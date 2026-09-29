@@ -1,0 +1,57 @@
+# ai-dev-harness
+
+AI 코딩 도구로 개발하는 팀 프로젝트에, 저장소를 만든 날부터 붙여 쓰는 **개발 가드레일 키트**다.
+규칙 문서, 플랜·리뷰 절차, hooks, CI 검사, 스캐폴드, 측정을 한 벌로 제공해 AI 산출물이
+표준을 벗어나면 기계가 막고, 그 효과를 숫자로 보이는 것을 목표로 한다.
+
+SSAFY 2학기 프로젝트(feelm)에서 실제로 운용한 AI 작업 절차를 일반화한 것이 출발점이며,
+키트 저장소 자신도 이 키트로 관리한다(자기 적용).
+
+## 지금 할 수 있는 것 (0.1.0)
+
+```bash
+# 새 저장소나 기존 저장소에 규칙 파일 한 벌을 생성한다
+python bin/harness.py init ../my-project --platform gitlab --tracker jira --issue-prefix ABC123
+
+# 생성된 파일이 템플릿과 어긋났는지 검사한다
+python bin/harness.py check ../my-project
+```
+
+생성되는 파일: 루트 `AGENTS.md`·`CLAUDE.md`, `docs/`의 문서 역할·AI 병렬 작업·Git 컨벤션·
+개발 흐름·Secret 규칙, 플랜·리뷰·ADR 템플릿, 병합 요청 템플릿. 자리표시자는 플랫폼(GitLab·GitHub)과
+업무 추적(Jira·GitHub Issues)에 맞춰 치환된다. 목록은 `core/templates/manifest.json`이 정의한다.
+
+## 구조
+
+```text
+bin/harness.py     명령 진입점 (init · check · version). 표준 라이브러리만 사용
+core/templates/    규칙 문서와 양식 템플릿 + manifest.json
+core/hooks/        (2주차) .claude 설정, 보호 경로 차단, 종료 시 검사, 3단계 자동 판정
+core/ci/           (2·3주차) GitLab CI include 조각: 보안 검사 4종, MR 본문 lint, Claude 리뷰
+core/metrics/      (7주차) 플랜·리뷰 측정 칸 수집, CI 결과 분류, 주간 요약
+profiles/          (5주차) 스택별 스캐폴드와 컨벤션 테스트
+docs/              키트 자체 문서: 개발 계획, 기여 규칙, ADR, 이관 대장
+tests/             단위 테스트와 리허설
+```
+
+## 자기 적용
+
+키트 저장소의 루트 `AGENTS.md`, 플랜·리뷰 템플릿, PR 템플릿은 손으로 고치지 않는다.
+`core/templates/`를 고친 뒤 다시 생성하고, CI가 드리프트를 검사한다.
+
+```bash
+python bin/harness.py init --self
+python bin/harness.py check --self
+python -m unittest discover tests -v
+```
+
+## 문서
+
+- [개발 계획과 마일스톤](docs/roadmap.md)
+- [기여 규칙](docs/contributing.md)
+- [설계 결정(ADR)](docs/adr/README.md)
+- [feelm에서 이관한 항목 대장](docs/migration-ledger.md)
+
+## 라이선스
+
+MIT

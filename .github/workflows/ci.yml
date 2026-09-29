@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 단위 테스트
+        run: python -m unittest discover tests -v
+
+      - name: 자기 적용 드리프트 검사
+        run: python bin/harness.py check --self
+
+      # 빈 저장소에 키트를 붙여 돌아가는지 확인하는 리허설. 마일스톤이 늘어나면 여기에
+      # hooks 설치, 판정 스크립트, 보안 CI 조각 검증을 같은 대상에 이어 붙인다.
+      - name: 리허설 (GitLab + Jira)
+        run: |
+          target="$RUNNER_TEMP/rehearsal-gitlab"
+          python bin/harness.py init "$target" --project-name rehearsal --platform gitlab --tracker jira --issue-prefix DEMO
+          python bin/harness.py check "$target"
+          test -f "$target/AGENTS.md"
+          test -f "$target/.gitlab/merge_request_templates/Default.md"
+          ! grep -R "{{" "$target" --include='*.md'
+
+      - name: 리허설 (GitHub)
+        run: |
+          target="$RUNNER_TEMP/rehearsal-github"
+          python bin/harness.py init "$target" --project-name rehearsal --platform github --tracker github --integration-branch main
+          python bin/harness.py check "$target"
+          test -f "$target/.github/PULL_REQUEST_TEMPLATE.md"

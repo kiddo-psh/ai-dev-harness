@@ -1,0 +1,19 @@
+{
+  "description": "init이 렌더링해 대상 저장소에 넣는 파일 목록. self=true인 항목만 키트 자신에게도 적용한다.",
+  "files": [
+    {"src": "AGENTS.md", "dest": "AGENTS.md", "self": true},
+    {"src": "CLAUDE.md", "dest": "CLAUDE.md", "self": true},
+    {"src": "docs/README.md", "dest": "docs/README.md", "self": false},
+    {"src": "docs/ai-collaboration.md", "dest": "docs/ai-collaboration.md", "self": true},
+    {"src": "docs/development-workflow.md", "dest": "docs/development-workflow.md", "self": false},
+    {"src": "docs/git-convention.md", "dest": "docs/git-convention.md", "self": false},
+    {"src": "docs/secret-environment-variables.md", "dest": "docs/secret-environment-variables.md", "self": true},
+    {"src": "docs/templates/plan.md", "dest": "docs/templates/plan.md", "self": true},
+    {"src": "docs/templates/review.md", "dest": "docs/templates/review.md", "self": true},
+    {"src": "docs/adr/README.md", "dest": "docs/adr/README.md", "self": false},
+    {"src": "docs/adr/0000-template.md", "dest": "docs/adr/0000-template.md", "self": true},
+    {"src": "merge-request/Default.md", "dest": ".gitlab/merge_request_templates/Default.md", "self": false, "platform": "gitlab"},
+    {"src": "merge-request/Release.md", "dest": ".gitlab/merge_request_templates/Release.md", "self": false, "platform": "gitlab"},
+    {"src": "merge-request/Default.md", "dest": ".github/PULL_REQUEST_TEMPLATE.md", "self": true, "platform": "github"}
+  ]
+}

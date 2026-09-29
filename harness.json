@@ -1,0 +1,14 @@
+{
+  "harness_version": "0.1.0",
+  "project_name": "ai-dev-harness",
+  "platform": "github",
+  "tracker": "github",
+  "issue_prefix": "",
+  "default_branch": "main",
+  "integration_branch": "main",
+  "related_docs": [
+    {"label": "저장소 기여 규칙(브랜치·커밋·PR)", "path": "docs/contributing.md"},
+    {"label": "Secret 및 환경변수 관리 규칙", "path": "docs/secret-environment-variables.md"},
+    {"label": "개발 계획과 마일스톤", "path": "docs/roadmap.md"}
+  ]
+}

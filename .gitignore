@@ -1,0 +1,18 @@
+# Local environment files may contain credentials. Only .env.example is tracked.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+.venv/
+__pycache__/
+*.py[cod]
+
+# Plan and review drafts are local-only and must not be committed (see AGENTS.md).
+/plans/
+/*/plans/
+
+# Git worktrees for parallel tasks are local workspaces.
+/.worktrees/
