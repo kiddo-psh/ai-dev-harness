@@ -13,13 +13,20 @@ SSAFY 2학기 프로젝트(feelm)에서 실제로 운용한 AI 작업 절차를 
 # 새 저장소나 기존 저장소에 규칙 파일 한 벌을 생성한다
 python bin/harness.py init ../my-project --platform gitlab --tracker jira --issue-prefix ABC123
 
-# 생성된 파일이 템플릿과 어긋났는지 검사한다
+# 영역 디렉터리에 판정·절차 규칙(AGENTS.md)을 생성한다. 루트 init 이후에 실행한다
+python bin/harness.py init ../my-project --area backend --verify-cmd "./gradlew build"
+
+# 생성된 파일이 템플릿과 어긋났는지 검사한다(영역 파일 포함)
 python bin/harness.py check ../my-project
 ```
 
 생성되는 파일: 루트 `AGENTS.md`·`CLAUDE.md`, `docs/`의 문서 역할·AI 병렬 작업·Git 컨벤션·
 개발 흐름·Secret 규칙, 플랜·리뷰·ADR 템플릿, 병합 요청 템플릿. 자리표시자는 플랫폼(GitLab·GitHub)과
 업무 추적(Jira·GitHub Issues)에 맞춰 치환된다. 목록은 `core/templates/manifest.json`이 정의한다.
+
+영역 `AGENTS.md`는 변경을 경량·표준·엄격 세 단계로 판정하고, 단계마다 플랜·리뷰 절차를 정한다.
+영역 설정(검증 명령, 트리거, 리뷰 관점, 기준 문서)은 `harness.json`의 `areas`에 기록되며,
+`--trigger`·`--review-focus`를 생략하면 키트 기본값을 쓰고, 기준 문서는 `--area-doc`으로 준 것만 적는다.
 
 ## 구조
 

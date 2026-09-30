@@ -4,6 +4,9 @@
     python bin/harness.py init <target> [--project-name ..] [--platform gitlab|github]
                                [--tracker jira|github] [--issue-prefix KEY] [--force]
     python bin/harness.py init --self        # 키트 저장소 자신에게 템플릿을 다시 생성
+    python bin/harness.py init <target> --area <dir> --verify-cmd <cmd> [--verify-cmd ..]
+                               [--trigger ..] [--review-focus ..] [--area-doc ..] [--force]
+                                             # 영역 디렉터리에 AGENTS.md 생성(루트 init 이후)
     python bin/harness.py check <target>     # 렌더링 결과와 실제 파일의 차이(드리프트) 검사
     python bin/harness.py check --self
     python bin/harness.py version
@@ -21,6 +24,8 @@ VERSION = "0.1.0"
 KIT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = KIT_ROOT / "core" / "templates"
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
+AREA_TEMPLATE = "AREA-AGENTS.md"
+AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs"}
 CONFIG_NAME = "harness.json"
 
 PLATFORMS = {
@@ -51,6 +56,15 @@ TRACKERS = {
     },
 }
 
+# 루트 init 인자의 기본값. argparse 기본값을 None으로 두어 사용자가 직접 준 인자를 구분한다.
+ROOT_DEFAULTS = {
+    "platform": "gitlab",
+    "tracker": "jira",
+    "default_branch": "main",
+    "integration_branch": "develop",
+}
+ROOT_ONLY_FLAGS = ("config", "project_name", "issue_prefix", *ROOT_DEFAULTS)
+
 CONSUMER_RELATED_DOCS = [
     {"label": "문서 역할과 우선순위", "path": "docs/README.md"},
     {"label": "AI 병렬 작업 및 충돌 방지 규칙", "path": "docs/ai-collaboration.md"},
@@ -58,6 +72,26 @@ CONSUMER_RELATED_DOCS = [
     {"label": "개발 흐름(업무 항목 시작부터 병합까지)", "path": "docs/development-workflow.md"},
     {"label": "Secret 및 환경변수 관리 규칙", "path": "docs/secret-environment-variables.md"},
 ]
+
+# 영역 AGENTS.md의 기본 트리거. 스택 중립 항목만 두고 스택 고유 항목은 프로필이 채운다.
+DEFAULT_TRIGGERS = [
+    "계약 문서(API·스키마·영역 간 교환 계약)의 변경, 또는 계약과 다른 구현",
+    "DB 마이그레이션",
+    "인증·인가, 토큰·세션·쿠키 처리",
+    "트랜잭션 경계의 신설·변경, 여러 저장소에 걸친 쓰기, 외부 시스템(메시지·캐시) 쓰기와 그 재시도·멱등성·부분 실패 처리",
+    "공용 모듈 또는 다른 담당자 소유 영역의 생산 코드",
+    "의존성·lock 파일, 운영 설정, 환경 변수 계약, CI 정의",
+]
+
+DEFAULT_REVIEW_FOCUS = [
+    "계약 정합성",
+    "정확성(경계 조건, 실패 경로)",
+    "보안(입력 검증, Secret)",
+    "테스트 실효성(플랜 목록과 실제 테스트의 대조)",
+]
+
+# 존재를 확인할 수 없는 문서를 기본값으로 적지 않는다. 렌더링은 설정만으로 정해져야 check가 안정적이다.
+NO_AREA_DOCS = "- 아직 지정한 기준 문서가 없다. 계약·스키마·컨벤션 문서가 생기면 `--area-doc`으로 추가한다."
 
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 
@@ -98,6 +132,45 @@ def validate_config(config: dict, source: Path | str) -> None:
         not isinstance(d, dict) or not d.get("label") or not d.get("path") for d in docs
     ):
         raise HarnessError(f"{source}: related_docs는 label·path를 가진 객체 목록이어야 한다")
+    validate_areas(config.get("areas", []), source)
+
+
+def normalize_area_dir(value: str, source: Path | str) -> str:
+    """대상 저장소 안의 상대 경로만 허용하고 `a/b` 형태로 정규화한다."""
+    raw = value.strip().replace("\\", "/") if isinstance(value, str) else ""
+    parts = [part for part in raw.split("/") if part not in ("", ".")]
+    if not raw or raw.startswith("/") or re.match(r"^[A-Za-z]:", raw):
+        raise HarnessError(f"{source}: 영역 dir은 대상 저장소 안의 상대 경로여야 한다: {value!r}")
+    if not parts or ".." in parts:
+        raise HarnessError(f"{source}: 영역 dir은 대상 저장소 안의 상대 경로여야 한다: {value!r}")
+    return "/".join(parts)
+
+
+def validate_areas(areas, source: Path | str) -> None:
+    if not isinstance(areas, list):
+        raise HarnessError(f"{source}: areas는 목록이어야 한다")
+    seen = set()
+    for area in areas:
+        if not isinstance(area, dict) or "dir" not in area:
+            raise HarnessError(f"{source}: areas 항목에는 dir이 필요하다")
+        dir_ = normalize_area_dir(area["dir"], source)
+        if dir_ != area["dir"]:
+            raise HarnessError(f"{source}: 영역 dir은 정규화된 형태여야 한다: {area['dir']!r} → {dir_!r}")
+        if dir_ in seen:
+            raise HarnessError(f"{source}: 영역 dir이 중복된다: {dir_}")
+        seen.add(dir_)
+        unknown = sorted(set(area) - AREA_KEYS)
+        if unknown:  # 오타 난 키가 조용히 무시되고 기본값이 적용되는 것을 막는다
+            raise HarnessError(f"{source}: 영역 {dir_}에 알 수 없는 키가 있다: {', '.join(unknown)}")
+        for key, required in (("verify", True), ("triggers", False),
+                              ("review_focus", False), ("docs", False)):
+            if key not in area and not required:
+                continue
+            items = area.get(key)
+            if not isinstance(items, list) or not items or any(
+                not isinstance(item, str) or not item.strip() for item in items
+            ):
+                raise HarnessError(f"{source}: 영역 {dir_}의 {key}는 비어 있지 않은 문자열 목록이어야 한다")
 
 
 def build_context(config: dict) -> dict:
@@ -118,6 +191,27 @@ def build_context(config: dict) -> dict:
     docs = config.get("related_docs") or []
     ctx["related_docs"] = "\n".join(f"- [{d['label']}]({d['path']})" for d in docs)
     return ctx
+
+
+def area_context(area: dict) -> dict:
+    dir_ = area["dir"]
+    docs = area.get("docs")
+    triggers = area.get("triggers") or DEFAULT_TRIGGERS
+    focus = area.get("review_focus") or DEFAULT_REVIEW_FOCUS
+    return {
+        "area_dir": dir_,
+        "area_docs": "\n".join(f"- `{doc}`" for doc in docs) if docs else NO_AREA_DOCS,
+        "area_verify": "\n".join(f"- `{cmd}`" for cmd in area["verify"]),
+        "area_triggers": "\n".join(f"{i}. {item}" for i, item in enumerate(triggers, 1)),
+        "area_review_focus": " · ".join(focus),
+    }
+
+
+def render_area(area: dict, ctx: dict) -> str:
+    path = TEMPLATES_DIR / AREA_TEMPLATE
+    if not path.is_file():
+        raise HarnessError(f"템플릿 파일이 없다: {path}")
+    return render(path.read_text(encoding="utf-8"), {**ctx, **area_context(area)}, source=AREA_TEMPLATE)
 
 
 def render(text: str, ctx: dict, source: str = "<template>") -> str:
@@ -169,6 +263,8 @@ def render_all(config: dict, self_mode: bool) -> dict[str, str]:
         if not path.is_file():
             raise HarnessError(f"템플릿 파일이 없다: {path}")
         outputs[dest] = render(path.read_text(encoding="utf-8"), ctx, source=src)
+    for area in config.get("areas", []):
+        outputs[f"{area['dir']}/AGENTS.md"] = render_area(area, ctx)
     return outputs
 
 
@@ -200,19 +296,59 @@ def config_from_args(args, target: Path) -> dict:
     config = {
         "harness_version": VERSION,
         "project_name": args.project_name or target.name,
-        "platform": args.platform,
-        "tracker": args.tracker,
+        "platform": args.platform or ROOT_DEFAULTS["platform"],
+        "tracker": args.tracker or ROOT_DEFAULTS["tracker"],
         "issue_prefix": args.issue_prefix or "",
-        "default_branch": args.default_branch,
-        "integration_branch": args.integration_branch,
+        "default_branch": args.default_branch or ROOT_DEFAULTS["default_branch"],
+        "integration_branch": args.integration_branch or ROOT_DEFAULTS["integration_branch"],
         "related_docs": CONSUMER_RELATED_DOCS,
     }
     validate_config(config, "명령 인자")
     return config
 
 
+def cmd_init_area(args, target: Path) -> int:
+    if not args.verify_cmd:
+        raise HarnessError("--area 에는 --verify-cmd 가 하나 이상 필요하다")
+    given = [flag for flag in ROOT_ONLY_FLAGS if getattr(args, flag) is not None]
+    if given:  # 영역 모드는 대상의 harness.json만 쓴다. 루트 인자를 조용히 버리지 않는다
+        flags = ", ".join(f"--{flag.replace('_', '-')}" for flag in given)
+        raise HarnessError(f"--area 는 대상의 {CONFIG_NAME} 설정을 쓰므로 {flags} 를 함께 쓸 수 없다")
+    config_path = target / CONFIG_NAME
+    if not config_path.is_file():
+        raise HarnessError(f"{config_path} 이 없다. 루트 init 을 먼저 실행한다")
+    config = load_config(config_path)
+    area = {"dir": normalize_area_dir(args.area, "--area"), "verify": args.verify_cmd}
+    for key, values in (("triggers", args.trigger), ("review_focus", args.review_focus),
+                        ("docs", args.area_doc)):
+        if values:
+            area[key] = values
+    areas = list(config.get("areas", []))
+    same = [i for i, existing in enumerate(areas) if existing.get("dir") == area["dir"]]
+    if same:
+        areas[same[0]] = area  # 같은 영역을 다시 생성하면 기존 항목을 제자리에서 바꾼다
+    else:
+        areas.append(area)
+    config["areas"] = areas
+    validate_config(config, "명령 인자")
+
+    content = render_area(area, build_context(config))
+    dest = target / area["dir"] / "AGENTS.md"
+    if dest.exists() and not args.force:
+        raise HarnessError(f"이미 존재하는 파일이 있어 중단한다. 덮어쓰려면 --force 를 지정한다:\n  {dest}")
+    write_text(dest, content)
+    write_text(config_path, json.dumps(config, ensure_ascii=False, indent=2) + "\n")
+    print(f"영역 {area['dir']} 에 AGENTS.md 를 생성하고 {CONFIG_NAME} 의 areas 를 갱신했다.")
+    return 0
+
+
 def cmd_init(args) -> int:
     target, self_mode = resolve_target(args)
+    if args.area is not None:
+        return cmd_init_area(args, target)
+    for flag in ("verify_cmd", "trigger", "review_focus", "area_doc"):
+        if getattr(args, flag):
+            raise HarnessError(f"--{flag.replace('_', '-')} 는 --area 와 함께 쓴다")
     if self_mode:
         config = load_config(KIT_ROOT / CONFIG_NAME)
     else:
@@ -276,12 +412,17 @@ def main(argv: list[str] | None = None) -> int:
     init.add_argument("--self", action="store_true", help="키트 저장소 자신에게 적용")
     init.add_argument("--config", help="사용할 harness.json 경로")
     init.add_argument("--project-name")
-    init.add_argument("--platform", choices=sorted(PLATFORMS), default="gitlab")
-    init.add_argument("--tracker", choices=sorted(TRACKERS), default="jira")
+    init.add_argument("--platform", choices=sorted(PLATFORMS), help="기본 gitlab")
+    init.add_argument("--tracker", choices=sorted(TRACKERS), help="기본 jira")
     init.add_argument("--issue-prefix", help="Jira 프로젝트 키(예: ABC123)")
-    init.add_argument("--default-branch", default="main")
-    init.add_argument("--integration-branch", default="develop")
+    init.add_argument("--default-branch", help="기본 main")
+    init.add_argument("--integration-branch", help="기본 develop")
     init.add_argument("--force", action="store_true", help="기존 파일을 덮어쓴다")
+    init.add_argument("--area", help="영역 디렉터리(대상 저장소 기준 상대 경로)에 AGENTS.md 생성")
+    init.add_argument("--verify-cmd", action="append", help="영역 검증 명령(반복 가능, --area 필수)")
+    init.add_argument("--trigger", action="append", help="엄격 단계 트리거(반복 가능, 지정하면 기본값 대체)")
+    init.add_argument("--review-focus", action="append", help="리뷰 관점(반복 가능, 지정하면 기본값 대체)")
+    init.add_argument("--area-doc", action="append", help="영역 기준 문서 경로(반복 가능)")
     init.set_defaults(func=cmd_init)
 
     check = sub.add_parser("check", help="생성된 파일이 템플릿과 일치하는지 검사한다")

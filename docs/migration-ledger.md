@@ -23,11 +23,16 @@
 | `.gitlab/merge_request_templates/Release.md` | `core/templates/merge-request/Release.md` | 없음 |
 | `.gitignore`의 `/plans/`·`/*/plans/`·`.env` 규칙 | 키트 자신의 `.gitignore` | 소비자 저장소용 gitignore 조각은 M1-5에서 hooks와 함께 생성 |
 
+## 이관 완료 (M1-4)
+
+| 원본 (feelm) | 키트 위치 | 걷어낸 것 · 바꾼 것 |
+| --- | --- | --- |
+| `backend/AGENTS.md`, `pipeline/AGENTS.md` | `core/templates/AREA-AGENTS.md` (`init --area`로 생성) | 두 문서의 공통 뼈대(3단계 판정·트리거·플랜/구현/리뷰·W1/W2)만 스택 중립으로. 기준 문서·검증 명령·트리거·리뷰 관점은 `harness.json`의 `areas[]`에서 채움. 단계 이름을 경량·표준·엄격으로, "리뷰 게이트"를 "조건부 관점"으로. 경량 단계는 플랜 없이 시작 보고와 MR에 기록(pipeline 방식). 테스트 전용 변경은 트리거에서 제외. 완화·강화 규칙은 "검토 후보"로. 루트 `AGENTS.md`와 겹치는 규칙은 반복하지 않음. 규칙마다 강제 주체 `[hook]`·`[ci]`·`[사람]` 표시 |
+
 ## 이관 예정
 
 | 원본 (feelm) | 키트 위치(예정) | 마일스톤 | 비고 |
 | --- | --- | --- | --- |
-| `backend/AGENTS.md`, `pipeline/AGENTS.md` | `core/templates/AREA-AGENTS.md` | M1-4 | 두 문서의 공통 뼈대(3단계 판정·트리거·플랜/구현/리뷰·W1/W2)를 스택 중립으로. 트리거 목록은 `harness.json`에서 채움 |
 | `frontend/AGENTS.md` | `profiles/react-ts/` 검증 명령 | M3-3 | Prettier 검사 규칙은 프로필의 verify 정의로 |
 | `infra/claude-review/*.py` | `core/ci/claude-review/` | M2-4 | 서버 경로·UID·계정명을 설정으로 분리. systemd·nftables 문서는 설치 가이드로 |
 | `infra/claude-review/generate-review.py`의 SYSTEM_PROMPT | `core/templates/review-perspectives.md` | M2-5 | 로컬 리뷰 관점과 단일화 |

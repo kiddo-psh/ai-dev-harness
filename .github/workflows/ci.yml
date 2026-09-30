@@ -26,8 +26,10 @@ jobs:
         run: |
           target="$RUNNER_TEMP/rehearsal-gitlab"
           python bin/harness.py init "$target" --project-name rehearsal --platform gitlab --tracker jira --issue-prefix DEMO
+          python bin/harness.py init "$target" --area backend --verify-cmd "./gradlew build"
           python bin/harness.py check "$target"
           test -f "$target/AGENTS.md"
+          test -f "$target/backend/AGENTS.md"
           test -f "$target/.gitlab/merge_request_templates/Default.md"
           ! grep -R "{{" "$target" --include='*.md'
 
