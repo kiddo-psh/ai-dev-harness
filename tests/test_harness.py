@@ -207,6 +207,29 @@ class AreaInitTest(AreaTestBase):
         self.assertFalse((self.tmp / "x").exists())
         self.assertNotIn("areas", self.config())
 
+    def test_default_docs_do_not_reference_missing_files(self):
+        self.init_area("--verify-cmd", "make test")
+        text = self.area_text()
+        self.assertIn(harness.NO_AREA_DOCS, text)
+        self.assertNotIn("backend/README.md", text)
+
+    def test_area_doc_rendered(self):
+        self.init_area("--verify-cmd", "make test", "--area-doc", "docs/api/README.md")
+        text = self.area_text()
+        self.assertIn("- `docs/api/README.md`", text)
+        self.assertNotIn(harness.NO_AREA_DOCS, text)
+
+    def test_rejects_root_flags(self):
+        cases = (["--config", "other.json"], ["--platform", "github"], ["--tracker", "github"],
+                 ["--project-name", "x"], ["--issue-prefix", "X"],
+                 ["--default-branch", "main"], ["--integration-branch", "main"])
+        for extra in cases:
+            with self.subTest(flag=extra[0]):
+                code, _ = self.init_area("--verify-cmd", "t", *extra)
+                self.assertEqual(code, 2)
+        self.assertFalse((self.target / "backend").exists())
+        self.assertNotIn("areas", self.config())
+
     def test_area_flags_need_area(self):
         code, _ = run(["init", str(self.tmp / "other"), "--verify-cmd", "t"])
         self.assertEqual(code, 2)

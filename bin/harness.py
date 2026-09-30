@@ -56,6 +56,15 @@ TRACKERS = {
     },
 }
 
+# 루트 init 인자의 기본값. argparse 기본값을 None으로 두어 사용자가 직접 준 인자를 구분한다.
+ROOT_DEFAULTS = {
+    "platform": "gitlab",
+    "tracker": "jira",
+    "default_branch": "main",
+    "integration_branch": "develop",
+}
+ROOT_ONLY_FLAGS = ("config", "project_name", "issue_prefix", *ROOT_DEFAULTS)
+
 CONSUMER_RELATED_DOCS = [
     {"label": "문서 역할과 우선순위", "path": "docs/README.md"},
     {"label": "AI 병렬 작업 및 충돌 방지 규칙", "path": "docs/ai-collaboration.md"},
@@ -80,6 +89,9 @@ DEFAULT_REVIEW_FOCUS = [
     "보안(입력 검증, Secret)",
     "테스트 실효성(플랜 목록과 실제 테스트의 대조)",
 ]
+
+# 존재를 확인할 수 없는 문서를 기본값으로 적지 않는다. 렌더링은 설정만으로 정해져야 check가 안정적이다.
+NO_AREA_DOCS = "- 아직 지정한 기준 문서가 없다. 계약·스키마·컨벤션 문서가 생기면 `--area-doc`으로 추가한다."
 
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 
@@ -183,12 +195,12 @@ def build_context(config: dict) -> dict:
 
 def area_context(area: dict) -> dict:
     dir_ = area["dir"]
-    docs = area.get("docs") or [f"{dir_}/README.md"]
+    docs = area.get("docs")
     triggers = area.get("triggers") or DEFAULT_TRIGGERS
     focus = area.get("review_focus") or DEFAULT_REVIEW_FOCUS
     return {
         "area_dir": dir_,
-        "area_docs": "\n".join(f"- `{doc}`" for doc in docs),
+        "area_docs": "\n".join(f"- `{doc}`" for doc in docs) if docs else NO_AREA_DOCS,
         "area_verify": "\n".join(f"- `{cmd}`" for cmd in area["verify"]),
         "area_triggers": "\n".join(f"{i}. {item}" for i, item in enumerate(triggers, 1)),
         "area_review_focus": " · ".join(focus),
@@ -284,11 +296,11 @@ def config_from_args(args, target: Path) -> dict:
     config = {
         "harness_version": VERSION,
         "project_name": args.project_name or target.name,
-        "platform": args.platform,
-        "tracker": args.tracker,
+        "platform": args.platform or ROOT_DEFAULTS["platform"],
+        "tracker": args.tracker or ROOT_DEFAULTS["tracker"],
         "issue_prefix": args.issue_prefix or "",
-        "default_branch": args.default_branch,
-        "integration_branch": args.integration_branch,
+        "default_branch": args.default_branch or ROOT_DEFAULTS["default_branch"],
+        "integration_branch": args.integration_branch or ROOT_DEFAULTS["integration_branch"],
         "related_docs": CONSUMER_RELATED_DOCS,
     }
     validate_config(config, "명령 인자")
@@ -298,6 +310,10 @@ def config_from_args(args, target: Path) -> dict:
 def cmd_init_area(args, target: Path) -> int:
     if not args.verify_cmd:
         raise HarnessError("--area 에는 --verify-cmd 가 하나 이상 필요하다")
+    given = [flag for flag in ROOT_ONLY_FLAGS if getattr(args, flag) is not None]
+    if given:  # 영역 모드는 대상의 harness.json만 쓴다. 루트 인자를 조용히 버리지 않는다
+        flags = ", ".join(f"--{flag.replace('_', '-')}" for flag in given)
+        raise HarnessError(f"--area 는 대상의 {CONFIG_NAME} 설정을 쓰므로 {flags} 를 함께 쓸 수 없다")
     config_path = target / CONFIG_NAME
     if not config_path.is_file():
         raise HarnessError(f"{config_path} 이 없다. 루트 init 을 먼저 실행한다")
@@ -396,11 +412,11 @@ def main(argv: list[str] | None = None) -> int:
     init.add_argument("--self", action="store_true", help="키트 저장소 자신에게 적용")
     init.add_argument("--config", help="사용할 harness.json 경로")
     init.add_argument("--project-name")
-    init.add_argument("--platform", choices=sorted(PLATFORMS), default="gitlab")
-    init.add_argument("--tracker", choices=sorted(TRACKERS), default="jira")
+    init.add_argument("--platform", choices=sorted(PLATFORMS), help="기본 gitlab")
+    init.add_argument("--tracker", choices=sorted(TRACKERS), help="기본 jira")
     init.add_argument("--issue-prefix", help="Jira 프로젝트 키(예: ABC123)")
-    init.add_argument("--default-branch", default="main")
-    init.add_argument("--integration-branch", default="develop")
+    init.add_argument("--default-branch", help="기본 main")
+    init.add_argument("--integration-branch", help="기본 develop")
     init.add_argument("--force", action="store_true", help="기존 파일을 덮어쓴다")
     init.add_argument("--area", help="영역 디렉터리(대상 저장소 기준 상대 경로)에 AGENTS.md 생성")
     init.add_argument("--verify-cmd", action="append", help="영역 검증 명령(반복 가능, --area 필수)")

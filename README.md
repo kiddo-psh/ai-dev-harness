@@ -26,7 +26,7 @@ python bin/harness.py check ../my-project
 
 영역 `AGENTS.md`는 변경을 경량·표준·엄격 세 단계로 판정하고, 단계마다 플랜·리뷰 절차를 정한다.
 영역 설정(검증 명령, 트리거, 리뷰 관점, 기준 문서)은 `harness.json`의 `areas`에 기록되며,
-`--trigger`·`--review-focus`·`--area-doc`을 생략하면 키트 기본값을 쓴다.
+`--trigger`·`--review-focus`를 생략하면 키트 기본값을 쓰고, 기준 문서는 `--area-doc`으로 준 것만 적는다.
 
 ## 구조
 
