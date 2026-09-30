@@ -5,6 +5,7 @@
 **키트 자체 문서** (손으로 관리)
 
 - [개발 계획과 마일스톤](./roadmap.md)
+- [설치 가이드](./install.md) — 대상 저장소에 붙이기, hooks 설정, 끄는 법
 - [기여 규칙](./contributing.md) — 브랜치·커밋·PR, 플랜·리뷰를 켜는 조건
 - [설계 결정(ADR)](./adr/README.md)
 - [feelm에서 이관한 항목 대장](./migration-ledger.md)
