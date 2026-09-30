@@ -1,0 +1,495 @@
+"""core/hooks 스크립트 테스트. 스크립트를 실제 hook처럼 subprocess로 실행하고 stdin에 JSON을 넣는다."""
+
+import importlib.util
+import io
+import json
+import locale
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+HOOKS = ROOT / "core" / "hooks"
+sys.path.insert(0, str(HOOKS))
+import harness_common as common  # noqa: E402
+
+PY = Path(sys.executable).as_posix()
+
+
+def load_stop_module():
+    """stop-verify.py를 프로세스 안에서 새로 불러온다. 상수를 바꿔 끼워도 다른 테스트에 번지지 않게
+    공통 모듈도 별도 사본을 쓴다."""
+    spec = importlib.util.spec_from_file_location("stop_verify_under_test", HOOKS / "stop-verify.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    common_spec = importlib.util.spec_from_file_location("harness_common_copy", HOOKS / "harness_common.py")
+    module.common = importlib.util.module_from_spec(common_spec)
+    common_spec.loader.exec_module(module.common)
+    return module
+
+
+def call_main(module, payload, project, ceiling):
+    stdin = io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode("utf-8")), encoding="utf-8")
+    out, err = io.StringIO(), io.StringIO()
+    env = {"CLAUDE_PROJECT_DIR": str(project), "GIT_CEILING_DIRECTORIES": str(ceiling)}
+    with mock.patch.dict(os.environ, env), mock.patch.object(sys, "stdin", stdin), \
+            mock.patch.object(module.common, "setup_streams", lambda: None), \
+            redirect_stdout(out), redirect_stderr(err):
+        code = module.main()
+    return code, out.getvalue(), err.getvalue()
+
+
+def git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def git_path(project, name):
+    out = subprocess.run(["git", "rev-parse", "--git-path", f"harness/{name}"], cwd=project,
+                         check=True, capture_output=True, text=True).stdout.strip()
+    path = Path(out)
+    return path if path.is_absolute() else project / path
+
+
+class HookCase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="harness-hooks-")).resolve()
+        self.project = self.tmp / "project"
+        self.project.mkdir()
+        self.outside = self.tmp / "outside"
+        self.outside.mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def write_config(self, config):
+        (self.project / "harness.json").write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+
+    def init_git(self):
+        git(self.project, "init", "-q")
+        git(self.project, "config", "user.email", "t@example.com")
+        git(self.project, "config", "user.name", "t")
+        git(self.project, "config", "core.autocrlf", "false")
+        git(self.project, "add", "-A")
+        git(self.project, "commit", "-q", "--allow-empty", "-m", "init")
+
+    def hook(self, name, payload, raw=None, project=None, env=None):
+        project = project or self.project
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project),
+               "GIT_CEILING_DIRECTORIES": str(self.tmp), **(env or {})}
+        data = raw if raw is not None else json.dumps(payload)
+        return subprocess.run([sys.executable, str(HOOKS / name)], input=data.encode("utf-8"),
+                              capture_output=True, cwd=project, env=env, timeout=60)
+
+
+class ProtectPathsCase(HookCase):
+    def edit(self, path, tool="Edit", key="file_path"):
+        result = self.hook("protect-paths.py", {"tool_name": tool, "tool_input": {key: str(path)},
+                                                "cwd": str(self.project), "session_id": "s1"})
+        out = result.stdout.decode("utf-8").strip()
+        decision = json.loads(out)["hookSpecificOutput"] if out else None
+        return result, decision
+
+
+class ProtectPathsTest(ProtectPathsCase):
+    def test_block_rule_denies(self):
+        result, decision = self.edit(self.project / "package-lock.json", tool="Write")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(decision["permissionDecision"], "deny")
+        self.assertIn("lock 파일", decision["permissionDecisionReason"])
+        self.assertIn("package-lock.json", decision["permissionDecisionReason"])
+
+    def test_ask_rule_asks(self):
+        _, decision = self.edit(self.project / ".github" / "workflows" / "ci.yml")
+        self.assertEqual(decision["permissionDecision"], "ask")
+
+    def test_unprotected_path_silent(self):
+        result, decision = self.edit(self.project / "src" / "app.py")
+        self.assertEqual(result.returncode, 0)
+        self.assertIsNone(decision)
+        self.assertEqual(result.stdout, b"")
+
+    def test_tool_input_keys(self):
+        _, decision = self.edit(self.project / "yarn.lock", tool="MultiEdit")
+        self.assertEqual(decision["permissionDecision"], "deny")
+        _, decision = self.edit(self.project / "migrations" / "a.ipynb", tool="NotebookEdit", key="notebook_path")
+        self.assertEqual(decision["permissionDecision"], "ask")
+        _, decision = self.edit(self.project / "yarn.lock", tool="Read")
+        self.assertIsNone(decision)
+
+    def test_path_normalization(self):
+        variants = ["src/../package-lock.json", "src\\..\\package-lock.json",
+                    str(self.project / "package-lock.json"), "./frontend/package-lock.json"]
+        for raw in variants:
+            with self.subTest(raw=raw):
+                _, decision = self.edit(raw)
+                self.assertEqual(decision["permissionDecision"], "deny")
+        link = self.project / "innocent.txt"
+        (self.project / "package-lock.json").write_text("{}", encoding="utf-8")
+        try:
+            link.symlink_to(self.project / "package-lock.json")
+        except (OSError, NotImplementedError):
+            self.skipTest("이 환경에서는 심볼릭 링크를 만들 수 없다")
+        _, decision = self.edit(link)
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_outside_project_ignored(self):
+        _, decision = self.edit(self.outside / "package-lock.json")
+        self.assertIsNone(decision)
+        _, decision = self.edit("../outside/package-lock.json")
+        self.assertIsNone(decision)
+
+    def test_self_protection_not_overridable(self):
+        self.write_config({"hooks": {"protected_paths": []}})
+        for rel in (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/protect-paths.py"):
+            with self.subTest(rel=rel):
+                _, decision = self.edit(self.project / rel)
+                self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_override_replaces_defaults(self):
+        self.write_config({"hooks": {"protected_paths": [{"pattern": "secret/**", "mode": "ask"}]}})
+        _, decision = self.edit(self.project / "secret" / "a.txt")
+        self.assertEqual(decision["permissionDecision"], "ask")
+        _, decision = self.edit(self.project / "package-lock.json")
+        self.assertIsNone(decision)
+
+    def test_strongest_rule_wins(self):
+        self.write_config({"hooks": {"protected_paths": [
+            {"pattern": "cfg/**", "mode": "ask"}, {"pattern": "cfg/prod.yml", "mode": "block"}]}})
+        _, decision = self.edit(self.project / "cfg" / "prod.yml")
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_area_docs_are_asked(self):
+        self.write_config({"areas": [{"dir": "backend", "verify": ["x"], "docs": ["docs/api.md"]}]})
+        _, decision = self.edit(self.project / "docs" / "api.md")
+        self.assertEqual(decision["permissionDecision"], "ask")
+        self.assertIn("계약 문서", decision["permissionDecisionReason"])
+        _, decision = self.edit(self.project / "backend" / "docs" / "api.md")
+        self.assertIsNone(decision)
+
+    def test_fail_open_on_bad_config(self):
+        (self.project / "harness.json").write_text("{not json", encoding="utf-8")
+        result, decision = self.edit(self.project / "package-lock.json")
+        self.assertEqual(result.returncode, 1)
+        self.assertIsNone(decision)
+        self.assertIn("꺼진 상태", result.stderr.decode("utf-8"))
+        # 자기 보호는 설정 오류와 무관하게 유지된다
+        result, decision = self.edit(self.project / ".claude" / "settings.json")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_fail_open_on_bad_stdin(self):
+        result = self.hook("protect-paths.py", None, raw="not json")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn(b"deny", result.stdout)
+        self.assertIn("꺼진 상태", result.stderr.decode("utf-8"))
+
+    def test_invalid_hooks_config_fails_open(self):
+        self.write_config({"hooks": {"protected_paths": [{"pattern": "x", "mode": "warn"}]}})
+        result, decision = self.edit(self.project / "x")
+        self.assertEqual(result.returncode, 1)
+        self.assertIsNone(decision)
+
+    def test_event_logged(self):
+        self.init_git()
+        self.edit(self.project / "package-lock.json")
+        lines = git_path(self.project, "events.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1)
+        event = json.loads(lines[0])
+        self.assertEqual((event["hook"], event["decision"], event["path"], event["session"]),
+                         ("protect-paths", "block", "package-lock.json", "s1"))
+
+    def test_log_failure_does_not_change_decision(self):
+        self.init_git()
+        blocker = git_path(self.project, "events.jsonl").parent
+        blocker.write_text("not a directory", encoding="utf-8")  # 로그 디렉터리를 만들 수 없게 한다
+        result, decision = self.edit(self.project / "package-lock.json")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+
+class ProtectPathsReviewTest(ProtectPathsCase):
+    """분리 리뷰(R1·R2·R6·R7·R11·R14) 회귀 테스트."""
+
+    @unittest.skipUnless(os.name == "nt", "Windows 경로 형식")
+    def test_extended_and_unc_paths(self):
+        _, decision = self.edit("\\\\?\\" + str(self.project / ".claude" / "settings.json"))
+        self.assertEqual(decision["permissionDecision"], "deny")
+        drive, rest = str(self.project).split(":", 1)
+        _, decision = self.edit(f"\\\\localhost\\{drive}$" + rest + "\\.claude\\settings.json")
+        self.assertEqual(decision["permissionDecision"], "ask")
+
+    def test_case_variants_blocked(self):
+        for rel in (".Claude/Settings.json", ".CLAUDE/hooks/x.py", "Package-Lock.json"):
+            with self.subTest(rel=rel):
+                _, decision = self.edit(self.project / rel)
+                self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_bad_area_types_keep_self_protection(self):
+        self.write_config({"areas": [{"dir": "a", "verify": ["x"], "docs": 5}]})
+        result, decision = self.edit(self.project / ".claude" / "settings.json")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(decision["permissionDecision"], "deny")
+        self.assertIn("주의", decision["permissionDecisionReason"])  # 설정 오류 알림이 사유에 붙는다
+        result, decision = self.edit(self.project / "package-lock.json")
+        self.assertEqual(result.returncode, 1)
+        self.assertIsNone(decision)
+
+    def test_harness_json_always_asked(self):
+        self.write_config({"hooks": {"protected_paths": []}})
+        _, decision = self.edit(self.project / "harness.json")
+        self.assertEqual(decision["permissionDecision"], "ask")
+
+    def test_dot_slash_doc_path(self):
+        self.write_config({"areas": [{"dir": "a", "verify": ["x"], "docs": ["./docs/api.md"]}]})
+        _, decision = self.edit(self.project / "docs" / "api.md")
+        self.assertEqual(decision["permissionDecision"], "ask")
+
+    def test_user_settings_asked(self):
+        home = self.tmp / "home"
+        (home / ".claude").mkdir(parents=True)
+        env = {"HOME": str(home), "USERPROFILE": str(home)}
+        for name in ("settings.json", "settings.local.json"):
+            with self.subTest(name=name):
+                result = self.hook("protect-paths.py", {"tool_name": "Edit", "tool_input": {
+                    "file_path": str(home / ".claude" / name)}}, env=env)
+                decision = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
+                self.assertEqual(decision, "ask")
+        result = self.hook("protect-paths.py", {"tool_name": "Edit", "tool_input": {
+            "file_path": str(home / ".claude" / "CLAUDE.md")}}, env=env)
+        self.assertEqual(result.stdout, b"")
+
+
+class GlobTest(unittest.TestCase):
+    def match(self, pattern, path):
+        return bool(common.compile_glob(pattern).fullmatch(path))
+
+    def test_double_star_semantics(self):
+        self.assertTrue(self.match("**/migrations/**", "migrations/1.sql"))
+        self.assertTrue(self.match("**/migrations/**", "a/b/migrations/1.sql"))
+        self.assertFalse(self.match("**/migrations/**", "migrationsx/1.sql"))
+        self.assertFalse(self.match("**/migrations/**", "a/migrations"))
+
+    def test_basename_and_anchor(self):
+        self.assertTrue(self.match("*.lock", "a/b.lock"))  # 슬래시 없는 패턴은 모든 깊이(gitignore 방식)
+        self.assertTrue(self.match("*.lock", "b.lock"))
+        self.assertFalse(self.match("docs/*.md", "docs/a/b.md"))  # `*`는 `/`를 넘지 않는다
+        self.assertTrue(self.match("docs/*.md", "docs/a.md"))
+        self.assertFalse(self.match("docs/*.md", "x/docs/a.md"))  # 중간에 `/`가 있으면 루트 기준
+        self.assertTrue(self.match("/harness.json", "harness.json"))
+        self.assertFalse(self.match("/harness.json", "sub/harness.json"))
+        self.assertTrue(self.match("build/", "build/x/y"))
+        self.assertTrue(self.match("a?.txt", "ab.txt"))
+        self.assertFalse(self.match("a?.txt", "a/.txt"))
+        self.assertFalse(self.match("a.b", "axb"))  # 정규식 특수 문자는 그대로
+
+    def test_gitignore_directory_rules(self):
+        self.assertTrue(self.match("./docs/api.md", "docs/api.md"))
+        self.assertTrue(self.match("migrations/", "a/migrations/1.sql"))  # 끝의 `/`만 있으면 모든 깊이
+        self.assertFalse(self.match("migrations/", "migrations"))
+        self.assertTrue(self.match("vendor", "vendor/x/y.js"))  # 디렉터리에 맞으면 그 아래도
+        self.assertTrue(self.match("**/db/migration/", "backend/src/db/migration/V1.sql"))
+        self.assertTrue(self.match("/.claude/hooks/", ".claude/hooks/a.py"))
+        self.assertTrue(self.match("PACKAGE-lock.json", "package-lock.json"))
+
+
+class StopVerifyTest(HookCase):
+    def marker_cmd(self, name, code=0):
+        marker = (self.outside / name).as_posix()
+        return f"\"{PY}\" -c \"open('{marker}','a').write('x'); raise SystemExit({code})\""
+
+    def runs(self, name):
+        path = self.outside / name
+        return len(path.read_text()) if path.exists() else 0
+
+    def setup_repo(self, config):
+        self.write_config(config)
+        self.init_git()
+
+    def stop(self, active=False):
+        return self.hook("stop-verify.py", {"hook_event_name": "Stop", "stop_hook_active": active,
+                                            "session_id": "s1", "cwd": str(self.project)})
+
+    def test_no_changes_runs_nothing(self):
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root", 1)]}})
+        result = self.stop()
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.runs("root"), 0)
+
+    def test_runs_only_changed_areas(self):
+        self.setup_repo({
+            "areas": [{"dir": "a", "verify": [self.marker_cmd("a")]},
+                      {"dir": "b", "verify": [self.marker_cmd("b")]}],
+            "hooks": {"stop_verify": [self.marker_cmd("root")]},
+        })
+        (self.project / "a").mkdir()
+        (self.project / "a" / "x.txt").write_text("1", encoding="utf-8")
+        self.assertEqual(self.stop().returncode, 0)
+        self.assertEqual((self.runs("a"), self.runs("b"), self.runs("root")), (1, 0, 0))
+        (self.project / "top.txt").write_text("1", encoding="utf-8")
+        self.assertEqual(self.stop().returncode, 0)
+        self.assertEqual(self.runs("root"), 1)
+
+    def test_nested_area_owns_its_files(self):
+        self.setup_repo({"areas": [{"dir": "a", "verify": [self.marker_cmd("a")]},
+                                   {"dir": "a/inner", "verify": [self.marker_cmd("inner")]}]})
+        (self.project / "a" / "inner").mkdir(parents=True)
+        (self.project / "a" / "inner" / "x.txt").write_text("1", encoding="utf-8")
+        self.stop()
+        self.assertEqual((self.runs("a"), self.runs("inner")), (0, 1))
+
+    def test_failure_blocks_once(self):
+        self.setup_repo({"hooks": {"stop_verify": [f"\"{PY}\" -c \"print('boom-output'); raise SystemExit(3)\""]}})
+        (self.project / "x.txt").write_text("1", encoding="utf-8")
+        result = self.stop()
+        self.assertEqual(result.returncode, 2)
+        err = result.stderr.decode("utf-8")
+        self.assertIn("종료 코드 3", err)
+        self.assertIn("boom-output", err)
+        event = json.loads(git_path(self.project, "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual((event["hook"], event["decision"]), ("stop-verify", "fail"))
+
+    def test_no_reblock_when_active(self):
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root", 1)]}})
+        (self.project / "x.txt").write_text("1", encoding="utf-8")
+        result = self.stop(active=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("사람이 확인", json.loads(result.stdout.decode("utf-8"))["systemMessage"])
+
+    def test_success_cached(self):
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        target = self.project / "x.txt"
+        target.write_text("1", encoding="utf-8")
+        self.stop()
+        self.stop()
+        self.assertEqual(self.runs("root"), 1)
+        target.write_text("2", encoding="utf-8")
+        self.stop()
+        self.assertEqual(self.runs("root"), 2)
+
+    def test_same_failing_state_not_reblocked(self):
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root", 1)]}})
+        target = self.project / "x.txt"
+        target.write_text("1", encoding="utf-8")
+        self.assertEqual(self.stop().returncode, 2)
+        second = self.stop()  # 세션과 무관한 기존 변경이어도 매 턴 보류하지 않는다
+        self.assertEqual(second.returncode, 0)
+        self.assertIn("같은 상태", json.loads(second.stdout.decode("utf-8"))["systemMessage"])
+        third = self.stop()
+        self.assertEqual((third.returncode, third.stdout), (0, b""))  # 알림은 한 번만
+        self.assertEqual(self.runs("root"), 1)
+        target.write_text("2", encoding="utf-8")  # 모델이 무언가를 바꾸면 다시 검증하고 보류한다
+        self.assertEqual(self.stop().returncode, 2)
+        self.assertEqual(self.runs("root"), 2)
+
+    def test_project_in_subdirectory(self):
+        app = self.project / "app"
+        (app / "a").mkdir(parents=True)
+        check = f"\"{PY}\" -c \"import sys; sys.exit('bad' in open('a/x.txt').read())\""
+        (app / "harness.json").write_text(json.dumps({"areas": [{"dir": "a", "verify": [check]}]}),
+                                          encoding="utf-8")
+        (app / "a" / "x.txt").write_text("good", encoding="utf-8")
+        self.init_git()
+        (self.project / "outside.txt").write_text("1", encoding="utf-8")  # 프로젝트 밖 변경은 무시한다
+
+        def stop():
+            return self.hook("stop-verify.py", {"stop_hook_active": False}, project=app)
+
+        self.assertEqual(stop().returncode, 0)
+        (app / "a" / "x.txt").write_text("good2", encoding="utf-8")
+        self.assertEqual(stop().returncode, 0)
+        (app / "a" / "x.txt").write_text("bad", encoding="utf-8")  # 통과 캐시로 실패를 덮지 않는다
+        self.assertEqual(stop().returncode, 2)
+
+    def test_nested_repo_changes_rehashed(self):
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        sub = self.project / "sub"
+        sub.mkdir()
+        git(sub, "init", "-q")
+        (sub / "f.txt").write_text("1", encoding="utf-8")
+        self.stop()
+        self.assertEqual(self.runs("root"), 1)
+        (sub / "f.txt").write_text("2", encoding="utf-8")
+        self.stop()
+        self.assertEqual(self.runs("root"), 2)
+
+    def test_rename_counts_both_areas(self):
+        self.write_config({"areas": [{"dir": "a", "verify": [self.marker_cmd("a")]},
+                                     {"dir": "b", "verify": [self.marker_cmd("b")]}]})
+        (self.project / "a").mkdir()
+        (self.project / "b").mkdir()
+        (self.project / "a" / "f.txt").write_text("1", encoding="utf-8")
+        self.init_git()
+        git(self.project, "mv", "a/f.txt", "b/f.txt")
+        self.stop()
+        self.assertEqual((self.runs("a"), self.runs("b")), (1, 1))
+
+    def test_bad_area_type_fails_open(self):
+        self.setup_repo({"areas": [{"dir": "a", "verify": "ab"}]})
+        (self.project / "a").mkdir()
+        (self.project / "a" / "x").write_text("1", encoding="utf-8")
+        result = self.stop()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("꺼진 상태", result.stderr.decode("utf-8"))
+        self.write_config({"areas": [{"dir": "a/", "verify": ["x"]}]})
+        self.assertEqual(self.stop().returncode, 1)
+
+    def test_orphan_grandchild_does_not_stall(self):
+        spawn = ("import subprocess,sys; "
+                 "subprocess.Popen([sys.executable,'-c','import time; time.sleep(8)'])")
+        self.setup_repo({"hooks": {"stop_verify": [f"\"{PY}\" -c \"{spawn}\""]}})
+        (self.project / "x.txt").write_text("1", encoding="utf-8")
+        started = time.monotonic()
+        result = self.stop()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(time.monotonic() - started, 6)
+
+    def test_total_budget(self):
+        self.setup_repo({"hooks": {"stop_verify": [f"\"{PY}\" -c \"import time; time.sleep(3)\"",
+                                                   self.marker_cmd("second")]}})
+        (self.project / "x.txt").write_text("1", encoding="utf-8")
+        module = load_stop_module()
+        module.common.MAX_STOP_TIMEOUT = 1
+        code, _, err = call_main(module, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertEqual(code, 2)
+        self.assertIn("전체 시간 예산", err)
+        self.assertEqual(self.runs("second"), 0)
+
+    def test_decode_output_falls_back_to_locale(self):
+        text = common.decode_output("검증 실패".encode("cp949"))
+        self.assertIsInstance(text, str)
+        if locale.getpreferredencoding(False).lower() in ("cp949", "euc-kr", "ms949"):
+            self.assertEqual(text, "검증 실패")
+        self.assertEqual(common.decode_output("ok".encode("utf-8")), "ok")
+
+    def test_timeout_is_failure(self):
+        self.setup_repo({"hooks": {"stop_timeout_sec": 1,
+                                   "stop_verify": [f"\"{PY}\" -c \"import time; time.sleep(5)\""]}})
+        (self.project / "x.txt").write_text("1", encoding="utf-8")
+        result = self.stop()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("시간 초과", result.stderr.decode("utf-8"))
+
+    def test_not_git_repo(self):
+        self.write_config({"hooks": {"stop_verify": [self.marker_cmd("root", 1)]}})
+        result = self.stop()
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("git 상태를 읽지 못해", json.loads(result.stdout.decode("utf-8"))["systemMessage"])
+        self.assertEqual(self.runs("root"), 0)
+
+    def test_bad_config_fails_open(self):
+        self.init_git()
+        (self.project / "harness.json").write_text("{", encoding="utf-8")
+        result = self.stop()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("꺼진 상태", result.stderr.decode("utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()

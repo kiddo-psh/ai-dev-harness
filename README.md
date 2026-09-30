@@ -21,7 +21,7 @@ python bin/harness.py check ../my-project
 ```
 
 생성되는 파일: 루트 `AGENTS.md`·`CLAUDE.md`, `docs/`의 문서 역할·AI 병렬 작업·Git 컨벤션·
-개발 흐름·Secret 규칙, 플랜·리뷰·ADR 템플릿, 병합 요청 템플릿. 자리표시자는 플랫폼(GitLab·GitHub)과
+개발 흐름·Secret 규칙, 플랜·리뷰·ADR 템플릿, 병합 요청 템플릿, Claude Code hooks(`.claude/`, [설명](core/hooks/README.md)). 자리표시자는 플랫폼(GitLab·GitHub)과
 업무 추적(Jira·GitHub Issues)에 맞춰 치환된다. 목록은 `core/templates/manifest.json`이 정의한다.
 
 영역 `AGENTS.md`는 변경을 경량·표준·엄격 세 단계로 판정하고, 단계마다 플랜·리뷰 절차를 정한다.
@@ -33,7 +33,7 @@ python bin/harness.py check ../my-project
 ```text
 bin/harness.py     명령 진입점 (init · check · version). 표준 라이브러리만 사용
 core/templates/    규칙 문서와 양식 템플릿 + manifest.json
-core/hooks/        (2주차) .claude 설정, 보호 경로 차단, 종료 시 검사, 3단계 자동 판정
+core/hooks/        Claude Code hooks: 보호 경로 차단·확인, 종료 시 검증. (3·4주차) 3단계 자동 판정
 core/ci/           (2·3주차) GitLab CI include 조각: 보안 검사 4종, MR 본문 lint, Claude 리뷰
 core/metrics/      (7주차) 플랜·리뷰 측정 칸 수집, CI 결과 분류, 주간 요약
 profiles/          (5주차) 스택별 스캐폴드와 컨벤션 테스트

@@ -3,7 +3,10 @@
 import importlib.util
 import io
 import json
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -263,6 +266,120 @@ class ConfigTest(unittest.TestCase):
         harness.validate_config({**self.BASE, "areas": [
             {"dir": "apps/web", "verify": ["npm test"], "review_focus": ["접근성"]},
         ]}, "test")
+
+    def test_invalid_hooks_rejected(self):
+        bad_hooks = [
+            [],
+            {"protected_path": []},
+            {"protected_paths": "x"},
+            {"protected_paths": [{"pattern": "x", "mode": "warn"}]},
+            {"protected_paths": [{"pattern": "", "mode": "ask"}]},
+            {"protected_paths": [{"pattern": "x", "mode": "ask", "why": "오타"}]},
+            {"protected_paths": [{"pattern": "x", "mode": "ask", "reason": ""}]},
+            {"stop_verify": []},
+            {"stop_verify": [1]},
+            {"stop_timeout_sec": 0},
+            {"stop_timeout_sec": 841},
+            {"stop_timeout_sec": True},
+            {"stop_timeout_sec": "60"},
+            {"python": ""},
+            {"python": 'py "x'},
+            {"python": "C:\\py.exe"},
+            {"python": "python\nrm"},
+        ]
+        for hooks in bad_hooks:
+            with self.subTest(hooks=hooks):
+                with self.assertRaises(harness.HarnessError):
+                    harness.validate_config({**self.BASE, "hooks": hooks}, "test")
+
+    def test_valid_hooks_accepted(self):
+        harness.validate_config(self.BASE, "test")
+        harness.validate_config({**self.BASE, "hooks": {
+            "protected_paths": [{"pattern": "docs/api/**", "mode": "block", "reason": "API 계약"},
+                                {"pattern": "infra/", "mode": "ask"}],
+            "stop_verify": ["npm test"], "stop_timeout_sec": 840, "python": "py -3",
+        }}, "test")
+        harness.validate_config({**self.BASE, "hooks": {"protected_paths": []}}, "test")
+
+
+class HookInstallTest(unittest.TestCase):
+    HOOK_FILES = ("protect-paths.py", "stop-verify.py", "harness_common.py")
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="harness-hook-install-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def init(self, name, *extra):
+        target = self.tmp / name
+        code, out = run(["init", str(target), *extra])
+        self.assertEqual(code, 0, out)
+        return target
+
+    def test_init_installs_hooks(self):
+        for platform, tracker in (("gitlab", "jira"), ("github", "github")):
+            with self.subTest(platform=platform):
+                target = self.init(platform, "--platform", platform, "--tracker", tracker,
+                                   "--issue-prefix", "DEMO")
+                text = (target / ".claude" / "settings.json").read_text(encoding="utf-8")
+                self.assertNotIn("{{", text)
+                settings = json.loads(text)["hooks"]
+                self.assertEqual(settings["PreToolUse"][0]["matcher"], "Edit|Write|MultiEdit|NotebookEdit")
+                self.assertEqual(settings["Stop"][0]["hooks"][0]["timeout"], 900)
+                self.assertTrue(settings["PreToolUse"][0]["hooks"][0]["command"].startswith(
+                    'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/protect-paths.py"'))
+                for name in self.HOOK_FILES:
+                    installed = (target / ".claude" / "hooks" / name).read_text(encoding="utf-8")
+                    original = (harness.HOOKS_DIR / name).read_text(encoding="utf-8")
+                    self.assertEqual(installed, original)
+                code, out = run(["check", str(target)])
+                self.assertEqual(code, 0, out)
+
+    def test_check_detects_script_tamper(self):
+        target = self.init("tamper", "--platform", "github", "--tracker", "github")
+        script = target / ".claude" / "hooks" / "protect-paths.py"
+        script.write_text(script.read_text(encoding="utf-8").replace("deny", "allow"), encoding="utf-8")
+        code, out = run(["check", str(target)])
+        self.assertEqual(code, 1)
+        self.assertIn("불일치: .claude/hooks/protect-paths.py", out)
+
+    def test_hook_python_rendered(self):
+        target = self.init("py", "--platform", "github", "--tracker", "github")
+        config_path = target / "harness.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["hooks"] = {"python": "python"}
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        code, out = run(["init", str(target), "--force"])
+        self.assertEqual(code, 0, out)
+        settings = json.loads((target / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        command = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+        self.assertTrue(command.startswith('python "$CLAUDE_PROJECT_DIR/.claude/hooks/stop-verify.py"'))
+
+    def test_existing_settings_need_force(self):
+        target = self.tmp / "existing"
+        (target / ".claude").mkdir(parents=True)
+        (target / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        code, _ = run(["init", str(target), "--platform", "github", "--tracker", "github"])
+        self.assertEqual(code, 2)
+        self.assertEqual((target / ".claude" / "settings.json").read_text(encoding="utf-8"), "{}")
+
+    def test_installed_hook_runs_from_target(self):
+        target = self.init("run", "--platform", "github", "--tracker", "github")
+        payload = {"tool_name": "Write", "tool_input": {"file_path": str(target / "package-lock.json")}}
+        result = subprocess.run(
+            [sys.executable, str(target / ".claude" / "hooks" / "protect-paths.py")],
+            input=json.dumps(payload).encode("utf-8"), capture_output=True, timeout=60,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(target)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
+        self.assertEqual(decision, "deny")
+        self.assertFalse((target / ".claude" / "hooks" / "__pycache__").exists())  # 대상에 부산물을 남기지 않는다
+
+    def test_kit_self_has_no_hooks_yet(self):
+        outputs = harness.render_all(harness.load_config(harness.KIT_ROOT / "harness.json"), self_mode=True)
+        self.assertFalse(any(dest.startswith(".claude/") for dest in outputs))  # 자기 적용은 M1-7
 
 
 class AreaCheckTest(AreaTestBase):
