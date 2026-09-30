@@ -541,6 +541,25 @@ class StopVerifyTest(HookCase):
         self.stop()
         self.assertEqual(self.runs("root"), 2)
 
+    def test_nesting_limit_not_cached(self):
+        """PR #11 Codex 리뷰: 중첩 한도를 넘으면 안쪽 변경을 반영할 수 없으므로 캐시하지 않는다."""
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        repos = [self.project / "l1"]
+        for name in ("l2", "l3", "l4"):
+            repos.append(repos[-1] / name)
+        repos[-1].mkdir(parents=True)
+        for repo in repos:
+            git(repo, "init", "-q")
+        deep = repos[-1]
+        (deep / "f.txt").write_text("1", encoding="utf-8")
+        module = load_stop_module()
+        module.MAX_NEST_DEPTH = 2  # l1(0) → l2(1) → l3(2) 안의 l4는 한도를 넘는다
+        call_main(module, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertFalse(git_path(self.project, "stop-verify.json").exists())
+        (deep / "f.txt").write_text("2", encoding="utf-8")
+        call_main(module, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertEqual(self.runs("root"), 2)
+
     def test_nested_git_failure_not_cached(self):
         """#10 리뷰 R4: 중첩 저장소의 git이 실패하면 상태를 확정할 수 없으므로 캐시하지 않는다."""
         self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})

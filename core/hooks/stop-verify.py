@@ -130,7 +130,9 @@ def hash_repo(digest, repo: Path, deadline: float, depth: int = 0) -> None:
     for name in sorted(set(parse_porcelain(out))):
         digest.update(b"\0nested\0" + name.encode("utf-8") + b"\0")
         path = repo / name.rstrip("/")
-        if path.is_dir() and depth < MAX_NEST_DEPTH:
+        if path.is_dir():
+            if depth >= MAX_NEST_DEPTH:  # 한도 너머는 내용을 반영할 수 없으므로 캐시하지 않는다
+                raise StateUnknown(f"{path}: 중첩 저장소가 {MAX_NEST_DEPTH}단계를 넘는다")
             hash_repo(digest, path, deadline, depth + 1)
         else:
             hash_file(digest, path, deadline)
