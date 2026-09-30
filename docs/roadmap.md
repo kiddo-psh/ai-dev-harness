@@ -40,19 +40,20 @@
 - [x] M1-1 저장소 초기화, 구조, 라이선스, 자기 설정(`harness.json`)
 - [x] M1-2 feelm 규칙 문서 이관·일반화 → `core/templates/` (이관 대장 `docs/migration-ledger.md`)
 - [x] M1-3 `harness.py init/check`, 자기 적용(`--self`), 드리프트 검사, 단위 테스트, GitHub Actions 리허설
-- [ ] M1-4 영역 `AGENTS.md` 템플릿 (`core/templates/AREA-AGENTS.md`): 3단계 판정표·트리거·플랜/구현/리뷰 절차·W1/W2 편성을 스택 중립으로 정리. `init --area <dir> --verify-cmd ...`로 생성
+- [x] M1-4 영역 `AGENTS.md` 템플릿 (`core/templates/AREA-AGENTS.md`): 3단계 판정표·트리거·플랜/구현/리뷰 절차·W1/W2 편성을 스택 중립으로 정리. `init --area <dir> --verify-cmd ...`로 생성
 - [ ] M1-5 hooks 1차: `.claude/settings.json` 생성, 보호 경로(계약 문서·마이그레이션·CI 정의·lock 파일) 수정 시 차단 또는 경고, 세션 종료 시 지정 검증 명령 실행
 - [ ] M1-6 보안 검사 CI 조각 4종 (`core/ci/gitlab/`): Secret 탐지(gitleaks), 의존성 감사(npm audit · OWASP dependency-check 또는 Gradle 대안), SAST(semgrep), 컨테이너 이미지 스캔(trivy). 각각 `include: remote:`로 끌어 쓸 수 있는 단독 YAML
 - [ ] M1-7 키트 저장소에 M1-5·M1-6을 자기 적용 (GitHub Actions에는 같은 도구를 직접 호출)
 - [ ] M1-8 리허설 확장: 리허설 대상에 hooks 설치와 보안 검사 실행까지 포함
 - [ ] M1-9 설치 가이드 초안 (`docs/install.md`): 새 저장소·기존 저장소·끄는 법
+- [ ] M1-10 적용 전 계약 리뷰(엄격): 다음 프로젝트에 붙이기 전에 소비자가 생기면 바꾸기 비싼 표면을 한 번에 본다. `harness.json` 스키마(`areas` 포함), CLI 인자, 자리표시자 이름, 판정 식별자(`lite`·`standard`·`strict`), 기본 트리거·리뷰 관점을 생성 시점에 설정으로 굳힐지(#1 리뷰 F2), `harness_version` 올림 정책(#1 리뷰 F5)
 
 ### M2. 판정과 리뷰 (3~4주차)
 
 완료 기준: diff 기반 3단계 자동 판정이 MR 댓글로 붙고, MR 본문 필수 절이 비면 CI가 실패한다.
 
 - [ ] M2-1 판정 스크립트 `harness judge`: 변경 파일 목록과 트리거 규칙(`harness.json`의 `areas[].triggers`)으로 경량·표준·엄격(`lite`·`standard`·`strict`)을 산출. 사람 판정과 다르면 기록(측정 4번)
-- [ ] M2-2 MR 본문 lint CI 조각: `Closes`, 검증 절(방법·결과·미검증), 영향 범위 체크박스 중 하나 이상 필수. 엄격 판정이면 플랜 요약·리뷰 결과 절 필수
+- [ ] M2-2 MR 본문 lint CI 조각: `Closes`, 검증 절(방법·결과·미검증), 영향 범위 체크박스 중 하나 이상 필수. 엄격 판정이면 플랜 요약·리뷰 결과 절 필수. diff에 `plans/` 경로가 있거나 `.gitignore`에 `/plans/`가 없으면 실패(영역 `AGENTS.md` 5장의 `[ci]` 규칙)
 - [ ] M2-3 플랜·리뷰 파일 lint: 템플릿 절 누락, 측정 칸 빈칸, 인수 테스트 표 0행 검출 (로컬 hooks와 CI 양쪽)
 - [ ] M2-4 Claude MR 리뷰 CI 조각 이관: feelm의 수집·생성·게시 스크립트를 `core/ci/claude-review/`로 옮기고 프로젝트 고유값을 설정으로 분리. 도구 없는 실행·네트워크 가드 문서화
 - [ ] M2-5 리뷰 프롬프트 단일화: 로컬 W1/W2 리뷰 관점과 CI Claude 리뷰 시스템 프롬프트를 한 파일(`core/templates/review-perspectives.md`)에서 생성
