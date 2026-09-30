@@ -1,13 +1,88 @@
 # core/hooks
 
-AI 코딩 세션에 거는 하드 가드레일. 로드맵 M1-5(1차)와 M2-1·M2-3(판정·lint)에서 채운다.
+AI 코딩 세션(Claude Code)에 거는 하드 가드레일. `init`이 대상 저장소의 `.claude/`에 설치하고
+`check`가 드리프트를 검사한다. 스크립트는 표준 라이브러리만 쓴다.
 
-예정 내용
+| 원본 | 대상 | 역할 |
+| --- | --- | --- |
+| `settings.template.json` | `.claude/settings.json` | hook 등록. `{{hook_python}}`만 치환한다 |
+| `protect-paths.py` | `.claude/hooks/` | PreToolUse. 보호 경로를 고치려는 `Edit`·`Write`·`MultiEdit`·`NotebookEdit`를 거부하거나 사용자 확인으로 돌린다 |
+| `stop-verify.py` | `.claude/hooks/` | Stop. 응답을 끝내기 전에 바뀐 영역의 검증 명령을 실행한다 |
+| `harness_common.py` | `.claude/hooks/` | 공통 코드. 키트의 `bin/harness.py`도 이 파일로 `hooks` 설정을 검사한다 |
 
-- `settings.template.json` — 대상 저장소의 `.claude/settings.json` 원본. 허용 명령과 hooks 등록
-- `protect-paths.py` — PreToolUse: `harness.json`의 `protected_paths`(계약 문서, 마이그레이션, CI 정의, lock 파일)에
-  닿는 수정을 차단하거나 경고. 엄격 판정이 승인된 플랜 파일에 기록돼 있으면 통과
-- `stop-verify.py` — Stop: 프로필의 검증 명령을 실행하고 실패하면 세션에 알림
-- `judge.py` — diff에서 경량·표준·엄격(`lite`·`standard`·`strict`)을 산출(M2-1). CLI `harness judge`와 같은 코드
+`.claude/settings.json`은 키트가 생성하는 파일이다. 손으로 고치면 `check`가 불일치로 보고한다.
+팀이나 개인 설정은 `.claude/settings.local.json` 또는 사용자 설정에 둔다.
 
-원칙: 기본 경로는 조용히 돈다. 끄는 방법을 항상 문서화한다(`docs/install.md`).
+## 설정 (`harness.json`)
+
+```json
+{
+  "hooks": {
+    "protected_paths": [{"pattern": "docs/api/**", "mode": "block", "reason": "API 계약"}],
+    "stop_verify": ["npm test"],
+    "stop_timeout_sec": 300,
+    "python": "python3"
+  }
+}
+```
+
+모든 키는 생략할 수 있다. hook은 실행할 때마다 이 파일을 읽으므로 규칙을 바꿔도 `init`을 다시 할 필요가 없다.
+`python`을 바꿀 때만 `init --force`로 `settings.json`을 다시 만든다.
+
+- `protected_paths`: 지정하면 기본 목록을 대체한다. `mode`는 `block`(거부) 또는 `ask`(사용자 확인).
+  `pattern`은 gitignore 방식이다. `/`로 시작하거나 중간에 있으면 루트 기준, 아니면 모든 깊이에서 맞춘다.
+  앞의 `./`는 무시하고, 끝의 `/`는 그 아래 전체다. 디렉터리에 맞는 패턴은 그 아래 파일에도 맞는다.
+  `**`는 0개 이상의 디렉터리다. 대소문자는 구분하지 않는다. 여러 규칙이 맞으면 `block`이 이긴다.
+- 기본 목록: `block` lock 파일(`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `gradle.lockfile`,
+  `poetry.lock`, `uv.lock`, `Cargo.lock`, `go.sum`). `ask` CI 정의(`.gitlab-ci.yml`, `/.github/workflows/`),
+  마이그레이션(`**/db/migration/`, `migrations/`), `.env.example`.
+- 항상 추가(설정으로 끌 수 없다): 자기 보호 `/.claude/settings.json`, `/.claude/settings.local.json`,
+  `/.claude/hooks/`는 `block`. `/harness.json`과 `areas[].docs`에 적은 계약 문서는 `ask`.
+  프로젝트 밖의 사용자 설정 `~/.claude/settings.json`·`settings.local.json`도 `ask`.
+- `stop_verify`: 영역(`areas[].dir`) 밖의 파일이 바뀌었을 때 실행할 명령. 영역 안의 변경은 그 영역의
+  `areas[].verify`를 실행한다. 파일을 수정하지 않는 명령만 적는다.
+- `stop_timeout_sec`: 명령별 시간 제한(1~840초, 기본 300). 모든 명령을 합친 예산도 840초다.
+- `python`: hook을 실행할 인터프리터(기본 `python3`). Windows에서는 `python3`이 Microsoft Store 별칭인 경우가
+  많아 hooks가 조용히 실패한다(종료 코드 49). `python`이나 `py`로 바꾼다.
+
+## 동작
+
+- 보호 경로 검사는 프로젝트 루트(`$CLAUDE_PROJECT_DIR`) 밖의 파일은 사용자 설정 외에는 보지 않는다.
+  `..`, 역슬래시, 심볼릭 링크, Windows 확장 경로(`\?\`)는 해석한 뒤 맞춘다. 그 밖의 UNC 경로(`\host\share`)는
+  프로젝트 소속을 확인할 수 없어 `ask`로 돌린다.
+- 종료 검증은 작업 트리에 변경이 없으면 아무것도 하지 않는다. 프로젝트가 git 최상위의 하위 디렉터리면 프로젝트 안의
+  변경만 본다. 직전 확인과 변경 상태가 같으면 다시 실행하지 않는다.
+- 종료 검증이 실패하면 한 번 종료를 보류하고 실패한 명령과 출력 끝 40줄을 모델에 넘긴다. 모델이 고친 뒤에도
+  실패하거나 아무것도 바꾸지 않았으면 다시 보류하지 않고 사용자에게 한 번 알린다. 세션 시작 전부터 있던 변경이
+  실패하면 첫 응답에서 한 번 보류될 수 있다.
+- 설정 파일을 읽지 못하면 막지 않고(fail-open) "꺼진 상태"라고 알린다. 끌 수 없는 규칙은 이때도 유지한다.
+- 판정(`block`·`ask`)과 종료 검증 실패는 `.git/harness/events.jsonl`(worktree마다 따로)에 한 줄씩 남는다.
+  외부로 보내지 않는다. 측정 수집기(M4-1)가 읽는다.
+
+## 알려진 우회
+
+hooks는 실수를 막는 장치이지 보안 경계가 아니다. 최종 방어선은 CI다.
+
+- **Bash로 쓰는 경로는 보지 않는다.** `sed -i`, 리다이렉션(`>`), `git checkout -- <파일>`, 패키지 관리자 명령은
+  보호 경로를 바꿀 수 있다. 명령 문자열을 추측해 막으면 오탐과 미탐이 모두 커서 1차에서는 다루지 않는다.
+- `check`는 `.claude/hooks/`에 추가된 파일을 보지 않는다. 같은 이름의 패키지(`harness_common/`)를 넣으면 hook을
+  무력화할 수 있다. 도구 쓰기는 자기 보호가 막으므로 Bash나 사람을 거치는 경로다.
+- 사용자 설정(`~/.claude/settings.json`)의 `disableAllHooks`는 확인 창을 거치면 바뀐다.
+- hook 스크립트 파일이 없으면 Python이 종료 코드 2를 내서 모든 편집이 거부된다. `init --force`로 다시 설치한다.
+- Claude Code 외의 도구(Codex, IDE 확장 등)에는 적용되지 않는다.
+- 사람이 편집기로 고치는 파일은 막지 않는다.
+
+## 임시로 끄는 법
+
+사람이 판단해 끈다. 끈 사실과 이유는 `friction` 이슈로 남긴다(로드맵 1장 "팀 수용").
+
+- 전체: `.claude/settings.local.json`에 `{"disableAllHooks": true}`. 이 파일은 개인 설정이라 커밋하지 않는다.
+- 보호 경로 하나: `harness.json`의 `hooks.protected_paths`를 조정한다(`ask` 확인 후 반영).
+- 종료 검증만: 느린 명령을 빠른 명령(예: 단위 테스트만)으로 바꾸거나 `hooks.stop_verify`를 지운다.
+  영역의 `verify`는 필수이므로 영역 단위로는 끌 수 없다.
+
+## 다음 단계
+
+- `judge.py`: diff에서 경량·표준·엄격(`lite`·`standard`·`strict`)을 산출(M2-1). CLI `harness judge`와 같은 코드
+- 플랜·리뷰 파일 lint, 엄격 판정 플랜 승인에 따른 `block` 해제(M2-3)
+- 세션 시작 시점 기준선(SessionStart)으로 기존 변경을 종료 검증에서 빼기, `check`의 관리 디렉터리 여분 파일 검사(후속 이슈)

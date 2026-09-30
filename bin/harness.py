@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
@@ -23,6 +24,9 @@ from pathlib import Path
 VERSION = "0.1.0"
 KIT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = KIT_ROOT / "core" / "templates"
+HOOKS_DIR = KIT_ROOT / "core" / "hooks"
+# 매니페스트 항목의 base가 가리키는 원본 디렉터리
+SOURCE_DIRS = {"templates": TEMPLATES_DIR, "hooks": HOOKS_DIR}
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
 AREA_TEMPLATE = "AREA-AGENTS.md"
 AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs"}
@@ -93,6 +97,11 @@ DEFAULT_REVIEW_FOCUS = [
 # 존재를 확인할 수 없는 문서를 기본값으로 적지 않는다. 렌더링은 설정만으로 정해져야 check가 안정적이다.
 NO_AREA_DOCS = "- 아직 지정한 기준 문서가 없다. 계약·스키마·컨벤션 문서가 생기면 `--area-doc`으로 추가한다."
 
+# hooks 설정 검증은 대상에 복사되는 hook 공통 코드와 같은 규칙을 쓴다
+_HOOKS_SPEC = importlib.util.spec_from_file_location("harness_hooks_common", HOOKS_DIR / "harness_common.py")
+hooks_common = importlib.util.module_from_spec(_HOOKS_SPEC)
+_HOOKS_SPEC.loader.exec_module(hooks_common)
+
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 
 
@@ -133,6 +142,10 @@ def validate_config(config: dict, source: Path | str) -> None:
     ):
         raise HarnessError(f"{source}: related_docs는 label·path를 가진 객체 목록이어야 한다")
     validate_areas(config.get("areas", []), source)
+    try:
+        hooks_common.validate_hooks(config.get("hooks"), source)
+    except hooks_common.ConfigError as exc:
+        raise HarnessError(str(exc)) from exc
 
 
 def normalize_area_dir(value: str, source: Path | str) -> str:
@@ -190,6 +203,7 @@ def build_context(config: dict) -> dict:
         ctx["branch_key_example"] = "52"
     docs = config.get("related_docs") or []
     ctx["related_docs"] = "\n".join(f"- [{d['label']}]({d['path']})" for d in docs)
+    ctx["hook_python"] = (config.get("hooks") or {}).get("python", hooks_common.DEFAULT_PYTHON)
     return ctx
 
 
@@ -242,8 +256,8 @@ def load_manifest() -> list[dict]:
     return data["files"]
 
 
-def planned_files(config: dict, self_mode: bool) -> list[tuple[str, str]]:
-    """(템플릿 상대 경로, 대상 상대 경로) 목록."""
+def planned_files(config: dict, self_mode: bool) -> list[tuple[Path, str, bool]]:
+    """(원본 경로, 대상 상대 경로, 자리표시자 치환 여부) 목록."""
     plan = []
     for entry in load_manifest():
         wanted_platform = entry.get("platform")
@@ -251,18 +265,21 @@ def planned_files(config: dict, self_mode: bool) -> list[tuple[str, str]]:
             continue
         if self_mode and not entry.get("self", False):
             continue
-        plan.append((entry["src"], entry["dest"]))
+        base = entry.get("base", "templates")
+        if base not in SOURCE_DIRS:
+            raise HarnessError(f"매니페스트 base는 {sorted(SOURCE_DIRS)} 중 하나여야 한다: {base}")
+        plan.append((SOURCE_DIRS[base] / entry["src"], entry["dest"], entry.get("render", True)))
     return plan
 
 
 def render_all(config: dict, self_mode: bool) -> dict[str, str]:
     ctx = build_context(config)
     outputs: dict[str, str] = {}
-    for src, dest in planned_files(config, self_mode):
-        path = TEMPLATES_DIR / src
+    for path, dest, rendered in planned_files(config, self_mode):
         if not path.is_file():
             raise HarnessError(f"템플릿 파일이 없다: {path}")
-        outputs[dest] = render(path.read_text(encoding="utf-8"), ctx, source=src)
+        text = path.read_text(encoding="utf-8")
+        outputs[dest] = render(text, ctx, source=path.name) if rendered else text
     for area in config.get("areas", []):
         outputs[f"{area['dir']}/AGENTS.md"] = render_area(area, ctx)
     return outputs
