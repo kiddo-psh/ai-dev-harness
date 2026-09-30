@@ -166,14 +166,25 @@ def compile_glob(pattern: str) -> re.Pattern:
     return re.compile(rx, re.IGNORECASE)
 
 
+def project_root_raw(payload: dict) -> str:
+    return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
+
+
 def project_dir(payload: dict) -> Path:
-    root = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
-    return Path(root).resolve()
+    return Path(project_root_raw(payload)).resolve()
 
 
-def classify_path(project: Path, raw: str, cwd: str | None = None) -> tuple[str, str | Path]:
-    """("inside", 루트 기준 `a/b`) · ("outside", 절대 경로) · ("unc", 원본) 중 하나.
+def lexical(path: Path) -> Path:
+    """링크를 따라가지 않고 `.`·`..`만 정리한 절대 경로."""
+    return Path(os.path.normpath(os.path.abspath(path)))
 
+
+def classify_path(project: Path, raw: str, cwd: str | None = None,
+                  project_lexical: Path | None = None) -> tuple[str, list[str], list[Path], list[Path]]:
+    """("unc", [], [], []) 또는 ("paths", 프로젝트 안 `a/b` 목록, 프로젝트 밖 절대 경로 목록, 판정한 절대 경로).
+
+    링크를 따라가지 않은 논리 경로와 `resolve()`한 실제 경로를 둘 다 돌려준다. 보호 대상 이름이
+    심볼릭 링크이거나, 링크된 디렉터리를 거쳐 보호 파일에 닿는 경우를 모두 잡기 위해서다.
     Windows의 `\\\\?\\` 확장 경로는 일반 경로로 바꾼다. 그 밖의 UNC 경로는 프로젝트 소속을
     확인할 수 없으므로 "unc"로 돌려 호출자가 확인을 받게 한다.
     """
@@ -184,16 +195,58 @@ def classify_path(project: Path, raw: str, cwd: str | None = None) -> tuple[str,
         elif text.startswith("//?/") or text.startswith("//./"):
             text = text[4:]
         if text.startswith("//"):
-            return "unc", raw
+            return "unc", [], [], []
     path = Path(text)
     if not path.is_absolute():
         path = Path(cwd or project) / path
-    resolved = path.resolve()
+    roots = [project] + ([project_lexical] if project_lexical and project_lexical != project else [])
+    inside: list[str] = []
+    outside: list[Path] = []
+    candidates = [lexical(path), path.resolve()]
+    for candidate in candidates:
+        rel = None
+        for root in roots:
+            try:
+                rel = candidate.relative_to(root).as_posix()
+                break
+            except ValueError:
+                continue
+        if rel is None:
+            if candidate not in outside:
+                outside.append(candidate)
+        elif rel not in ("", ".") and rel not in inside:
+            inside.append(rel)
+    return "paths", inside, outside, candidates
+
+
+def self_protected_real(project: Path, candidates: list[Path]) -> dict | None:
+    """자기 보호 경로의 실제 위치와 비교한다. `.claude`나 `.claude/hooks`가 링크여도 그 대상 경로로 쓰거나
+    다른 링크를 거쳐 쓰는 경우, 보호 파일의 하드링크를 다른 이름으로 쓰는 경우를 잡는다."""
+    claude = project / ".claude"
+    files = [claude / "settings.json", claude / "settings.local.json"]
+    hooks = claude / "hooks"
     try:
-        rel = resolved.relative_to(project).as_posix()
-    except ValueError:
-        return "outside", resolved
-    return ("inside", rel) if rel not in ("", ".") else ("outside", resolved)
+        real_files = [f.resolve() for f in files]
+        real_hooks = hooks.resolve()
+        hook_files = [p for p in hooks.iterdir() if p.is_file()] if hooks.is_dir() else []
+    except OSError:
+        return None
+    for candidate in candidates:
+        try:
+            real = candidate.resolve()
+        except OSError:
+            continue
+        if real in real_files or real == real_hooks or real_hooks in real.parents:
+            return {"pattern": "/.claude/(실제 위치)", "mode": "block", "reason": "hooks 설정·스크립트(자기 보호)"}
+        if real.is_file():
+            for protected in [*files, *hook_files]:
+                try:
+                    if protected.is_file() and os.path.samefile(real, protected):
+                        return {"pattern": "/.claude/(같은 파일)", "mode": "block",
+                                "reason": "hooks 설정·스크립트의 하드링크(자기 보호)"}
+                except OSError:
+                    continue
+    return None
 
 
 def is_user_settings(path: Path) -> bool:
@@ -209,10 +262,10 @@ def is_user_settings(path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def git_result(project: Path, *args: str) -> tuple[str | None, str]:
+def git_result(project: Path, *args: str, timeout: float = 30) -> tuple[str | None, str]:
     """(stdout, 오류 첫 줄). 실패하면 stdout이 None."""
     try:
-        result = subprocess.run(["git", *args], cwd=project, capture_output=True, timeout=30)
+        result = subprocess.run(["git", *args], cwd=project, capture_output=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)
     if result.returncode != 0:
@@ -257,7 +310,7 @@ def decode_output(data: bytes) -> str:
 
 
 def read_payload() -> dict:
-    data = sys.stdin.buffer.read().decode("utf-8")
+    data = sys.stdin.buffer.read().decode("utf-8-sig")  # BOM이 붙은 입력(PowerShell 파이프 등)도 읽는다
     payload = json.loads(data) if data.strip() else {}
     if not isinstance(payload, dict):
         raise ValueError("hook 입력은 JSON 객체여야 한다")

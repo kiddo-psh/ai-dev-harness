@@ -266,6 +266,102 @@ class ProtectPathsReviewTest(ProtectPathsCase):
         self.assertEqual(result.stdout, b"")
 
 
+class SymlinkTest(ProtectPathsCase):
+    """PR #9 Codex 리뷰(#10 C1): 링크를 따라가기 전의 논리 경로와 실제 경로를 모두 판정한다."""
+
+    def link(self, name, target):
+        path = self.project / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("이 환경에서는 심볼릭 링크를 만들 수 없다")
+        return path
+
+    def dir_link(self, path, target):
+        """디렉터리 링크. Windows는 권한 없이 만들 수 있는 junction을 쓴다."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        target.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            import _winapi
+            _winapi.CreateJunction(str(target), str(path))
+        else:
+            path.symlink_to(target, target_is_directory=True)
+        return path
+
+    def test_protected_link_to_outside(self):
+        target = self.outside / "x.json"
+        target.write_text("{}", encoding="utf-8")
+        link = self.link(".claude/settings.json", target)
+        _, decision = self.edit(link)
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_protected_link_to_unprotected(self):
+        (self.project / "src").mkdir()
+        (self.project / "src" / "data.json").write_text("{}", encoding="utf-8")
+        link = self.link("package-lock.json", self.project / "src" / "data.json")
+        _, decision = self.edit(link)
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_file_link_into_protected(self):
+        (self.project / "package-lock.json").write_text("{}", encoding="utf-8")
+        link = self.link("innocent.txt", self.project / "package-lock.json")
+        _, decision = self.edit(link)
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_dir_link_into_protected(self):
+        alias = self.dir_link(self.project / "alias", self.project / ".claude")
+        _, decision = self.edit(alias / "settings.json")
+        self.assertEqual(decision["permissionDecision"], "deny")
+        chain = self.dir_link(self.project / "chain", alias)  # 링크를 거친 링크
+        _, decision = self.edit(chain / "hooks" / "x.py")
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_protected_dir_is_link(self):
+        """#10 리뷰 R1: `.claude/hooks`가 링크면 그 대상 경로로 직접 쓰거나 다른 링크를 거쳐도 막는다."""
+        real = self.dir_link(self.project / ".claude" / "hooks", self.outside / "hooksreal")
+        _, decision = self.edit(real / "protect-paths.py")
+        self.assertEqual(decision["permissionDecision"], "deny")
+        _, decision = self.edit(self.outside / "hooksreal" / "protect-paths.py")
+        self.assertEqual(decision["permissionDecision"], "deny")
+        _, decision = self.edit(self.outside / "other.txt")
+        self.assertIsNone(decision)  # 보호 대상이 아닌 곳은 그대로 조용하다
+
+    def test_claude_dir_is_link(self):
+        self.dir_link(self.project / ".claude", self.project / "shared")
+        _, decision = self.edit(self.project / "shared" / "settings.json")
+        self.assertEqual(decision["permissionDecision"], "deny")
+        _, decision = self.edit(self.project / "shared" / "notes.md")
+        self.assertIsNone(decision)
+
+    def test_hardlink_to_settings(self):
+        settings = self.project / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text("{}", encoding="utf-8")
+        alias = self.project / "notes.txt"
+        try:
+            os.link(settings, alias)
+        except (OSError, NotImplementedError):
+            self.skipTest("이 환경에서는 하드링크를 만들 수 없다")
+        _, decision = self.edit(alias)
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_link_to_user_settings(self):
+        home = self.tmp / "home"
+        self.dir_link(self.project / "userlink", home / ".claude")
+        env = {"HOME": str(home), "USERPROFILE": str(home)}
+        result = self.hook("protect-paths.py", {"tool_name": "Edit", "tool_input": {
+            "file_path": str(self.project / "userlink" / "settings.json")}}, env=env)
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_unprotected_link_silent(self):
+        (self.project / "b.txt").write_text("b", encoding="utf-8")
+        link = self.link("a.txt", self.project / "b.txt")
+        result, decision = self.edit(link)
+        self.assertEqual(result.returncode, 0)
+        self.assertIsNone(decision)
+
+
 class GlobTest(unittest.TestCase):
     def match(self, pattern, path):
         return bool(common.compile_glob(pattern).fullmatch(path))
@@ -418,6 +514,109 @@ class StopVerifyTest(HookCase):
         (sub / "f.txt").write_text("2", encoding="utf-8")
         self.stop()
         self.assertEqual(self.runs("root"), 2)
+
+    def test_nested_repo_ignored_files_not_hashed(self):
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        sub = self.project / "sub"
+        (sub / "junk").mkdir(parents=True)
+        git(sub, "init", "-q")
+        (sub / ".gitignore").write_text("junk/\n", encoding="utf-8")
+        (sub / "junk" / "big.bin").write_bytes(b"0" * 1024)
+        self.stop()
+        self.assertEqual(self.runs("root"), 1)
+        (sub / "junk" / "big.bin").write_bytes(b"1" * 1024)  # ignore된 파일은 읽지도 해시하지도 않는다
+        self.stop()
+        self.assertEqual(self.runs("root"), 1)
+
+    def test_nested_repo_inside_nested_repo(self):
+        """#10 리뷰 R2: 중첩 저장소 안의 중첩 저장소 변경도 해시에 들어간다."""
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        inner = self.project / "sub" / "inner"
+        inner.mkdir(parents=True)
+        git(self.project / "sub", "init", "-q")
+        git(inner, "init", "-q")
+        (inner / "f.txt").write_text("1", encoding="utf-8")
+        self.stop()
+        (inner / "f.txt").write_text("2", encoding="utf-8")
+        self.stop()
+        self.assertEqual(self.runs("root"), 2)
+
+    def test_nesting_limit_not_cached(self):
+        """PR #11 Codex 리뷰: 중첩 한도를 넘으면 안쪽 변경을 반영할 수 없으므로 캐시하지 않는다."""
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        repos = [self.project / "l1"]
+        for name in ("l2", "l3", "l4"):
+            repos.append(repos[-1] / name)
+        repos[-1].mkdir(parents=True)
+        for repo in repos:
+            git(repo, "init", "-q")
+        deep = repos[-1]
+        (deep / "f.txt").write_text("1", encoding="utf-8")
+        module = load_stop_module()
+        module.MAX_NEST_DEPTH = 2  # l1(0) → l2(1) → l3(2) 안의 l4는 한도를 넘는다
+        call_main(module, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertFalse(git_path(self.project, "stop-verify.json").exists())
+        (deep / "f.txt").write_text("2", encoding="utf-8")
+        call_main(module, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertEqual(self.runs("root"), 2)
+
+    def test_nested_git_failure_not_cached(self):
+        """#10 리뷰 R4: 중첩 저장소의 git이 실패하면 상태를 확정할 수 없으므로 캐시하지 않는다."""
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        sub = self.project / "sub"
+        sub.mkdir()
+        git(sub, "init", "-q")
+        (sub / "f.txt").write_text("1", encoding="utf-8")
+        module = load_stop_module()
+        real = module.common.git_result
+
+        def failing(repo, *args, **kwargs):
+            if Path(repo).resolve() == sub.resolve() and args[:1] == ("status",):
+                return None, "fatal: 주입한 실패"
+            return real(repo, *args, **kwargs)
+
+        module.common.git_result = failing
+        for _ in range(2):
+            call_main(module, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertEqual(self.runs("root"), 2)
+        self.assertFalse(git_path(self.project, "stop-verify.json").exists())
+
+    def test_slow_nested_git_counts_against_budget(self):
+        """#10 리뷰 R3: 해시 중 git 호출도 예산 안에서 하고, 예산을 넘기면 캐시하지 않는다."""
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        sub = self.project / "sub"
+        sub.mkdir()
+        git(sub, "init", "-q")
+        (sub / "f.txt").write_text("1", encoding="utf-8")
+        module = load_stop_module()
+        module.common.MAX_STOP_TIMEOUT = 1
+        real = module.common.git_result
+
+        def slow(repo, *args, **kwargs):
+            if Path(repo).resolve() == sub.resolve():
+                time.sleep(1.2)
+            return real(repo, *args, **kwargs)
+
+        module.common.git_result = slow
+        code, _, err = call_main(module, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertEqual(code, 2)
+        self.assertIn("전체 시간 예산", err)
+        self.assertFalse(git_path(self.project, "stop-verify.json").exists())
+        fresh = load_stop_module()  # 예산이 충분하면 다음 실행에서 명령이 실제로 돈다
+        call_main(fresh, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertEqual(self.runs("root"), 1)
+
+    def test_hash_within_budget(self):
+        self.setup_repo({"hooks": {"stop_verify": [self.marker_cmd("root")]}})
+        (self.project / "x.txt").write_text("1", encoding="utf-8")
+        module = load_stop_module()
+        module.common.MAX_STOP_TIMEOUT = 0
+        code, _, err = call_main(module, {"stop_hook_active": False}, self.project, self.tmp)
+        self.assertEqual(code, 2)
+        self.assertIn("전체 시간 예산", err)
+        self.assertEqual(self.runs("root"), 0)
+        cache = git_path(self.project, "stop-verify.json")
+        self.assertFalse(cache.exists())  # 상태를 확정하지 못했으므로 캐시하지 않는다
 
     def test_rename_counts_both_areas(self):
         self.write_config({"areas": [{"dir": "a", "verify": [self.marker_cmd("a")]},
