@@ -6,7 +6,7 @@
 
 ```text
 profiles/<name>/
-  profile.json         검증 명령(format · lint · test · build), 보호 경로 기본값, 게이트 트리거 기본값
+  profile.json         검증 명령(format · lint · test · build), 보호 경로 기본값, 엄격 단계 트리거 기본값
   scaffold/            도메인 또는 화면 생성기와 템플릿
   convention-tests/    생성물과 기존 코드가 컨벤션을 지키는지 검사하는 테스트
   README.md            적용 방법
