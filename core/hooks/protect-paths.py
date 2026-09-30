@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 sys.dont_write_bytecode = True  # 대상 저장소의 .claude/hooks/에 __pycache__를 남기지 않는다
 import harness_common as common  # noqa: E402
@@ -85,36 +86,36 @@ def main() -> int:
     if not isinstance(raw, str) or not raw.strip():
         return 0
     project = common.project_dir(payload)
+    project_lexical = common.lexical(Path(common.project_root_raw(payload)))
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None
-    kind, where = common.classify_path(project, raw, cwd)
+    kind, inside, outside, candidates = common.classify_path(project, raw, cwd, project_lexical)
 
     if kind == "unc":
         rule = {"pattern": "\\\\server\\share", "mode": "ask", "reason": "프로젝트 소속을 확인할 수 없는 네트워크 경로"}
-        target = raw
-    elif kind == "outside":
-        if not common.is_user_settings(where):
-            return 0
-        rule = {"pattern": "~/.claude/settings*.json", "mode": "ask", "reason": "사용자 hooks 설정"}
-        target = str(where)
-    else:
-        target = where
-        notice = ""
-        try:
-            config = common.load_config(project)
-            rules = rules_for(config)
-        except Exception as exc:  # noqa: BLE001 - 어떤 설정 오류에서도 끌 수 없는 규칙은 남긴다
-            rules, notice = rules_for(None), f"{OFF_NOTICE}: {exc}"
-        rule = decide(target, rules)
-        if rule is None:
-            if notice:
-                print(f"harness protect-paths: {notice}", file=sys.stderr)
-                return 1
-            return 0
-        respond(target, rule, notice)
-        log(project, payload, rule, target)
+        respond(raw, rule)
+        log(project, payload, rule, raw)
         return 0
 
-    respond(target, rule)
+    # (규칙, 대상) 후보. 논리 경로와 실제 경로 중 가장 강한 결정을 택한다
+    matches = [({"pattern": "~/.claude/settings*.json", "mode": "ask", "reason": "사용자 hooks 설정"}, str(p))
+               for p in outside if common.is_user_settings(p)]
+    real = common.self_protected_real(project, candidates)  # 설정과 무관하게 적용한다
+    if real is not None:
+        matches.append((real, raw))
+    notice = ""
+    if inside:
+        try:
+            rules = rules_for(common.load_config(project))
+        except Exception as exc:  # noqa: BLE001 - 어떤 설정 오류에서도 끌 수 없는 규칙은 남긴다
+            rules, notice = rules_for(None), f"{OFF_NOTICE}: {exc}"
+        matches += [(rule, rel) for rel in inside if (rule := decide(rel, rules)) is not None]
+    if not matches:
+        if notice:
+            print(f"harness protect-paths: {notice}", file=sys.stderr)
+            return 1
+        return 0
+    rule, target = max(matches, key=lambda m: common.MODES.index(m[0]["mode"]))  # 동률이면 먼저 나온 후보
+    respond(target, rule, notice)
     log(project, payload, rule, target)
     return 0
 
