@@ -40,8 +40,7 @@ python bin/harness.py version
 | `.claude/settings.json`, `.claude/hooks/` | Claude Code hooks ([설명](../core/hooks/README.md)) |
 | `harness.json` | 대상 저장소의 키트 설정. 이후 모든 명령이 이 파일을 읽는다 |
 
-영역 `AGENTS.md`는 3절에서 따로 생성한다. CI 조각은 파일을 복사하지 않고 대상 저장소의 CI 정의에서
-`include`로 참조한다(5절).
+영역 `AGENTS.md`는 3절에서 따로 생성한다. CI 조각은 아직 제공하지 않는다(5절).
 
 ## 3. 새 저장소에 붙이기
 
@@ -137,8 +136,16 @@ python bin/harness.py init ../my-project --force --platform github --tracker git
 
 ## 5. CI 조각
 
-보안 검사 CI 조각은 파일을 복사하지 않고 대상 저장소의 CI 정의에서 참조한다. 설정 방법과 필요 조건은
-[`core/ci/README.md`](../core/ci/README.md)에 있다.
+> **아직 쓸 수 없다.** 보안 검사 CI 조각은 로드맵 M1-6에서 만들고 있고, 현재 `core/ci/`에는 예정 구조만 있다.
+> 이 절은 M1-6이 병합되면 설정 방법으로 채운다.
+
+예정된 방식은 다음과 같다([ADR-0003](adr/0003-gitlab-ci-remote-include.md)).
+
+- **GitLab 전용이다.** 대상 저장소의 `.gitlab-ci.yml`이 키트의 조각을 `include: remote:`로 태그 고정해 참조한다.
+  파일은 복사하지 않는다
+- **GitHub 저장소용 조각은 계획에 없다.** GitHub Actions에서는 같은 도구(gitleaks, trivy, semgrep)를 직접
+  호출해야 한다. 키트 저장소 자신의 적용 예는 M1-7에서 만든다
+- 설정 방법·필요 조건·끄는 법은 조각과 함께 [`core/ci/README.md`](../core/ci/README.md)에 들어간다
 
 ## 6. hooks 설정
 
@@ -234,7 +241,7 @@ hooks가 실제로 동작하는지는 `check`로 알 수 없다. Claude Code 세
 | hooks 전체 | `.claude/settings.local.json`에 `{"disableAllHooks": true}`. 개인 설정이라 커밋하지 않는다 |
 | 보호 경로 하나 | `harness.json`의 `hooks.protected_paths`를 조정한다 |
 | 종료 검증 | `hooks.stop_verify`를 지우거나 더 빠른 명령으로 바꾼다. 영역의 `verify`는 필수라 영역 단위로는 끌 수 없다 |
-| CI 조각 하나 | [`core/ci/README.md`](../core/ci/README.md)의 "끄는 법" |
+| CI 조각 하나 | 아직 제공하지 않는다(5절). 제공되면 [`core/ci/README.md`](../core/ci/README.md)에 끄는 법을 둔다 |
 
 ## 10. 제거
 
@@ -245,7 +252,7 @@ rm .claude/settings.json harness.json
 ```
 
 문서(`AGENTS.md`, `CLAUDE.md`, `docs/`)와 병합 요청 템플릿은 저장소의 내용이므로 지울지는 따로 판단한다.
-CI 조각을 썼다면 CI 정의에서 `include`와 `harness-*` job 참조를 지운다.
+CI 조각(5절, 제공 예정)을 붙였다면 CI 정의에서 해당 `include`와 그 조각의 job 참조도 지운다.
 
 `.claude/settings.local.json`은 개인 설정이라 키트가 만들지 않았다. 지우지 않는다.
 
@@ -267,5 +274,5 @@ CI 조각을 썼다면 CI 정의에서 `include`와 `harness-*` job 참조를 �
 
 - 판정 단계와 플랜·리뷰를 켜는 조건: [기여 규칙](contributing.md)
 - hooks의 규칙·동작·알려진 우회: [`core/hooks/README.md`](../core/hooks/README.md)
-- CI 조각: [`core/ci/README.md`](../core/ci/README.md)
+- CI 조각(M1-6 진행 중, GitLab 전용 예정): [`core/ci/README.md`](../core/ci/README.md)
 - 설계 결정의 배경: [ADR](adr/README.md)
