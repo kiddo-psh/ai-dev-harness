@@ -87,6 +87,8 @@ class CiFragmentTest(unittest.TestCase):
         secret = text("secret-detection")
         for flag in ("--redact", "--exit-code 1", "--remerge-diff", "merge-base --is-ancestor", "useDefault"):
             self.assertIn(flag, secret)
+        self.assertIn("in_extend &&", secret)
+        self.assertIn("/^[[:space:]]*\\[/ { in_extend=0 }", secret)
         for name in ("dependency-audit", "image-scan"):
             body = text(name)
             for flag in ("--exit-code 1", "--config /dev/null", "--ignore-unfixed", "--severity HIGH,CRITICAL"):
