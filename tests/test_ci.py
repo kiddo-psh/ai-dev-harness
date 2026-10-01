@@ -90,6 +90,10 @@ class CiFragmentTest(unittest.TestCase):
                 self.assertIn(flag, body, name)
             self.assertRegex(body, r"cache:\n\s+key: harness-trivy\n\s+when: always", name)
         self.assertRegex(text("image-scan"), r"artifacts:\n\s+when: always\n\s+access: developer")
+        image = text("image-scan")
+        self.assertIn('set -- --input "$HARNESS_SCAN_ARCHIVE"', image)
+        self.assertIn('if [ -n "${HARNESS_SCAN_IMAGE:-}" ]; then fail', image)
+        self.assertIn('if [ ! -f "$HARNESS_SCAN_ARCHIVE" ] || [ ! -s "$HARNESS_SCAN_ARCHIVE" ]', image)
 
     def test_merge_request_only(self):
         for name in FRAGMENTS:

@@ -33,6 +33,33 @@ harness-image-scan:
   needs: [build-image]   # 이미지를 올리는 로컬 job
 ```
 
+GitLab Container Registry가 없는 프로젝트는 빌드한 이미지를 Docker 형식 tar 아티팩트로 넘긴다.
+`build-image`는 Docker 사용 권한이 있는 runner에서 실행하는 소비자 job 예시다.
+
+```yaml
+stages: [build, test]
+
+variables:
+  HARNESS_SCAN_ARCHIVE: image.tar
+
+build-image:
+  stage: build
+  script:
+    - docker build -t "harness-build:$CI_COMMIT_SHA" .
+    - docker save "harness-build:$CI_COMMIT_SHA" -o image.tar
+  artifacts:
+    access: developer
+    paths: [image.tar]
+
+harness-image-scan:
+  needs:
+    - job: build-image
+      artifacts: true
+```
+
+`HARNESS_SCAN_IMAGE`와 `HARNESS_SCAN_ARCHIVE`는 둘 중 하나만 지정한다. tar 파일이 없거나 비어 있으면
+job이 실패한다. tar 아티팩트는 크기가 클 수 있으므로 프로젝트의 아티팩트 용량 제한을 확인한다.
+
 GitLab 17.9 이상이면 `integrity: sha256-<base64>`를 함께 적어 받은 파일이 바뀌지 않았는지 확인할 수 있다.
 
 job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `image` 등은 같은 이름의 job을 로컬
@@ -44,7 +71,7 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 | --- | --- | --- |
 | `secret-detection` | MR 커밋에서 Secret 발견(뒤 커밋에서 지웠어도, merge 커밋에서 넣었어도) | `.gitleaksignore`(Fingerprint), `.gitleaks.toml`(`[extend] useDefault = true` 필수) |
 | `dependency-audit` | 운영 의존성의 High·Critical이면서 고친 버전이 있는 취약점. lockfile이 없는 `package.json`·`build.gradle(.kts)`, trivy가 읽지 못한 lockfile | `.trivyignore`, `HARNESS_AUDIT_SKIP_DIRS` |
-| `image-scan` | 이미지의 High·Critical이면서 고친 버전이 있는 취약점. `HARNESS_SCAN_IMAGE`가 비어 있음 | `.trivyignore` |
+| `image-scan` | 이미지의 High·Critical이면서 고친 버전이 있는 취약점. 이미지 참조·tar 입력이 모두 없거나 둘 다 지정됨, tar 파일 누락·빈 파일 | `.trivyignore` |
 | `sast` | 경고만(노란색). 이 MR이 새로 만든 발견만 보고한다. 측정(M4) 뒤 차단으로 올린다 | `# nosemgrep: <규칙 ID>`, `.semgrepignore` |
 
 - **도구 오류는 실패다.** DB·규칙 다운로드 실패, 설정 오류, MR 변수 없음, 얕은 clone, 기준 커밋 없음이 모두
@@ -79,8 +106,9 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
   - semgrep.dev: 레지스트리 규칙을 쓸 때
 - 폐쇄망: 조각은 `include: project:`로 미러링하고, trivy는 `TRIVY_DB_REPOSITORY`로 DB 미러를 지정한다.
   semgrep은 `HARNESS_SEMGREP_CONFIG`에 저장소 안의 규칙 파일을 준다.
-- `image-scan`: 레지스트리 접근. `$CI_REGISTRY` 아래 이미지는 job 토큰을 쓴다. 다른 레지스트리는
-  `TRIVY_USERNAME`·`TRIVY_PASSWORD`를 보호·마스킹 변수로 준다.
+- `image-scan`: 이미지 참조 방식에는 레지스트리 접근이 필요하다. `$CI_REGISTRY` 아래 이미지는 job 토큰을
+  쓴다. 다른 레지스트리는 `TRIVY_USERNAME`·`TRIVY_PASSWORD`를 보호·마스킹 변수로 준다. tar 방식에는
+  빌드 job이 만든 Docker 형식 이미지 아티팩트와 이를 받는 `needs`가 필요하다.
 
 ## 알려진 한계
 
