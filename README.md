@@ -55,6 +55,7 @@ python -m unittest discover tests -v
 ## 문서
 
 - [개발 계획과 마일스톤](docs/roadmap.md)
+- [설치 가이드](docs/install.md)
 - [기여 규칙](docs/contributing.md)
 - [설계 결정(ADR)](docs/adr/README.md)
 - [feelm에서 이관한 항목 대장](docs/migration-ledger.md)
