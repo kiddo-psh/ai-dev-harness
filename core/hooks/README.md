@@ -85,6 +85,14 @@ hooks는 실수를 막는 장치이지 보안 경계가 아니다. 최종 방어
 - 종료 검증만: 느린 명령을 빠른 명령(예: 단위 테스트만)으로 바꾸거나 `hooks.stop_verify`를 지운다.
   영역의 `verify`는 필수이므로 영역 단위로는 끌 수 없다.
 
+## 키트 자기 적용
+
+키트 저장소에도 같은 hooks가 설치돼 있다(M1-7). `harness.json`의 `hooks`에서 `python`은 `python`(Windows),
+`stop_verify`는 단위 테스트와 `check --self`다. 이 디렉터리를 고치면 `python bin/harness.py init --self`로
+`.claude/`를 다시 생성한다. 생성하지 않으면 `check --self`가 불일치로 보고한다.
+그래서 키트에서는 원본(`core/hooks/`, 매니페스트, `bin/harness.py`)을 고친 뒤 `init --self`를 돌리면 `.claude/hooks/`
+자기 보호를 거치지 않고 hook을 바꿀 수 있다. 원본 변경은 엄격 판정이라 리뷰로 통제한다.
+
 ## 다음 단계
 
 - `judge.py`: diff에서 경량·표준·엄격(`lite`·`standard`·`strict`)을 산출(M2-1). CLI `harness judge`와 같은 코드

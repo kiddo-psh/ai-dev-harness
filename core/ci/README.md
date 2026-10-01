@@ -135,6 +135,17 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 - 한 job: 같은 이름의 job을 로컬에 다시 적고 `rules: [{when: never}]`로 덮어쓴다.
 - 오탐 하나: 위 표의 예외 방식을 쓴다.
 
+## 키트 자기 적용
+
+키트 저장소의 PR에서는 `.github/workflows/security.yml`이 `secret-detection`과 `sast` 조각을 GitHub Actions로 실행한다(M1-7).
+`.github/scripts/run_fragment.py`가 조각에서 이미지·job 변수·스크립트·`allow_failure: exit_codes`를 꺼내 `docker run`으로
+돌리고, GitLab MR 변수는 PR merge 커밋에서 만든다(첫 부모 = 대상, 둘째 부모 = PR head, 그 merge-base = 기준).
+셸은 GitLab Docker executor처럼 bash가 있으면 `bash -eo pipefail`이다. 조각의 형식은 이 러너가 읽는 모양을 지킨다.
+최상위 job 하나, 알려진 키(`stage`·`image`·`variables`·`cache`·`rules`·`interruptible`·`allow_failure`·`script`·`artifacts`),
+`script:` 아래 `- |` 블록 하나, 변수 값은 큰따옴표 또는 맨 값(`$` 없음)이다. 모르는 모양은 실패한다(스크립트 일부만 돌려 통과하지 않는다).
+PR이 workflow·러너·조각을 바꿨으면 job 로그에 경고가 나온다.
+키트에는 lockfile과 이미지가 없어 의존성 감사·이미지 스캔은 리허설(M1-8)에서 돌린다.
+
 ## 갱신
 
 도구 버전은 태그와 digest로 고정한다(보안 도구 자체가 공급망 경로다). 버전을 올리는 것도 보안 검사

@@ -10,5 +10,9 @@
     {"label": "저장소 기여 규칙(브랜치·커밋·PR)", "path": "docs/contributing.md"},
     {"label": "Secret 및 환경변수 관리 규칙", "path": "docs/secret-environment-variables.md"},
     {"label": "개발 계획과 마일스톤", "path": "docs/roadmap.md"}
-  ]
+  ],
+  "hooks": {
+    "stop_verify": ["python -m unittest discover tests -q", "python bin/harness.py check --self"],
+    "python": "python"
+  }
 }

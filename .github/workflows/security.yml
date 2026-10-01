@@ -1,0 +1,54 @@
+name: security
+
+# 키트 자신에 M1-6 보안 검사를 자기 적용한다(M1-7, ADR-0003). 검사를 두 벌 쓰지 않도록
+# core/ci/gitlab/ 조각의 이미지·스크립트를 run_fragment.py로 그대로 실행한다.
+# 키트에는 lockfile과 이미지가 없으므로 의존성 감사·이미지 스캔은 리허설(M1-8)에서 본다.
+# job 이름(secret-detection, sast)은 브랜치 보호의 필수 체크 이름이다.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  secret-detection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Secret 탐지 (gitleaks, 차단)
+        run: python3 .github/scripts/run_fragment.py secret-detection
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: always()
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  sast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # 발견은 경고 주석으로 남기고 통과한다. 도구 오류는 실패다. 오류까지 삼키지 않도록 step 단위 실패 허용은 쓰지 않는다.
+      - name: SAST (semgrep, 경고)
+        run: python3 .github/scripts/run_fragment.py sast
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: always()
+        with:
+          name: semgrep-report
+          path: semgrep-report.json
+          retention-days: 30
+          if-no-files-found: ignore

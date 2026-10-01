@@ -60,7 +60,7 @@ Conventional Commits를 쓴다. Scope는 변경 영역이다.
 | --- | --- |
 | 경량 | `docs/` 하위의 손으로 관리하는 문서, 주석, 테스트만 변경. 플랜 없이 판정과 근거를 시작 보고와 PR 본문에 남긴다 |
 | 표준 | 그 밖의 변경(`bin/harness.py`, `core/templates/`, 보안 검사가 아닌 CI 조각·워크플로 단계 포함). 플랜·구현·리뷰 산출물을 한 세션에서 만든다 |
-| 엄격 | `core/hooks/`의 차단·수정 로직 변경(오탐이 나면 팀이 hooks를 끈다), 보안 검사 변경 — `core/ci/`의 보안 검사 조각과 `.github/workflows/`의 보안 검사 단계(틀려도 조용히 통과해 거짓 안심을 준다) |
+| 엄격 | `core/hooks/`의 차단·수정 로직 변경(오탐이 나면 팀이 hooks를 끈다), 보안 검사 변경 — `core/ci/`의 보안 검사 조각, `.github/workflows/`의 보안 검사 단계와 이를 실행하는 `.github/scripts/run_fragment.py`(틀려도 조용히 통과해 거짓 안심을 준다) |
 
 첫 소비자 저장소에 적용한 뒤에는 `harness.json` 스키마, CLI 인자, 자리표시자 이름, 판정 식별자
 (`lite`·`standard`·`strict`)를 깨는 변경도 엄격이다. 그 전에는 로드맵 M1-10의 적용 전 계약 리뷰에서
@@ -76,8 +76,17 @@ python -m unittest discover tests -v
 python bin/harness.py check --self
 ```
 
-`core/templates/`를 고쳤으면 `python bin/harness.py init --self`로 자기 적용 파일을 다시 생성한 뒤 검증한다.
-생성된 파일(`AGENTS.md`, `docs/templates/*`, `docs/adr/0000-template.md`, PR 템플릿 등)은 직접 고치지 않는다.
+`core/templates/`나 `core/hooks/`를 고쳤으면 `python bin/harness.py init --self`로 자기 적용 파일을 다시 생성한 뒤 검증한다.
+생성된 파일(`AGENTS.md`, `docs/templates/*`, `docs/adr/0000-template.md`, PR 템플릿, `.claude/settings.json`, `.claude/hooks/*` 등)은 직접 고치지 않는다.
+
+이 저장소에도 hooks가 설치돼 있다(`harness.json`의 `hooks`). Claude Code 세션은 응답을 끝낼 때마다 위 두 명령을 실행한다.
+`hooks.python`은 `python`이다. `python`이 없는 환경이면 개인 설정(`.claude/settings.local.json`)으로 끄고 `friction` 이슈로 남긴다.
+
+PR에는 `security` workflow가 `core/ci/gitlab/`의 Secret 탐지(차단)와 SAST(경고) 조각을 같은 이미지·스크립트로 실행한다
+(`.github/scripts/run_fragment.py`). 조각을 고치면 키트 PR에서 바로 그 조각이 돈다.
+PR이 workflow·러너·조각을 바꾸면 그 PR의 검사도 바뀐 정의로 돈다. 러너가 경고로 알리지만 막지는 않는다.
+이런 PR은 엄격이라 사람이 병합하는 것이 최종 방어선이다. 브랜치 보호에는 `secret-detection`·`sast` 필수 체크와
+"Require branches to be up to date before merging"을 함께 켠다(대상 브랜치가 앞서가도 검사가 다시 돌지 않는다).
 
 ## 자기 적용에서 얻은 불편은 이슈로
 
