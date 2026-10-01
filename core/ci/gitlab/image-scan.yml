@@ -1,0 +1,95 @@
+# harness: 컨테이너 이미지 스캔 (trivy image)
+#
+# 소비자의 빌드 job이 레지스트리에 올린 이미지 또는 artifact로 넘긴 이미지 tar 파일을 검사한다.
+# 이 조각은 이미지를 만들지 않는다(이미지 빌드는 runner 권한에 달려 있다). High·Critical이면서
+# 고친 버전이 있는 취약점이 하나라도 있으면 job이 실패한다. 입력이 없거나 둘 다 지정되면 실패한다.
+# 저장소의 `trivy.yaml`은 읽지 않는다(`--config /dev/null`). MR이 검사 설정을 바꿀 수 없게 한다.
+#
+# 사용법:
+#   include:
+#     - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<tag>/core/ci/gitlab/image-scan.yml
+#   variables:
+#     HARNESS_SCAN_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+#   harness-image-scan:
+#     needs: [build-image]   # 이미지를 올리는 로컬 job
+# 레지스트리가 없으면 빌드 job에서 Docker 형식 이미지 tar를 artifact로 넘긴다:
+#   variables:
+#     HARNESS_SCAN_ARCHIVE: image.tar
+#   harness-image-scan:
+#     needs:
+#       - job: build-image
+#         artifacts: true
+#
+# 변수:
+#   HARNESS_SCAN_IMAGE      검사할 레지스트리 이미지 참조(HARNESS_SCAN_ARCHIVE와 둘 중 하나 필수)
+#   HARNESS_SCAN_ARCHIVE    빌드 job의 artifact로 전달된 Docker 형식 이미지 tar 경로(둘 중 하나 필수)
+#   TRIVY_USERNAME·TRIVY_PASSWORD  다른 레지스트리의 자격 증명(보호·마스킹 변수로). 이미지 레지스트리와 묶이지
+#                           않으므로 그 레지스트리의 이미지에만 쓴다. 이미지가 `$CI_REGISTRY` 아래이고 이 값이
+#                           없으면 job 토큰(`CI_REGISTRY_USER`·`CI_REGISTRY_PASSWORD`)을 쓴다
+#   TRIVY_DB_REPOSITORY 등  trivy 표준 변수. 폐쇄망이면 DB 미러를 지정한다
+# 필요 조건: Docker executor runner, Docker Hub 접근, trivy DB 다운로드(mirror.gcr.io 또는 ghcr.io),
+#            GitLab 16.11 이상(`artifacts:access`). 이미지 참조 방식은 레지스트리 접근이 필요하다.
+#            tar 방식은 빌드 job의 artifact를 받도록 `needs:artifacts` 또는 stage를 설정한다.
+# 예외: 저장소 루트의 `.trivyignore`(CVE ID 한 줄씩, 사유와 재검토 시점을 주석으로). 의존성 감사와 같은 파일이다.
+#       이 MR이 예외 파일을 바꿨으면 로그 맨 앞에 경고로 보인다.
+# 리포트: trivy-image.json (30일 보관). 이미지의 환경 변수와 빌드 이력이 들어 있으므로 Developer 이상만 받는다.
+
+harness-image-scan:
+  stage: test
+  image:
+    name: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+    entrypoint: [""]
+  variables:
+    TRIVY_CACHE_DIR: .trivycache
+    TRIVY_NO_PROGRESS: "true"
+  cache:
+    key: harness-trivy
+    when: always
+    paths:
+      - .trivycache/
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  interruptible: true
+  script:
+    - |
+      set -euf
+      fail() { echo "harness: $*"; exit 2; }
+      git config --global --add safe.directory "$CI_PROJECT_DIR"
+      base=${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}
+      if [ -n "$base" ] && { git cat-file -e "$base^{commit}" 2>/dev/null || git fetch -q --depth=1 origin "$base" 2>/dev/null; }; then
+        changed=$(git diff --name-only "$base" HEAD -- .trivyignore trivy.yaml)
+        if [ -n "$changed" ]; then echo "harness 경고: 이 MR이 이미지 스캔 예외·설정 파일을 바꿨다. 리뷰에서 확인한다."; echo "$changed"; fi
+      else
+        echo "harness 경고: 기준 커밋을 가져오지 못해 예외 파일 변경을 확인하지 못했다."
+      fi
+      if [ -n "${HARNESS_SCAN_ARCHIVE:-}" ]; then
+        if [ -n "${HARNESS_SCAN_IMAGE:-}" ]; then fail "HARNESS_SCAN_IMAGE와 HARNESS_SCAN_ARCHIVE 중 하나만 지정한다."; fi
+        if [ ! -f "$HARNESS_SCAN_ARCHIVE" ] || [ ! -s "$HARNESS_SCAN_ARCHIVE" ]; then
+          fail "HARNESS_SCAN_ARCHIVE 파일이 없거나 비어 있다. 빌드 job의 artifact와 needs를 확인한다."
+        fi
+        set -- --input "$HARNESS_SCAN_ARCHIVE"
+      else
+        if [ -z "${HARNESS_SCAN_IMAGE:-}" ]; then
+          fail "HARNESS_SCAN_IMAGE 또는 HARNESS_SCAN_ARCHIVE를 지정한다."
+        fi
+        registry=${CI_REGISTRY:-}
+        if [ -n "$registry" ] && [ -z "${TRIVY_USERNAME:-}" ]; then
+          case "$HARNESS_SCAN_IMAGE" in
+            "$registry"/*)
+              export TRIVY_USERNAME="$CI_REGISTRY_USER" TRIVY_PASSWORD="$CI_REGISTRY_PASSWORD" ;;
+          esac
+        fi
+        set -- "$HARNESS_SCAN_IMAGE"
+      fi
+      code=0
+      trivy image --config /dev/null --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+        --format json --output trivy-image.json --exit-code 1 "$@" || code=$?
+      if [ ! -f trivy-image.json ]; then fail "trivy 리포트가 만들어지지 않았다(종료 코드 $code)."; fi
+      trivy convert --scanners vuln --format table trivy-image.json
+      exit "$code"
+  artifacts:
+    when: always
+    access: developer
+    expire_in: 30 days
+    paths:
+      - trivy-image.json

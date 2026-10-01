@@ -1,0 +1,151 @@
+# harness: 의존성 감사 (trivy fs)
+#
+# 저장소의 lockfile(`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `gradle.lockfile` 등 trivy가 읽는 형식)에서
+# 운영 의존성의 알려진 취약점을 찾는다. High·Critical이면서 고친 버전이 있는 취약점이 하나라도 있으면
+# job이 실패한다. 고친 버전이 없는 취약점과 dev·test 의존성(npm devDependencies, Gradle test 구성)은
+# 막지 않는다. 고칠 수 없는 것이나 운영에서 돌지 않는 것으로 MR을 계속 막으면 팀이 검사를 끈다.
+#
+# 검사가 돌지 않았는데 통과로 보이지 않게 앞뒤로 확인한다.
+# - `package.json`에 lockfile이 없으면 실패한다. 같은 디렉터리에 없으면 workspaces를 선언한 상위 디렉터리의
+#   lockfile만 인정한다(`package.json`의 `"workspaces"`, `pnpm-workspace.yaml`).
+# - `build.gradle(.kts)`가 있는데 같은 디렉터리에 `gradle.lockfile`이 없으면 실패한다.
+# - trivy가 읽지 못한 lockfile(깨진 파일 등)이 있으면 실패한다. 의존성이 하나도 없는 lockfile은 뺀다.
+# - 저장소의 `trivy.yaml`은 읽지 않는다(`--config /dev/null`). MR이 검사 설정을 바꿀 수 없게 한다.
+#
+# 사용법:
+#   include:
+#     - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<tag>/core/ci/gitlab/dependency-audit.yml
+#
+# 변수:
+#   HARNESS_AUDIT_SKIP_DIRS  검사에서 뺄 디렉터리(루트 기준 경로, 쉼표로 구분). 테스트 fixture 등.
+#                            glob 문자·`.`·`..`·절대 경로·빈 항목은 실패한다. 기본값 없음
+#   TRIVY_DB_REPOSITORY 등   trivy 표준 변수. 폐쇄망이면 DB 미러를 지정한다
+# 필요 조건: Docker executor runner, Docker Hub 접근, trivy DB 다운로드(mirror.gcr.io 또는 ghcr.io).
+# 예외: 저장소 루트의 `.trivyignore`(CVE ID 한 줄씩, 사유와 재검토 시점을 주석으로). 이미지 스캔과 같은 파일이다.
+#       이 MR이 예외 파일을 바꿨으면 로그 맨 앞에 경고로 보인다.
+# 리포트: trivy-dependency.json (30일 보관)
+
+harness-dependency-audit:
+  stage: test
+  image:
+    name: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+    entrypoint: [""]
+  variables:
+    TRIVY_CACHE_DIR: .trivycache
+    TRIVY_NO_PROGRESS: "true"
+  cache:
+    key: harness-trivy
+    when: always
+    paths:
+      - .trivycache/
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      exists:
+        - "**/package.json"
+        - "**/package-lock.json"
+        - "**/yarn.lock"
+        - "**/pnpm-lock.yaml"
+        - "**/build.gradle"
+        - "**/build.gradle.kts"
+        - "**/gradle.lockfile"
+  interruptible: true
+  script:
+    - |
+      set -euf
+      fail() { echo "harness: $*"; exit 2; }
+      git config --global --add safe.directory "$CI_PROJECT_DIR"
+      base=${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}
+      if [ -n "$base" ] && { git cat-file -e "$base^{commit}" 2>/dev/null || git fetch -q --depth=1 origin "$base" 2>/dev/null; }; then
+        changed=$(git diff --name-only "$base" HEAD -- .trivyignore trivy.yaml)
+        if [ -n "$changed" ]; then echo "harness 경고: 이 MR이 의존성 감사 예외·설정 파일을 바꿨다. 리뷰에서 확인한다."; echo "$changed"; fi
+      else
+        echo "harness 경고: 기준 커밋을 가져오지 못해 예외 파일 변경을 확인하지 못했다."
+      fi
+
+      skips=/tmp/harness-skip-dirs
+      : > "$skips"
+      set -- --config /dev/null --skip-dirs .trivycache
+      old_ifs=$IFS; IFS=,
+      for d in ${HARNESS_AUDIT_SKIP_DIRS:-}; do
+        d=$(printf '%s' "$d" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s#/*$##; s#^\./##')
+        case "$d" in
+          ""|.|/*|..|../*|*/..|*/../*|*[*?[]*)
+            IFS=$old_ifs; fail "HARNESS_AUDIT_SKIP_DIRS 항목이 잘못됐다: '$d' (루트 기준 디렉터리 경로만, glob·.·..·절대 경로·빈 항목 불가)" ;;
+        esac
+        printf '%s\n' "$d" >> "$skips"
+        set -- "$@" --skip-dirs "$d"
+      done
+      IFS=$old_ifs
+      skipped() {
+        while IFS= read -r d; do
+          case "$1" in "$d"|"$d"/*) return 0 ;; esac
+        done < "$skips"
+        return 1
+      }
+      has_npm_lock() { [ -f "$1/package-lock.json" ] || [ -f "$1/yarn.lock" ] || [ -f "$1/pnpm-lock.yaml" ]; }
+      is_workspace_root() { has_npm_lock "$1" && { grep -q '"workspaces"' "$1/package.json" 2>/dev/null || [ -f "$1/pnpm-workspace.yaml" ]; }; }
+
+      manifests=/tmp/harness-manifests; lockfiles=/tmp/harness-lockfiles; missing=/tmp/harness-missing
+      : > "$manifests"; : > "$lockfiles"; : > "$missing"
+      find . \( -name node_modules -o -name .git -o -name .trivycache \) -prune -o \( -type f -o -type l \) \
+        \( -name package.json -o -name build.gradle -o -name build.gradle.kts \
+           -o -name package-lock.json -o -name yarn.lock -o -name pnpm-lock.yaml -o -name gradle.lockfile \) -print |
+      while IFS= read -r f; do
+        f=${f#./}
+        if skipped "$f"; then continue; fi
+        case "$f" in
+          package.json|*/package.json|build.gradle|*/build.gradle|build.gradle.kts|*/build.gradle.kts) printf '%s\n' "$f" >> "$manifests" ;;
+          *) printf '%s\n' "$f" >> "$lockfiles" ;;
+        esac
+      done
+      while IFS= read -r f; do
+        dir=$(dirname "$f")
+        case "$f" in
+          package.json|*/package.json)
+            if has_npm_lock "$dir"; then continue; fi
+            d=$dir
+            while [ "$d" != "." ]; do
+              d=$(dirname "$d")
+              if is_workspace_root "$d"; then continue 2; fi
+            done
+            echo "$f: lockfile 없음(같은 디렉터리에도, workspaces를 선언한 상위 디렉터리에도)" >> "$missing" ;;
+          *)
+            if [ ! -f "$dir/gradle.lockfile" ]; then echo "$f: gradle.lockfile 없음" >> "$missing"; fi ;;
+        esac
+      done < "$manifests"
+      if [ -s "$missing" ]; then
+        echo "harness: lockfile이 없어 의존성을 검사할 수 없다."
+        cat "$missing"
+        echo "npm: package-lock.json을 커밋한다(npm install --package-lock-only). yarn.lock·pnpm-lock.yaml도 된다."
+        echo "Gradle: dependencyLocking { lockAllConfigurations() }를 켜고 ./gradlew dependencies --write-locks 결과를 커밋한다."
+        echo "검사 대상이 아닌 디렉터리는 HARNESS_AUDIT_SKIP_DIRS로 뺀다."
+        exit 1
+      fi
+
+      code=0
+      trivy fs "$@" --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+        --format json --output trivy-dependency.json --exit-code 1 . || code=$?
+      if [ ! -f trivy-dependency.json ]; then fail "trivy 리포트가 만들어지지 않았다(종료 코드 $code)."; fi
+      trivy convert --scanners vuln --format table trivy-dependency.json
+
+      # trivy는 읽지 못한 lockfile을 경고만 하고 넘어간다. dev 의존성까지 넣은 목록으로 읽힌 파일을 확인한다.
+      trivy fs "$@" --scanners vuln --include-dev-deps --list-all-pkgs --skip-db-update \
+        --format json --output /tmp/harness-inventory.json . >/dev/null 2>&1 || fail "lockfile 목록을 만들지 못했다."
+      unread=""
+      while IFS= read -r f; do
+        if grep -Fq "\"Target\": \"$f\"" /tmp/harness-inventory.json; then continue; fi
+        case "$f" in  # 의존성이 하나도 없는 lockfile은 trivy가 대상으로 잡지 않는다
+          *gradle.lockfile) if ! grep -v '^#' "$f" | grep -v '^empty=' | grep -q .; then continue; fi ;;
+          *package-lock.json) if grep -q '"lockfileVersion"' "$f" && ! grep -Eq '"node_modules/|"resolved"' "$f"; then continue; fi ;;
+          *yarn.lock) if grep -Eq '^(# yarn lockfile v1|__metadata:)' "$f" && ! grep -Eq '^[[:space:]]+(resolved|resolution)' "$f"; then continue; fi ;;
+          *pnpm-lock.yaml) if grep -q '^lockfileVersion:' "$f" && ! grep -q 'resolution:' "$f"; then continue; fi ;;
+        esac
+        unread="$unread $f"
+      done < "$lockfiles"
+      if [ -n "$unread" ]; then fail "trivy가 읽지 못한 lockfile이 있어 검사하지 못했다:$unread"; fi
+      exit "$code"
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - trivy-dependency.json

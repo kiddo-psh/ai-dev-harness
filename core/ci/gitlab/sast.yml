@@ -1,0 +1,99 @@
+# harness: SAST (semgrep)
+#
+# 이 MR이 새로 만든 발견만 보고한다(`--baseline-commit`으로 기준 커밋에 이미 있던 발견은 뺀다).
+# merged results 파이프라인은 대상 브랜치의 현재 커밋을 기준으로 삼아 대상에서만 생긴 발견을 뺀다.
+# 지금은 경고 단계다. 발견이 있으면 job은 경고(노란색)로 끝나고 파이프라인은 통과한다.
+# 도구 오류(규칙 다운로드 실패, 설정 오류, MR 변수 없음)는 경고가 아니라 실패다. 경고 job이 오류까지
+# 삼키면 검사가 돌지 않았는데 돈 것처럼 보인다. 측정(M4) 뒤에 차단으로 올린다.
+#
+# 로그와 리포트에는 규칙 ID·경로·줄 번호만 남긴다. semgrep의 기본 출력은 걸린 코드 줄을 그대로 보여 주어
+# Secret 규칙에 걸린 값이 로그에 남는다. 검사한 파일 수도 출력하고, MR이 파일을 바꿨는데 0개면 경고한다.
+#
+# 사용법:
+#   include:
+#     - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<tag>/core/ci/gitlab/sast.yml
+#
+# 변수:
+#   HARNESS_SEMGREP_CONFIG  semgrep `--config` 값(기본 `p/default`). 공백으로 여러 개, 저장소 안의 규칙 파일도 된다.
+#                           레지스트리 규칙은 버전이 고정되지 않는다. 고정이 필요하면 규칙 파일을 쓴다
+# 필요 조건: Docker executor runner, Docker Hub 접근, 레지스트리 규칙을 쓰면 semgrep.dev 접근. `GIT_DEPTH`는 0이어야 한다.
+#            사용 지표는 보내지 않는다(`--metrics=off`).
+# 예외: 코드에 `# nosemgrep: <규칙 ID>` 주석, 경로는 `.semgrepignore`. 이 MR이 `.semgrepignore`나
+#       HARNESS_SEMGREP_CONFIG로 지정한 저장소 규칙 파일을 바꿨으면 로그 맨 앞에 경고로 보인다.
+# 리포트: semgrep-report.json (코드 줄·매칭 값을 뺀 요약, 30일 보관)
+
+harness-sast:
+  stage: test
+  image:
+    name: semgrep/semgrep:1.178.0@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+    entrypoint: [""]
+  variables:
+    GIT_DEPTH: "0"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  interruptible: true
+  allow_failure:
+    exit_codes: [3]
+  script:
+    - |
+      set -euf
+      fail() { echo "harness: $*"; exit 2; }
+      git config --global --add safe.directory "$CI_PROJECT_DIR"
+      base=${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}
+      if [ -z "$base" ]; then fail "MR 기준 커밋 변수가 비어 있어 범위를 정할 수 없다."; fi
+      git cat-file -e "$base^{commit}" 2>/dev/null || fail "기준 커밋 $base 이 저장소에 없다. GIT_DEPTH가 0인지 확인한다."
+      git merge-base --is-ancestor "$base" HEAD || fail "기준 커밋 $base 이 HEAD의 조상이 아니다."
+      changed=$(git diff --name-only "$base" HEAD -- .semgrepignore)
+      if [ -n "$changed" ]; then echo "harness 경고: 이 MR이 .semgrepignore를 바꿨다. 리뷰에서 확인한다."; fi
+      set --
+      for c in ${HARNESS_SEMGREP_CONFIG:-p/default}; do
+        if [ -L "$c" ]; then fail "저장소 규칙 파일에 심볼릭 링크를 쓸 수 없다: $c"; fi
+        if [ -f "$c" ] || [ -d "$c" ]; then
+          config_changed=$(git diff --name-only "$base" HEAD -- "$c")
+          if [ -n "$config_changed" ]; then
+            echo "harness 경고: 이 MR이 Semgrep 규칙 파일을 바꿨다. 리뷰에서 확인한다."
+            echo "$config_changed"
+          fi
+        fi
+        set -- "$@" --config "$c"
+      done
+      if [ "$#" -eq 0 ]; then fail "HARNESS_SEMGREP_CONFIG에 규칙이 없다."; fi
+      code=0
+      semgrep scan "$@" --baseline-commit "$base" --metrics=off --error \
+        --json-output=/tmp/semgrep-raw.json . >/dev/null || code=$?  # 대상 경로를 주지 않으면 이미지가 /src를 찾는다
+      case "$code" in
+        0|1) ;;
+        *) fail "semgrep 오류(종료 코드 $code). 검사가 끝나지 않았다." ;;
+      esac
+      HARNESS_CHANGED_FILES=$(git diff --name-only "$base" HEAD | wc -l)
+      export HARNESS_CHANGED_FILES
+      summary=0
+      python3 - <<'PY' || summary=$?
+      import json, os, sys
+      data = json.load(open("/tmp/semgrep-raw.json", encoding="utf-8"))
+      results = data.get("results", [])
+      scanned = len(data.get("paths", {}).get("scanned", []))
+      rows = [{"check_id": r.get("check_id"), "path": r.get("path"), "line": r.get("start", {}).get("line"),
+               "severity": r.get("extra", {}).get("severity")} for r in results]
+      json.dump({"version": data.get("version"), "scanned": scanned, "results": rows,
+                 "errors": [e.get("type", "") for e in data.get("errors", [])]},
+                open("semgrep-report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+      print(f"harness: semgrep이 파일 {scanned}개를 검사했다. 새 발견 {len(rows)}건.")
+      for row in rows:
+          print(f"  {row['path']}:{row['line']}  {row['check_id']}  ({row['severity']})")
+      if rows:
+          sys.exit(3)
+      if scanned == 0 and int(os.environ["HARNESS_CHANGED_FILES"]) > 0:
+          print("harness 경고: MR이 파일을 바꿨는데 검사한 파일이 없다. .semgrepignore와 언어 지원을 확인한다.")
+          sys.exit(3)
+      PY
+      case "$summary" in
+        0) if [ "$code" -eq 1 ]; then fail "semgrep은 발견을 보고했는데 요약에 없다."; fi ;;
+        3) echo "harness: 경고 단계라 파이프라인은 통과한다."; exit 3 ;;
+        *) fail "semgrep 결과를 읽지 못했다." ;;
+      esac
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - semgrep-report.json
