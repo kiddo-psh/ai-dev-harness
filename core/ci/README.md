@@ -72,7 +72,7 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 | `secret-detection` | MR 커밋에서 Secret 발견(뒤 커밋에서 지웠어도, merge 커밋에서 넣었어도) | `.gitleaksignore`(Fingerprint), `.gitleaks.toml`(`[extend] useDefault = true` 필수) |
 | `dependency-audit` | 운영 의존성의 High·Critical이면서 고친 버전이 있는 취약점. lockfile이 없는 `package.json`·`build.gradle(.kts)`, trivy가 읽지 못한 lockfile | `.trivyignore`, `HARNESS_AUDIT_SKIP_DIRS` |
 | `image-scan` | 이미지의 High·Critical이면서 고친 버전이 있는 취약점. 이미지 참조·tar 입력이 모두 없거나 둘 다 지정됨, tar 파일 누락·빈 파일 | `.trivyignore` |
-| `sast` | 경고만(노란색). 이 MR이 새로 만든 발견만 보고한다. 측정(M4) 뒤 차단으로 올린다 | `# nosemgrep: <규칙 ID>`, `.semgrepignore` |
+| `sast` | 경고만(노란색). 이 MR이 새로 만든 발견만 보고한다. merged results에서는 대상 브랜치 현재 커밋을 기준으로 삼는다. 측정(M4) 뒤 차단으로 올린다 | `# nosemgrep: <규칙 ID>`, `.semgrepignore` |
 
 - **도구 오류는 실패다.** DB·규칙 다운로드 실패, 설정 오류, MR 변수 없음, 얕은 clone, 기준 커밋 없음이 모두
   해당한다. 검사가 돌지 않았는데 통과로 보이지 않게 한다. semgrep도 발견만 경고로 허용한다. MR이 파일을 바꿨는데
@@ -82,7 +82,8 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 - **MR이 검사 설정을 바꿀 수 없다.** 저장소의 `trivy.yaml`은 읽지 않는다. `.gitleaks.toml`이 기본 규칙을 끄면
   실패한다. `HARNESS_AUDIT_SKIP_DIRS`는 glob·`.`·`..`·절대 경로를 받지 않는다.
 - **예외는 리뷰로 통제한다.** 이 MR이 예외 파일(`.gitleaksignore`, `.gitleaks.toml`, `.trivyignore`,
-  `.semgrepignore`, `trivy.yaml`)을 바꿨으면 각 job 로그 맨 앞에 경고가 나온다. 실패로 만들지는 않는다.
+  `.semgrepignore`, `trivy.yaml`)이나 `HARNESS_SEMGREP_CONFIG`가 가리키는 저장소 규칙 파일을 바꿨으면
+  각 job 로그 맨 앞에 경고가 나온다. 실패로 만들지는 않는다.
   예외 파일을 CODEOWNERS에 올려 보안 담당 승인을 받게 한다.
 
   ```text

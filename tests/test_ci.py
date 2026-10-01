@@ -73,6 +73,9 @@ class CiFragmentTest(unittest.TestCase):
         self.assertIn('fail() { echo "harness: $*"; exit 2; }', body)
         self.assertEqual(len(re.findall(r"exit 3", body)), 1)  # 경고는 요약 단계 한 곳에서만
         self.assertIn(">/dev/null", body)  # 코드 줄을 그대로 보여 주는 기본 출력은 버린다
+        self.assertIn("CI_MERGE_REQUEST_TARGET_BRANCH_SHA", body)
+        self.assertIn('git merge-base --is-ancestor "$base" HEAD', body)
+        self.assertIn('git diff --name-only "$base" HEAD -- "$c"', body)
 
     def test_no_error_swallowing(self):
         for name in FRAGMENTS:

@@ -1,6 +1,7 @@
 # harness: SAST (semgrep)
 #
 # 이 MR이 새로 만든 발견만 보고한다(`--baseline-commit`으로 기준 커밋에 이미 있던 발견은 뺀다).
+# merged results 파이프라인은 대상 브랜치의 현재 커밋을 기준으로 삼아 대상에서만 생긴 발견을 뺀다.
 # 지금은 경고 단계다. 발견이 있으면 job은 경고(노란색)로 끝나고 파이프라인은 통과한다.
 # 도구 오류(규칙 다운로드 실패, 설정 오류, MR 변수 없음)는 경고가 아니라 실패다. 경고 job이 오류까지
 # 삼키면 검사가 돌지 않았는데 돈 것처럼 보인다. 측정(M4) 뒤에 차단으로 올린다.
@@ -17,8 +18,8 @@
 #                           레지스트리 규칙은 버전이 고정되지 않는다. 고정이 필요하면 규칙 파일을 쓴다
 # 필요 조건: Docker executor runner, Docker Hub 접근, 레지스트리 규칙을 쓰면 semgrep.dev 접근. `GIT_DEPTH`는 0이어야 한다.
 #            사용 지표는 보내지 않는다(`--metrics=off`).
-# 예외: 코드에 `# nosemgrep: <규칙 ID>` 주석, 경로는 `.semgrepignore`. 이 MR이 `.semgrepignore`를 바꿨으면
-#       로그 맨 앞에 경고로 보인다.
+# 예외: 코드에 `# nosemgrep: <규칙 ID>` 주석, 경로는 `.semgrepignore`. 이 MR이 `.semgrepignore`나
+#       HARNESS_SEMGREP_CONFIG로 지정한 저장소 규칙 파일을 바꿨으면 로그 맨 앞에 경고로 보인다.
 # 리포트: semgrep-report.json (코드 줄·매칭 값을 뺀 요약, 30일 보관)
 
 harness-sast:
@@ -38,13 +39,24 @@ harness-sast:
       set -euf
       fail() { echo "harness: $*"; exit 2; }
       git config --global --add safe.directory "$CI_PROJECT_DIR"
-      base=${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}
-      if [ -z "$base" ]; then fail "CI_MERGE_REQUEST_DIFF_BASE_SHA가 비어 있어 MR 범위를 정할 수 없다."; fi
+      base=${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}
+      if [ -z "$base" ]; then fail "MR 기준 커밋 변수가 비어 있어 범위를 정할 수 없다."; fi
       git cat-file -e "$base^{commit}" 2>/dev/null || fail "기준 커밋 $base 이 저장소에 없다. GIT_DEPTH가 0인지 확인한다."
+      git merge-base --is-ancestor "$base" HEAD || fail "기준 커밋 $base 이 HEAD의 조상이 아니다."
       changed=$(git diff --name-only "$base" HEAD -- .semgrepignore)
       if [ -n "$changed" ]; then echo "harness 경고: 이 MR이 .semgrepignore를 바꿨다. 리뷰에서 확인한다."; fi
       set --
-      for c in ${HARNESS_SEMGREP_CONFIG:-p/default}; do set -- "$@" --config "$c"; done
+      for c in ${HARNESS_SEMGREP_CONFIG:-p/default}; do
+        if [ -L "$c" ]; then fail "저장소 규칙 파일에 심볼릭 링크를 쓸 수 없다: $c"; fi
+        if [ -f "$c" ] || [ -d "$c" ]; then
+          config_changed=$(git diff --name-only "$base" HEAD -- "$c")
+          if [ -n "$config_changed" ]; then
+            echo "harness 경고: 이 MR이 Semgrep 규칙 파일을 바꿨다. 리뷰에서 확인한다."
+            echo "$config_changed"
+          fi
+        fi
+        set -- "$@" --config "$c"
+      done
       if [ "$#" -eq 0 ]; then fail "HARNESS_SEMGREP_CONFIG에 규칙이 없다."; fi
       code=0
       semgrep scan "$@" --baseline-commit "$base" --metrics=off --error \
