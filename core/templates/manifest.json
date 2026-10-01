@@ -15,9 +15,9 @@
     {"src": "merge-request/Default.md", "dest": ".gitlab/merge_request_templates/Default.md", "self": false, "platform": "gitlab"},
     {"src": "merge-request/Release.md", "dest": ".gitlab/merge_request_templates/Release.md", "self": false, "platform": "gitlab"},
     {"src": "merge-request/Default.md", "dest": ".github/PULL_REQUEST_TEMPLATE.md", "self": true, "platform": "github"},
-    {"base": "hooks", "src": "settings.template.json", "dest": ".claude/settings.json", "self": false},
-    {"base": "hooks", "src": "protect-paths.py", "dest": ".claude/hooks/protect-paths.py", "self": false, "render": false},
-    {"base": "hooks", "src": "stop-verify.py", "dest": ".claude/hooks/stop-verify.py", "self": false, "render": false},
-    {"base": "hooks", "src": "harness_common.py", "dest": ".claude/hooks/harness_common.py", "self": false, "render": false}
+    {"base": "hooks", "src": "settings.template.json", "dest": ".claude/settings.json", "self": true},
+    {"base": "hooks", "src": "protect-paths.py", "dest": ".claude/hooks/protect-paths.py", "self": true, "render": false},
+    {"base": "hooks", "src": "stop-verify.py", "dest": ".claude/hooks/stop-verify.py", "self": true, "render": false},
+    {"base": "hooks", "src": "harness_common.py", "dest": ".claude/hooks/harness_common.py", "self": true, "render": false}
   ]
 }

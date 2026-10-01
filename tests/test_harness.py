@@ -377,10 +377,6 @@ class HookInstallTest(unittest.TestCase):
         self.assertEqual(decision, "deny")
         self.assertFalse((target / ".claude" / "hooks" / "__pycache__").exists())  # 대상에 부산물을 남기지 않는다
 
-    def test_kit_self_has_no_hooks_yet(self):
-        outputs = harness.render_all(harness.load_config(harness.KIT_ROOT / "harness.json"), self_mode=True)
-        self.assertFalse(any(dest.startswith(".claude/") for dest in outputs))  # 자기 적용은 M1-7
-
 
 class AreaCheckTest(AreaTestBase):
     def setUp(self):
@@ -448,6 +444,23 @@ class SelfApplicationTest(unittest.TestCase):
     def test_self_check_is_clean(self):
         code, out = run(["check", "--self"])
         self.assertEqual(code, 0, out)
+
+    def test_hooks_in_self_manifest(self):
+        config = harness.load_config(ROOT / "harness.json")
+        outputs = harness.render_all(config, self_mode=True)
+        for dest in (".claude/settings.json", ".claude/hooks/protect-paths.py",
+                     ".claude/hooks/stop-verify.py", ".claude/hooks/harness_common.py"):
+            self.assertIn(dest, outputs)
+        commands = [hook["command"] for groups in json.loads(outputs[".claude/settings.json"])["hooks"].values()
+                    for group in groups for hook in group["hooks"]]
+        self.assertEqual(len(commands), 2)
+        for command in commands:
+            self.assertTrue(command.startswith('python "'), command)  # Windows에서 python3은 Store 별칭이다
+        # 리뷰 #16 B-F9: 종료 검증을 의미 없는 명령으로 약화하면 잡는다. 기준은 docs/contributing.md "검증"
+        self.assertEqual(config["hooks"]["stop_verify"],
+                         ["python -m unittest discover tests -q", "python bin/harness.py check --self"])
+        verify = (ROOT / "docs" / "contributing.md").read_text(encoding="utf-8")
+        self.assertIn("python -m unittest discover tests -v\npython bin/harness.py check --self\n", verify)
 
 
 if __name__ == "__main__":

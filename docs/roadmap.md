@@ -42,8 +42,8 @@
 - [x] M1-3 `harness.py init/check`, 자기 적용(`--self`), 드리프트 검사, 단위 테스트, GitHub Actions 리허설
 - [x] M1-4 영역 `AGENTS.md` 템플릿 (`core/templates/AREA-AGENTS.md`): 3단계 판정표·트리거·플랜/구현/리뷰 절차·W1/W2 편성을 스택 중립으로 정리. `init --area <dir> --verify-cmd ...`로 생성
 - [x] M1-5 hooks 1차: `.claude/settings.json` 생성, 보호 경로(계약 문서·마이그레이션·CI 정의·lock 파일) 수정 시 차단 또는 경고, 세션 종료 시 지정 검증 명령 실행 (#5, 후속 #8)
-- [ ] M1-6 보안 검사 CI 조각 4종 (`core/ci/gitlab/`): Secret 탐지(gitleaks), 의존성 감사(npm audit · OWASP dependency-check 또는 Gradle 대안), SAST(semgrep), 컨테이너 이미지 스캔(trivy). 각각 `include: remote:`로 끌어 쓸 수 있는 단독 YAML
-- [ ] M1-7 키트 저장소에 M1-5·M1-6을 자기 적용 (GitHub Actions에는 같은 도구를 직접 호출)
+- [x] M1-6 보안 검사 CI 조각 4종 (`core/ci/gitlab/`): Secret 탐지(gitleaks), 의존성 감사(npm audit · OWASP dependency-check 또는 Gradle 대안), SAST(semgrep), 컨테이너 이미지 스캔(trivy). 각각 `include: remote:`로 끌어 쓸 수 있는 단독 YAML
+- [x] M1-7 키트 저장소에 M1-5·M1-6을 자기 적용 (GitHub Actions에는 같은 도구를 직접 호출) (#16)
 - [ ] M1-8 리허설 확장: 리허설 대상에 hooks 설치와 보안 검사 실행까지 포함
 - [x] M1-9 설치 가이드 초안 (`docs/install.md`): 새 저장소·기존 저장소·끄는 법, Windows의 `hooks.python` 설정(`python3`이 Microsoft Store 별칭이면 hooks가 조용히 꺼진다)
 - [ ] M1-10 적용 전 계약 리뷰(엄격): 다음 프로젝트에 붙이기 전에 소비자가 생기면 바꾸기 비싼 표면을 한 번에 본다. `harness.json` 스키마(`areas` 포함), CLI 인자, 자리표시자 이름, 판정 식별자(`lite`·`standard`·`strict`), 기본 트리거·리뷰 관점을 생성 시점에 설정으로 굳힐지(#1 리뷰 F2), `harness_version` 올림 정책(#1 리뷰 F5), `hooks` 스키마와 매니페스트 `base`·`render` 필드, 자리표시자 `hook_python`, 기존 `.claude/settings.json` 병합 여부(#5 Q3), `check`가 관리 디렉터리(`.claude/hooks/` 등)의 여분 파일도 보고할지(#5 리뷰 R18), CI 조각의 소비자 표면(job 이름 `harness-*`, 변수 `HARNESS_SCAN_IMAGE`·`HARNESS_SCAN_ARCHIVE`·`HARNESS_SEMGREP_CONFIG`·`HARNESS_AUDIT_SKIP_DIRS`, 조각 경로, 태그 참조 방식, #12), Jenkins 지원 시 공통 검사 정책과 CI별 구현의 경계
