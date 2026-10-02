@@ -56,7 +56,7 @@
 - [ ] M2-2 MR 본문 lint CI 조각: `Closes`, 검증 절(방법·결과·미검증), 영향 범위 체크박스 중 하나 이상 필수. 엄격 판정이면 플랜 요약·리뷰 결과 절 필수. diff에 `plans/` 경로가 있거나 `.gitignore`에 `/plans/`가 없으면 실패(영역 `AGENTS.md` 5장의 `[ci]` 규칙)
 - [ ] M2-3 플랜·리뷰 파일 lint: 템플릿 절 누락, 측정 칸 빈칸, 인수 테스트 표 0행 검출 (로컬 hooks와 CI 양쪽)
 - [ ] M2-4 Claude MR 리뷰 CI 조각 이관: feelm의 수집·생성·게시 스크립트를 `core/ci/claude-review/`로 옮기고 프로젝트 고유값을 설정으로 분리. 도구 없는 실행·네트워크 가드 문서화
-- [ ] M2-5 리뷰 프롬프트 단일화: 로컬 W1/W2 리뷰 관점과 CI Claude 리뷰 시스템 프롬프트를 한 파일(`core/templates/review-perspectives.md`)에서 생성
+- [x] M2-5 리뷰 프롬프트 단일화: 로컬 W1/W2 리뷰 관점과 CI Claude 리뷰 시스템 프롬프트를 한 파일(`core/templates/review-perspectives.md`)에서 생성. CI 프롬프트 파일은 M2-4에서 `review_perspectives_ci`로 렌더 (#29)
 - [ ] M2-6 CI 실패 원인 분류기 1차: job 로그를 규칙으로 분류해 JSON 산출 (측정 3번)
 
 ### M3. Scaffold (5~6주차)
