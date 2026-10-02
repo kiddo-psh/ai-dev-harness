@@ -46,7 +46,7 @@
 - [x] M1-7 키트 저장소에 M1-5·M1-6을 자기 적용 (GitHub Actions에는 같은 도구를 직접 호출) (#16)
 - [x] M1-8 리허설 확장: 리허설 대상에 hooks 설치와 보안 검사 실행까지 포함 (#18)
 - [x] M1-9 설치 가이드 초안 (`docs/install.md`): 새 저장소·기존 저장소·끄는 법, Windows의 `hooks.python` 설정(`python3`이 Microsoft Store 별칭이면 hooks가 조용히 꺼진다)
-- [ ] M1-10 적용 전 계약 리뷰(엄격): 다음 프로젝트에 붙이기 전에 소비자가 생기면 바꾸기 비싼 표면을 한 번에 본다. `harness.json` 스키마(`areas` 포함), CLI 인자, 자리표시자 이름, 판정 식별자(`lite`·`standard`·`strict`), 기본 트리거·리뷰 관점을 생성 시점에 설정으로 굳힐지(#1 리뷰 F2), `harness_version` 올림 정책(#1 리뷰 F5), `hooks` 스키마와 매니페스트 `base`·`render` 필드, 자리표시자 `hook_python`, 기존 `.claude/settings.json` 병합 여부(#5 Q3), `check`가 관리 디렉터리(`.claude/hooks/` 등)의 여분 파일도 보고할지(#5 리뷰 R18), CI 조각의 소비자 표면(job 이름 `harness-*`, 변수 `HARNESS_SCAN_IMAGE`·`HARNESS_SCAN_ARCHIVE`·`HARNESS_SEMGREP_CONFIG`·`HARNESS_AUDIT_SKIP_DIRS`, 조각 경로, 태그 참조 방식, #12), Jenkins 지원 시 공통 검사 정책과 CI별 구현의 경계
+- [x] M1-10 적용 전 계약 리뷰(엄격): 다음 프로젝트에 붙이기 전에 소비자가 생기면 바꾸기 비싼 표면을 한 번에 본다. `harness.json` 스키마(`areas` 포함), CLI 인자, 자리표시자 이름, 판정 식별자(`lite`·`standard`·`strict`), 기본 트리거·리뷰 관점을 생성 시점에 설정으로 굳힐지(#1 리뷰 F2), `harness_version` 올림 정책(#1 리뷰 F5), `hooks` 스키마와 매니페스트 `base`·`render` 필드, 자리표시자 `hook_python`, 기존 `.claude/settings.json` 병합 여부(#5 Q3), `check`가 관리 디렉터리(`.claude/hooks/` 등)의 여분 파일도 보고할지(#5 리뷰 R18), CI 조각의 소비자 표면(job 이름 `harness-*`, 변수 `HARNESS_SCAN_IMAGE`·`HARNESS_SCAN_ARCHIVE`·`HARNESS_SEMGREP_CONFIG`·`HARNESS_AUDIT_SKIP_DIRS`, 조각 경로, 태그 참조 방식, #12), Jenkins 지원 시 공통 검사 정책과 CI별 구현의 경계 (#20)
 
 ### M2. 판정과 리뷰 (3~4주차)
 
@@ -56,7 +56,7 @@
 - [ ] M2-2 MR 본문 lint CI 조각: `Closes`, 검증 절(방법·결과·미검증), 영향 범위 체크박스 중 하나 이상 필수. 엄격 판정이면 플랜 요약·리뷰 결과 절 필수. diff에 `plans/` 경로가 있거나 `.gitignore`에 `/plans/`가 없으면 실패(영역 `AGENTS.md` 5장의 `[ci]` 규칙)
 - [ ] M2-3 플랜·리뷰 파일 lint: 템플릿 절 누락, 측정 칸 빈칸, 인수 테스트 표 0행 검출 (로컬 hooks와 CI 양쪽)
 - [ ] M2-4 Claude MR 리뷰 CI 조각 이관: feelm의 수집·생성·게시 스크립트를 `core/ci/claude-review/`로 옮기고 프로젝트 고유값을 설정으로 분리. 도구 없는 실행·네트워크 가드 문서화
-- [ ] M2-5 리뷰 프롬프트 단일화: 로컬 W1/W2 리뷰 관점과 CI Claude 리뷰 시스템 프롬프트를 한 파일(`core/templates/review-perspectives.md`)에서 생성
+- [x] M2-5 리뷰 프롬프트 단일화: 로컬 W1/W2 리뷰 관점과 CI Claude 리뷰 시스템 프롬프트를 한 파일(`core/templates/review-perspectives.md`)에서 생성. CI 프롬프트 파일은 M2-4에서 `review_perspectives_ci`로 렌더 (#29)
 - [x] M2-6 CI 실패 원인 분류기 1차: job 로그를 규칙으로 분류해 JSON 산출 (측정 3번) (#28)
 
 ### M3. Scaffold (5~6주차)

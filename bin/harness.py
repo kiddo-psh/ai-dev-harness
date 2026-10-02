@@ -114,6 +114,7 @@ classify_ci = importlib.util.module_from_spec(_CLASSIFY_SPEC)
 _CLASSIFY_SPEC.loader.exec_module(classify_ci)
 
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
+PLACEHOLDER_NAME = re.compile(r"[a-z_]+")
 
 
 class HarnessError(Exception):
@@ -226,6 +227,10 @@ def build_context(config: dict) -> dict:
     docs = config.get("related_docs") or []
     ctx["related_docs"] = "\n".join(f"- [{d['label']}]({d['path']})" for d in docs)
     ctx["hook_python"] = (config.get("hooks") or {}).get("python", hooks_common.DEFAULT_PYTHON)
+    for include in load_includes():  # 다른 파일의 절을 자리표시자 값으로 넣는다. 포함 내용도 같은 컨텍스트로 렌더한다
+        if include["name"] in ctx:
+            raise HarnessError(f"매니페스트 include 이름이 기존 자리표시자와 겹친다: {include['name']}")
+        ctx[include["name"]] = render(include_text(include), ctx, source=f"{include['src']}#{include['name']}")
     return ctx
 
 
@@ -274,7 +279,7 @@ def render(text: str, ctx: dict, source: str = "<template>") -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_manifest() -> list[dict]:
+def read_manifest() -> dict:
     if not MANIFEST_PATH.is_file():
         raise HarnessError(f"매니페스트가 없다: {MANIFEST_PATH}")
     try:
@@ -283,6 +288,74 @@ def load_manifest() -> list[dict]:
         raise HarnessError(f"매니페스트를 읽을 수 없다: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("files"), list):
         raise HarnessError("매니페스트 files는 목록이어야 한다")
+    return data
+
+
+def valid_template_path(value) -> bool:
+    return (isinstance(value, str) and bool(value) and "\\" not in value and not value.startswith("/") and
+            all(part not in ("", ".", "..") for part in value.split("/")) and not re.match(r"^[A-Za-z]:", value))
+
+
+def load_includes() -> list[dict]:
+    """매니페스트 includes: 원본 파일(templates 기준)의 `## 절`을 골라 자리표시자 값으로 쓴다."""
+    includes = read_manifest().get("includes", [])
+    if not isinstance(includes, list):
+        raise HarnessError("매니페스트 includes는 목록이어야 한다")
+    seen = set()
+    for entry in includes:
+        if not isinstance(entry, dict) or not {"name", "src", "sections"} <= set(entry) <= {"name", "src", "sections", "tag"}:
+            raise HarnessError("매니페스트 include 항목은 name·src·sections(선택 tag)를 가져야 한다")
+        if "tag" in entry and (not isinstance(entry["tag"], str) or not re.fullmatch(r"[^\[\]\s]+", entry["tag"])):
+            raise HarnessError(f"매니페스트 include tag가 잘못됐다: {entry['tag']!r}")
+        name = entry["name"]
+        if not isinstance(name, str) or not PLACEHOLDER_NAME.fullmatch(name):
+            raise HarnessError(f"매니페스트 include 이름은 소문자와 밑줄만 쓴다: {name!r}")
+        if name.startswith("area_"):  # 영역 자리표시자 이름공간. 영역 문서에서 조용히 가려지는 것을 막는다
+            raise HarnessError(f"매니페스트 include 이름은 area_로 시작할 수 없다: {name}")
+        if name in seen:
+            raise HarnessError(f"매니페스트 include 이름이 중복된다: {name}")
+        seen.add(name)
+        if not valid_template_path(entry["src"]):
+            raise HarnessError(f"매니페스트 include src 경로가 잘못됐다: {entry['src']!r}")
+        sections = entry["sections"]
+        if not isinstance(sections, list) or not sections or any(
+                not isinstance(s, str) or not s.strip() for s in sections):
+            raise HarnessError(f"매니페스트 include {name}의 sections는 비어 있지 않은 문자열 목록이어야 한다")
+    return includes
+
+
+def markdown_sections(text: str) -> dict[str, str]:
+    """`## 제목` 단위 본문. 첫 `##` 앞의 설명은 버린다."""
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in text.replace("\r\n", "\n").split("\n"):
+        if line.startswith("## "):
+            current = line[3:].strip()
+            if current in sections:
+                raise HarnessError(f"절 제목이 중복된다: {current}")
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+    return {name: "\n".join(lines).strip("\n") for name, lines in sections.items()}
+
+
+def include_text(include: dict) -> str:
+    path = TEMPLATES_DIR / include["src"]
+    if not path.is_file():
+        raise HarnessError(f"include 원본이 없다: {path}")
+    sections = markdown_sections(path.read_text(encoding="utf-8"))
+    missing = [s for s in include["sections"] if s not in sections]
+    if missing:
+        raise HarnessError(f"{include['src']}에 절이 없다: {', '.join(missing)}")
+    text = "\n".join(sections[s] for s in include["sections"])  # 절 본문은 목록이라 한 목록으로 잇는다
+    if "tag" in include:
+        text = "\n".join(f"{line} [{include['tag']}]" if line.startswith("- ") else line
+                         for line in text.split("\n"))
+    return text
+
+
+def load_manifest() -> list[dict]:
+    data = read_manifest()
     seen = set()
     for entry in data["files"]:
         if not isinstance(entry, dict) or not {"src", "dest"} <= set(entry) or set(entry) - {"src", "dest", "base", "platform", "self", "render"}:
@@ -292,9 +365,7 @@ def load_manifest() -> list[dict]:
             raise HarnessError(f"매니페스트 base는 {sorted(SOURCE_DIRS)} 중 하나여야 한다: {base}")
         for key in ("src", "dest"):
             value = entry[key]
-            if (not isinstance(value, str) or not value or "\\" in value or
-                    value.startswith("/") or any(part in ("", ".", "..") for part in value.split("/")) or
-                    re.match(r"^[A-Za-z]:", value)):
+            if not valid_template_path(value):
                 raise HarnessError(f"매니페스트 {key} 경로가 잘못됐다: {value!r}")
         if entry["dest"] in seen:
             raise HarnessError(f"매니페스트 목적지가 중복된다: {entry['dest']}")
