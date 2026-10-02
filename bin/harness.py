@@ -13,6 +13,8 @@
                                              # 변경 파일로 경량·표준·엄격(lite·standard·strict) 판정
     python bin/harness.py classify-ci --jobs <jobs.json> [--trace-dir <dir>] [--out <file.jsonl>]
                                              # 실패한 CI job의 원인 범주를 JSONL로 산출(trace는 <job_id>.log)
+    python bin/harness.py lint-plans [<key>] [--target <dir> | --self]
+                                             # plans/의 플랜·리뷰 파일 검사(실패 1, 경고만이면 0)
     python bin/harness.py version
 """
 
@@ -677,6 +679,228 @@ def cmd_classify_ci(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# 플랜·리뷰 파일 lint (M2-3). 절 목록과 자리표시자는 템플릿에서 읽어 템플릿 변경을 따라간다
+# ---------------------------------------------------------------------------
+
+PLAN_TEMPLATE = "docs/templates/plan.md"
+REVIEW_TEMPLATE = "docs/templates/review.md"
+LINT_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+UNCHOSEN_TIER = re.compile(r"엄격\s*\|\s*표준\s*\|\s*경량")
+TEMPLATE_PLACEHOLDER = re.compile(r"<[^<>\n]+>")
+TABLE_DELIMITER = re.compile(r"\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*")
+CELL_SPLIT = re.compile(r"(?<!\\)\|")
+FENCE = re.compile(r"\s*(```|~~~)")
+INLINE_CODE = re.compile(r"(`+).+?\1")
+
+
+def strip_fences(text: str) -> list[str]:
+    """코드 블록 줄을 빈 줄로 바꾼 줄 목록. 코드 블록 안의 제목·표·자리표시자는 검사하지 않는다."""
+    lines, fence = [], None
+    for line in text.replace("\r\n", "\n").split("\n"):
+        match = FENCE.match(line)
+        if fence is None and match:
+            fence = match.group(1)
+            lines.append("")
+        elif fence is not None:
+            if line.strip().startswith(fence):
+                fence = None
+            lines.append("")
+        else:
+            lines.append(line)
+    return lines
+
+
+def normalize_heading(title: str) -> str:
+    """공백을 줄이고 끝의 괄호 주석(작성 안내)을 뗀다: `6. 변경 기록 (구현 단계에서 추기)` → `6. 변경 기록`."""
+    title = re.sub(r"\s+", " ", title).strip()
+    return re.sub(r"\s*\([^()]*\)$", "", title)
+
+
+def lint_sections(lines: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    """(첫 `## ` 앞의 줄, 정규화한 `## ` 제목 → 본문 줄). 같은 제목은 첫 절만 쓴다."""
+    head: list[str] = []
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in lines:
+        if line.startswith("## "):
+            current = normalize_heading(line[3:])
+            current = current if current not in sections else f"\0{len(sections)}"
+            sections[current] = []
+        elif current is None:
+            head.append(line)
+        else:
+            sections[current].append(line)
+    return head, sections
+
+
+def table_cells(line: str) -> list[str]:
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|") and not body.endswith("\\|"):
+        body = body[:-1]
+    return [cell.strip() for cell in CELL_SPLIT.split(body)]
+
+
+def first_table(lines: list[str]) -> list[list[str]] | None:
+    """절 안의 첫 GFM 표의 데이터 행(칸 목록). 머리 행 다음에 구분줄이 와야 표로 본다. 없으면 None."""
+    for i in range(len(lines) - 1):
+        if "|" in lines[i] and "|" in lines[i + 1] and TABLE_DELIMITER.fullmatch(lines[i + 1]):
+            rows = []
+            for line in lines[i + 2:]:
+                if "|" not in line or not line.strip():
+                    break
+                rows.append(table_cells(line))
+            return rows
+    return None
+
+
+def template_spec(text: str) -> dict:
+    lines = strip_fences(text)
+    _head, sections = lint_sections(lines)
+    placeholders = sorted({m.group(0) for line in lines for m in TEMPLATE_PLACEHOLDER.finditer(INLINE_CODE.sub("", line))})
+    return {"headings": [h for h in sections if not h.startswith("\0")], "placeholders": placeholders}
+
+
+def numbered_heading(spec: dict, number: str, source: str) -> str:
+    for heading in spec["headings"]:
+        if heading.startswith(f"{number}. "):
+            return heading
+    raise HarnessError(f"{source}: 템플릿에 {number}장 절이 없다")
+
+
+def lint_document(text: str, spec: dict, kind: str) -> tuple[list[str], list[str]]:
+    """(실패, 경고) 메시지 목록. kind는 plan 또는 review."""
+    lines = strip_fences(text)
+    head, sections = lint_sections(lines)
+    failures = [f"절 누락: ## {h}" for h in spec["headings"] if h not in sections]
+    if kind == "plan":
+        tier_lines = [line for line in head if "판정:" in line]
+        if not tier_lines:
+            failures.append("판정 줄(`판정:`)이 없다")
+        elif any(UNCHOSEN_TIER.search(line) for line in tier_lines):
+            failures.append("판정을 고르지 않았다: `엄격 | 표준 | 경량`이 그대로 남았다")
+        heading = spec["acceptance"]
+        if heading in sections:
+            rows = first_table(sections[heading])
+            if rows is None:
+                failures.append(f"## {heading}: 인수 테스트 표가 없다")
+            elif not rows:
+                failures.append(f"## {heading}: 인수 테스트 표에 데이터 행이 없다")
+            for row in rows or []:
+                if not any(row[1:]):
+                    failures.append(f"## {heading}: 빈 인수 테스트 행: {row[0] or '(번호 없음)'}")
+    else:
+        heading = spec["measurement"]
+        if heading in sections:
+            rows = first_table(sections[heading])
+            if rows is None:
+                failures.append(f"## {heading}: 측정 표가 없다")
+            elif not rows:
+                failures.append(f"## {heading}: 측정 표에 데이터 행이 없다")
+            for row in rows or []:
+                if len(row) < 2 or not all(row[1:]):
+                    failures.append(f"## {heading}: 측정 칸이 비었다: {row[0] or '(항목 없음)'}")
+    body = "\n".join(INLINE_CODE.sub("", line) for line in lines)
+    warnings = [f"자리표시자가 남았다: {p}" for p in spec["placeholders"] if p in body]
+    return failures, warnings
+
+
+def load_lint_spec(target: Path, config: dict, rel: str, number: str, key: str) -> dict:
+    """대상의 렌더된 템플릿을 쓰고, 없으면 키트 원본을 대상 설정으로 렌더한다."""
+    path = target / rel
+    if path.is_file():
+        text, source = path.read_text(encoding="utf-8"), rel
+    else:
+        original = TEMPLATES_DIR / rel
+        if not original.is_file():
+            raise HarnessError(f"템플릿 파일이 없다: {original}")
+        text, source = render(original.read_text(encoding="utf-8"), build_context(config), source=rel), f"키트 {rel}"
+    spec = template_spec(text)
+    if not spec["headings"]:
+        raise HarnessError(f"{source}: 템플릿에 `## ` 절이 없다")
+    spec[key] = numbered_heading(spec, number, source)
+    spec["source"] = source
+    return spec
+
+
+def classify_plan_files(names: list[str], config: dict, key: str | None) -> dict[str, list[str]]:
+    """D-15: `<키>.md` 플랜, `<키>-review*.md` 리뷰, `-mapping`·`-self-review` 제외, 그 밖은 무시."""
+    if key is not None:
+        key_pattern = re.escape(key)
+    elif config["tracker"] == "jira":
+        key_pattern = re.escape(config.get("issue_prefix", "")) + r"-\d+"
+    else:
+        key_pattern = r"\d+"
+    pattern = re.compile(rf"({key_pattern})(-review.*)?\.md", re.IGNORECASE if config["tracker"] == "jira" else 0)
+    groups: dict[str, list[str]] = {"plan": [], "review": [], "excluded": [], "ignored": []}
+    for name in sorted(names):
+        stem = name[:-3] if name.endswith(".md") else name
+        match = pattern.fullmatch(name)
+        if name.endswith(".md") and (stem.endswith("-mapping") or "-self-review" in stem):
+            if key is None or stem.lower().startswith(f"{key.lower()}-"):
+                groups["excluded"].append(name)
+        elif match:
+            groups["review" if match.group(2) else "plan"].append(name)
+        elif key is None:
+            groups["ignored"].append(name)
+    # 엄격 단계의 `-review.md`는 A·B 결과의 합집합 대조표다(영역 AGENTS.md 4장). 리뷰 양식이 아니므로 제외한다
+    lowered = {name.lower() for name in names}
+    combined = [name for name in groups["review"] if name.lower().endswith("-review.md") and
+                {name[:-3].lower() + "-a.md", name[:-3].lower() + "-b.md"} & lowered]
+    groups["review"] = [name for name in groups["review"] if name not in combined]
+    groups["excluded"].extend(combined)
+    return groups
+
+
+def cmd_lint_plans(args) -> int:
+    if args.self:
+        target = KIT_ROOT
+    else:
+        target = Path(args.target).resolve() if args.target else Path.cwd()
+    if args.key is not None and not LINT_KEY.fullmatch(args.key):
+        raise HarnessError(f"키는 영문·숫자·`.`·`_`·`-`만 쓴다: {args.key!r}")
+    config = load_config(target / CONFIG_NAME)
+    plans_dir = target / "plans"
+    names = [p.name for p in plans_dir.iterdir() if p.is_file()] if plans_dir.is_dir() else []
+    groups = classify_plan_files(names, config, args.key)
+    if args.key is not None and not groups["plan"] and not groups["review"]:
+        raise HarnessError(f"plans/ 에 키 {args.key} 의 플랜·리뷰 파일이 없다: {plans_dir}")
+    if not groups["plan"] and not groups["review"]:
+        print(f"검사할 파일 없음: {plans_dir}")
+        return 0
+    specs = {}
+    if groups["plan"]:
+        specs["plan"] = load_lint_spec(target, config, PLAN_TEMPLATE, "3", "acceptance")
+    if groups["review"]:
+        specs["review"] = load_lint_spec(target, config, REVIEW_TEMPLATE, "6", "measurement")
+    total_failures = total_warnings = 0
+    for kind, label in (("plan", "플랜"), ("review", "리뷰")):
+        for name in groups[kind]:
+            try:
+                text = (plans_dir / name).read_bytes().decode("utf-8-sig")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise HarnessError(f"plans/{name} 을 UTF-8로 읽을 수 없다: {exc}") from exc
+            failures, warnings = lint_document(text, specs[kind], kind)
+            total_failures += len(failures)
+            total_warnings += len(warnings)
+            status = "실패" if failures else ("경고" if warnings else "통과")
+            print(f"{status}: plans/{name} ({label})")
+            for message in failures:
+                print(f"  실패: {message}")
+            for message in warnings:
+                print(f"  경고: {message}")
+    if groups["excluded"]:
+        print(f"제외(-mapping·-self-review·엄격 합본 -review.md): {', '.join(groups['excluded'])}")
+    if groups["ignored"]:
+        print(f"무시(플랜·리뷰 이름 아님): {', '.join(groups['ignored'])}")
+    sources = ", ".join(f"{spec['source']}" for spec in specs.values())
+    print(f"파일 {len(groups['plan']) + len(groups['review'])}개, 실패 {total_failures}건, 경고 {total_warnings}건 "
+          f"(템플릿: {sources})")
+    return 1 if total_failures else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="harness", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -719,6 +943,13 @@ def main(argv: list[str] | None = None) -> int:
     classify.add_argument("--trace-dir", help="job trace 디렉터리(<job_id>.log). 없으면 메타데이터만으로 분류")
     classify.add_argument("--out", help="JSONL 출력 파일. 생략하면 표준 출력")
     classify.set_defaults(func=cmd_classify_ci)
+
+    lint_plans = sub.add_parser("lint-plans", help="plans/의 플랜·리뷰 파일을 템플릿 기준으로 검사한다")
+    lint_plans.add_argument("key", nargs="?", help="이 키의 플랜·리뷰만 검사(생략하면 plans/ 전체)")
+    lint_target = lint_plans.add_mutually_exclusive_group()
+    lint_target.add_argument("--target", help="대상 저장소(기본 현재 디렉터리)")
+    lint_target.add_argument("--self", action="store_true", help="키트 저장소 자신")
+    lint_plans.set_defaults(func=cmd_lint_plans)
 
     version = sub.add_parser("version")
     version.set_defaults(func=lambda _args: print(VERSION) or 0)
