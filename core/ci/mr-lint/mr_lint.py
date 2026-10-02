@@ -10,7 +10,10 @@ GitLab 조각(`core/ci/gitlab/mr-lint.yml`)은 `harness init`이 복사한 `.har
                        [--body-file FILE --base REV --head REV]   # CI 밖에서 실행할 때
     python3 mr_lint.py --post-report mr-lint.json                 # 댓글 전용(키트 GitHub workflow)
 
-종료 코드: 통과 0, lint 실패 1, 입력·설정·git 오류 2. --post-report는 항상 0(실패는 경고).
+종료 코드: 통과 0(통합 MR 건너뜀 포함), lint 실패 1, 입력·설정·git 오류 2. --post-report는 항상 0(실패는 경고).
+
+GitLab이 CI 변수의 본문을 2700자에서 잘랐으면 `HARNESS_COMMENT_TOKEN`이 있을 때만 같은 CI의 API(`CI_API_V4_URL`)로
+전체 본문을 다시 읽는다. 토큰이 없거나 읽지 못하면 잘린 본문으로 판정하지 않고 종료 2다.
 """
 
 from __future__ import annotations
@@ -51,6 +54,8 @@ HTTP_TIMEOUT = 15
 COMMENT_ITEM_CHARS = 300  # 댓글 실패 항목 한 줄 길이 상한
 COMMENT_MAX_ITEMS = 30  # 댓글 실패 항목 수 상한(나머지는 개수만)
 REPORT_MAX_BYTES = 1_000_000  # --post-report가 읽는 리포트 크기 상한
+MR_RESPONSE_MAX_BYTES = 5_000_000  # 전체 본문 API 응답 크기 상한(GitLab 본문 상한 1,048,576자)
+RESULTS = ("pass", "fail", "error", "skipped")  # 리포트 result 허용 값
 
 
 class LintError(Exception):
@@ -390,11 +395,18 @@ def context_from_env(env: dict) -> dict:
         body = env.get("CI_MERGE_REQUEST_DESCRIPTION")
         if body is None:
             raise LintError("CI_MERGE_REQUEST_DESCRIPTION이 없다. MR 파이프라인인지, GitLab 16.7 이상인지 확인한다.")
-        if env.get("CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED") == "true":
-            raise LintError("MR 본문이 길어 CI 변수에서 잘렸다(2700자). 잘린 본문으로 판정하지 않는다. 본문을 줄인다.")
+        source_project = env.get("CI_MERGE_REQUEST_SOURCE_PROJECT_ID", "")
+        mr_project = env.get("CI_MERGE_REQUEST_PROJECT_ID", "")
         return {
             "platform": "gitlab",
             "body": body,
+            # 잘렸으면 run이 통합 MR 판단 뒤에 토큰으로 전체 본문을 읽거나 검사 불가로 끝낸다
+            "truncated": env.get("CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED") == "true",
+            "source_branch": env.get("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME", ""),
+            "target_branch": env.get("CI_MERGE_REQUEST_TARGET_BRANCH_NAME", ""),
+            # fork MR이면 소스 프로젝트가 다르다. 둘 다 있어야 같은 프로젝트로 본다
+            "same_repo": bool(source_project) and source_project == mr_project,
+            "mr_project": mr_project or env.get("CI_PROJECT_ID", ""),
             "base": env.get("CI_MERGE_REQUEST_DIFF_BASE_SHA", ""),
             # merged results면 CI_COMMIT_SHA는 병합 결과다. MR 변경만 보도록 소스 커밋을 쓴다
             "head": env.get("CI_MERGE_REQUEST_SOURCE_BRANCH_SHA") or env.get("CI_COMMIT_SHA", ""),
@@ -412,16 +424,67 @@ def context_from_env(env: dict) -> dict:
         pr = event.get("pull_request") if isinstance(event, dict) else None
         if not isinstance(pr, dict):
             raise LintError("이벤트에 pull_request가 없다.")
+        base = pr.get("base") if isinstance(pr.get("base"), dict) else {}
+        head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
+        base_repo = (base.get("repo") or {}).get("full_name")
+        head_repo = (head.get("repo") or {}).get("full_name")
         return {
             "platform": "github",
             "body": pr.get("body") or "",  # 본문이 비어 있으면 null이다
-            "base": (pr.get("base") or {}).get("sha", ""),
-            "head": (pr.get("head") or {}).get("sha", ""),
+            "truncated": False,
+            "source_branch": head.get("ref", ""),
+            "target_branch": base.get("ref", ""),
+            # fork PR이면 head 저장소가 다르다(지워진 fork는 null). 같은 이름의 fork 브랜치로 건너뛰지 못하게 한다
+            "same_repo": isinstance(head_repo, str) and bool(head_repo) and head_repo == base_repo,
+            "base": base.get("sha", ""),
+            "head": head.get("sha", ""),
             "api": env.get("GITHUB_API_URL", ""),
             "project": env.get("GITHUB_REPOSITORY", ""),
             "number": str(pr.get("number", "")),
         }
     raise LintError("GitLab MR 파이프라인이나 GitHub pull_request가 아니다. --body-file·--base·--head를 준다.")
+
+
+def is_integration_mr(ctx: dict | None, config: dict | None) -> bool:
+    """통합 MR(integration → default, 같은 저장소)인가. 값이 하나라도 없거나 이상하면 False(검사한다)."""
+    if not ctx or not isinstance(config, dict):
+        return False
+    integration, default = config.get("integration_branch"), config.get("default_branch")
+    if not (isinstance(integration, str) and isinstance(default, str) and integration and default
+            and integration != default):
+        return False
+    return (ctx.get("same_repo") is True and ctx.get("source_branch") == integration
+            and ctx.get("target_branch") == default)
+
+
+def fetch_full_body(ctx: dict, token: str) -> str:
+    """잘린 GitLab 본문 대신 API로 전체 본문을 읽는다. 실패는 LintError(토큰·응답 본문은 메시지에 넣지 않는다)."""
+    prefix = "MR 본문이 CI 변수에서 잘렸고(2700자) API로 전체 본문을 읽지 못했다"
+    api = (ctx.get("api") or "").rstrip("/")
+    project, number = str(ctx.get("mr_project") or ""), str(ctx.get("number") or "")
+    if not api.startswith("https://") or not project or not number.isdigit():
+        raise LintError(f"{prefix}: API 주소가 https가 아니거나 MR 정보가 없다.")
+    url = f"{api}/projects/{urllib.parse.quote(project, safe='')}/merge_requests/{number}"
+    request = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+    # 리다이렉트로 다른 주소에 토큰을 넘기지 않는다(urllib은 unredirected 헤더를 옮기지 않는다)
+    request.add_unredirected_header("PRIVATE-TOKEN", token)
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
+            raw = response.read(MR_RESPONSE_MAX_BYTES + 1)
+        if len(raw) > MR_RESPONSE_MAX_BYTES:
+            raise ValueError("응답이 너무 크다")
+        data = json.loads(raw.decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        hint = " 토큰 범위(read_api 이상)·역할·만료를 확인한다." if exc.code in (401, 403, 404) else ""
+        raise LintError(f"{prefix}(HTTP {exc.code}).{hint}") from None
+    except (urllib.error.URLError, OSError, ValueError, RecursionError) as exc:
+        raise LintError(f"{prefix}({type(exc).__name__}).") from None
+    if not isinstance(data, dict) or str(data.get("iid")) != number:
+        raise LintError(f"{prefix}(응답이 이 MR이 아니다).")
+    description = data.get("description", 0)  # 빈 본문은 null이다. 키가 없으면 형식 오류
+    if description is not None and not isinstance(description, str):
+        raise LintError(f"{prefix}(description 형식).")
+    return description or ""
 
 
 # ---------------------------------------------------------------------------
@@ -449,13 +512,14 @@ def comment_item(text: str) -> str:
 
 def sanitize_report(raw) -> dict:
     """댓글에 쓸 필드만 검증해 새로 만든다. 모르는 키는 버린다. result가 허용 값이 아니면 ValueError."""
-    if not isinstance(raw, dict) or raw.get("result") not in ("pass", "fail", "error"):
+    if not isinstance(raw, dict) or raw.get("result") not in RESULTS:
         raise ValueError("리포트 형식이 아니다(result).")
     tier = raw.get("tier") if isinstance(raw.get("tier"), dict) else {}
     clean_tier = {key: tier.get(key) if tier.get(key) in TIERS else None for key in ("body", "judge", "effective")}
     clean_tier["mismatch"] = tier.get("mismatch") is True
     # 오류 메시지는 경로를 담을 수 있어 옮기지 않는다(job 로그에 있다)
-    items = raw.get("failures") if raw["result"] != "error" and isinstance(raw.get("failures"), list) else []
+    listed = raw["result"] in ("pass", "fail") and isinstance(raw.get("failures"), list)
+    items = raw.get("failures") if listed else []
     failures = [comment_item(item) for item in items if isinstance(item, str) and item.strip()]
     human = raw.get("human_check")
     return {
@@ -471,11 +535,13 @@ def comment_text(report: dict) -> str:
     """판정 댓글. 입력은 sanitize_report를 거친 필드만 쓴다(본문·경로는 옮기지 않는다)."""
     report = sanitize_report(report)
     tier = report["tier"]
-    title = {"pass": "통과", "fail": "실패", "error": "검사할 수 없음"}[report["result"]]
+    title = {"pass": "통과", "fail": "실패", "error": "검사할 수 없음", "skipped": "건너뜀"}[report["result"]]
     lines = [MARKER, f"### harness MR 본문 lint: {title}", ""]
     if tier["effective"]:
         lines.append(f"- 적용 판정: {TIER_LABELS[tier['effective']]}({tier['effective']})")
-    if report["result"] != "error":
+    if report["result"] == "skipped":
+        lines.append("- 통합 MR(integration → default)이라 검사하지 않았다.")
+    elif report["result"] != "error":
         lines.append(f"- 본문 판정: {tier['body'] or '없음'} · 변경 파일 판정(harness judge): {tier['judge'] or '없음'}"
                      + (" · **불일치**" if tier["mismatch"] else ""))
     if report["human_check"]:
@@ -536,6 +602,8 @@ def post_comment(ctx: dict, text: str, token: str) -> str:
 def try_comment(ctx: dict | None, report: dict, token: str | None) -> str:
     if not token:
         return "skipped"
+    if isinstance(report, dict) and report.get("result") == "skipped":
+        return "skipped"  # 통합 MR 건너뜀은 보여 줄 판정이 없어 댓글을 남기지 않는다(API 호출도 없다)
     if ctx is None:
         print("harness 경고: CI 밖 실행이라 댓글을 남기지 않는다.")
         return "skipped"
@@ -581,6 +649,16 @@ def post_report(path: str, env: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+def read_config(project: Path) -> dict | None:
+    """harness.json. 없으면 None(없을 때의 오류는 rejudge가 낸다)."""
+    config_path = project / "harness.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.is_file() else None
+    except (OSError, ValueError) as exc:
+        raise LintError(f"harness.json을 읽을 수 없다: {exc}") from exc
+    return config if isinstance(config, dict) else None
+
+
 def run(args, env: dict) -> tuple[int, dict]:
     project = Path(args.project).resolve()
     local = args.body_file is not None
@@ -596,18 +674,32 @@ def run(args, env: dict) -> tuple[int, dict]:
     else:
         ctx = context_from_env(env)
         body, base, head = ctx["body"], ctx["base"], ctx["head"]
+    config = read_config(project)
+    if is_integration_mr(ctx, config):
+        # 통합 MR(Release.md)에는 업무 참조·판정 절이 없다. 본문·git을 보지 않고 통과로 끝낸다
+        print(f"harness: 통합 MR({ctx['source_branch']} → {ctx['target_branch']})이라 MR 본문 lint를 건너뛴다(통과).")
+        return EXIT_PASS, {
+            "result": "skipped",
+            "reason": "integration",
+            "failures": [],
+            "tier": {"body": None, "judge": None, "effective": None, "mismatch": False},
+            "files": [],
+            "human_check": [],
+            "comment": "skipped",
+        }
+    if ctx is not None and ctx.get("truncated"):
+        token = env.get("HARNESS_COMMENT_TOKEN")
+        if not token:
+            raise LintError("MR 본문이 길어 CI 변수에서 잘렸다(2700자). 잘린 본문으로 판정하지 않는다. 본문을 줄이거나 "
+                            "HARNESS_COMMENT_TOKEN(read_api 이상)을 등록해 전체 본문을 읽게 한다.")
+        body = fetch_full_body(ctx, token)
+        print(f"harness: MR 본문이 CI 변수에서 잘려 API로 전체 본문({len(body)}자)을 읽었다.")
     common_path = Path(args.common) if args.common else project / DEFAULT_COMMON
     common = load_common(common_path if common_path.is_absolute() else project / common_path)
     changes = changed(project, base, head)
     judged = rejudge(project, common, [path for _status, path in changes])
     gitignore_path = project / ".gitignore"
     gitignore = gitignore_path.read_text(encoding="utf-8", errors="replace") if gitignore_path.is_file() else None
-
-    config_path = project / "harness.json"
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.is_file() else None
-    except (OSError, ValueError) as exc:
-        raise LintError(f"harness.json을 읽을 수 없다: {exc}") from exc
     result = lint_body(body, judged["tier"], example_references(config))
     failures = plans_failures(changes, gitignore) + result["failures"]
     report = {
@@ -622,6 +714,8 @@ def run(args, env: dict) -> tuple[int, dict]:
 
 
 def print_report(report: dict) -> None:
+    if report["result"] == "skipped":
+        return  # run이 건너뛴 이유를 이미 출력했다
     tier = report["tier"]
     print(f"판정: 적용 {tier['effective'] or '없음'} (본문 {tier['body'] or '없음'}, harness judge {tier['judge'] or '없음'})")
     if tier["mismatch"]:
