@@ -189,7 +189,10 @@ class CiWorkflowTest(unittest.TestCase):
             "      - name: 보안 검사 리허설",
             "        run: python3 .github/scripts/rehearse.py security",
         ])
-        self.assertNotIn("continue-on-error", body)
+        # M2-2(#37): 실패를 가리는 continue-on-error는 판정 댓글 job(PR 체크가 아닌 선택 기능)의 아티팩트 내려받기에만 둔다
+        comment_job = re.search(r"^  mr-lint-comment:\n(?:(?:    .*)?\n)+", body, re.M).group(0)
+        self.assertNotIn("continue-on-error", body.replace(comment_job, ""))
+        self.assertEqual(comment_job.count("continue-on-error"), 1)
 
 
 if __name__ == "__main__":

@@ -185,6 +185,37 @@ class BodyLintTest(unittest.TestCase):
         self.assertNotIn("판정", sections)
         self.assertEqual(lint.split_sections(["## 판정", "~~~", "## 검증", "~~~", "- lite"])["판정"][-1], "- lite")
 
+    def test_long_fence_keeps_inner_triple_backticks(self):
+        """Codex 리뷰: 네 개짜리 울타리 안의 ``` 줄은 블록을 닫지 않는다."""
+        demo = "````markdown\n```\n- Closes DEMO-9\n## 판정\n- strict\n- [x] 해당 없음\n```\n````"
+        body = filled().replace("- [x] 해당 없음", "- [ ] 해당 없음").replace("- Closes DEMO-7", demo)
+        result = lint.lint_body(body, None)
+        failures = " ".join(result["failures"])
+        self.assertIn("`Closes` 또는 `Refs`", failures)
+        self.assertIn("체크한 항목이 없다", failures)
+        self.assertEqual(result["tier"]["body"], "standard")  # 블록 안 `## 판정` / strict는 절이 아니다
+        lines = demo.split("\n") + ["## 검증", "- 방법: x"]
+        self.assertEqual(lint.unfenced(lines)[:8], [""] * 8)
+        sections = lint.split_sections(lines)
+        self.assertEqual(list(sections), ["검증"])
+        # 닫은 뒤의 내용은 다시 본다
+        after = filled().replace("- Closes DEMO-7", "````\n```\n````\n- Closes DEMO-7")
+        self.assertEqual(lint.lint_body(after, "standard")["failures"], [])
+
+    def test_fence_close_rules(self):
+        """Codex 리뷰: 다른 문자는 닫지 않고, 더 긴 울타리는 닫고, 짧거나 뒤에 글자가 있으면 닫지 않는다."""
+        self.assertEqual(lint.unfenced(["~~~", "```", "- a", "~~~", "- b"]), ["", "", "", "", "- b"])
+        self.assertEqual(lint.unfenced(["```", "~~~", "- a", "```", "- b"]), ["", "", "", "", "- b"])
+        self.assertEqual(lint.unfenced(["```", "- a", "`````", "- b"]), ["", "", "", "- b"])
+        self.assertEqual(lint.unfenced(["````", "```", "- a", "````  ", "- b"]), ["", "", "", "", "- b"])
+        self.assertEqual(lint.unfenced(["```", "``` x", "- a", "```", "- b"]), ["", "", "", "", "- b"])
+        self.assertEqual(lint.unfenced(["   ```", "- a", "   ```", "- b"]), ["", "", "", "- b"])
+        self.assertEqual(lint.unfenced(["    ```", "- a"]), ["    ```", "- a"])  # 4칸 들여쓰기는 울타리가 아니다
+        self.assertEqual(lint.unfenced(["``` a`b", "- a"]), ["``` a`b", "- a"])  # backtick 정보 문자열에 backtick
+        self.assertEqual(lint.unfenced(["~~~ a`b", "- a", "~~~", "- b"]), ["", "", "", "- b"])
+        sections = lint.split_sections(["## 판정", "````", "```", "## 검증", "```", "````", "- lite"])
+        self.assertEqual((list(sections), sections["판정"][-1]), (["판정"], "- lite"))
+
     def test_crlf_body(self):
         body = filled().replace("\n", "\r\n")
         self.assertEqual(lint.lint_body(body, "standard")["failures"], [])
@@ -471,6 +502,135 @@ class CommentTest(unittest.TestCase):
         self.assertNotIn("@everyone", text)
 
 
+class SanitizeTest(unittest.TestCase):
+    """Codex 리뷰: 댓글은 리포트의 검증한 필드만 옮긴다(리포트는 PR 코드가 쓴 신뢰할 수 없는 입력)."""
+
+    def test_unknown_keys_and_values_dropped(self):
+        raw = {"result": "pass", "body": "SECRET-BODY", "files": [{"path": "secret/path.py"}], "comment": "x",
+               "tier": {"body": "evil", "judge": "strict", "effective": "<b>strict</b>", "mismatch": "yes",
+                        "extra": "SECRET-TIER"},
+               "failures": [], "human_check": "many"}
+        clean = lint.sanitize_report(raw)
+        self.assertEqual(clean, {"result": "pass", "tier": {"body": None, "judge": "strict", "effective": None,
+                                                            "mismatch": False},
+                                 "failures": [], "omitted": 0, "human_check": 0})
+        text = lint.comment_text(raw)
+        for needle in ("SECRET", "secret/path", "evil", "<b>", "불일치"):
+            self.assertNotIn(needle, text)
+
+    def test_invalid_result_rejected(self):
+        for raw in (None, [], "pass", {}, {"result": "PASS"}, {"result": ["pass"]}):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                lint.sanitize_report(raw)
+
+    def test_failures_capped_and_neutralised(self):
+        evil = ("line1\n## 제목\r\n<!-- hide --> <img src=x> @everyone ![a](https://t/x.png) [l](u) ```js ~~~ "
+                " end")
+        raw = {"result": "fail", "tier": {}, "failures": [evil, 7, None, {"a": 1}, "", "x" * 1000]
+               + [f"f{i}" for i in range(40)]}
+        clean = lint.sanitize_report(raw)
+        self.assertEqual(len(clean["failures"]), lint.COMMENT_MAX_ITEMS)
+        self.assertEqual(clean["omitted"], 42 - lint.COMMENT_MAX_ITEMS)
+        first = clean["failures"][0]
+        self.assertNotIn("\n", first)
+        self.assertNotIn("\r", first)
+        self.assertNotIn(" ", first)
+        for needle in ("<", ">", "@everyone", "![", "```", "~~~", "[l]"):
+            self.assertNotIn(needle, first)
+        self.assertTrue(first.startswith("line1 ## 제목"))
+        self.assertLessEqual(len(clean["failures"][1]), lint.COMMENT_ITEM_CHARS)
+        self.assertTrue(clean["failures"][1].endswith("…"))
+        text = lint.comment_text(raw)
+        # 모든 실패 항목이 목록 한 줄이다(목록 밖으로 나가는 줄이 없다)
+        block = text.split("실패 항목:\n", 1)[1].split("\n\n", 1)[0].split("\n")
+        self.assertEqual(len(block), lint.COMMENT_MAX_ITEMS + 1)
+        self.assertTrue(all(line.startswith("- ") for line in block))
+        self.assertEqual(block[-1], f"- 외 {42 - lint.COMMENT_MAX_ITEMS}개(job 로그)")
+
+    def test_lint_failures_survive_unchanged(self):
+        """lint가 만드는 실패 문구(백틱 코드 스팬 포함)는 그대로 보인다."""
+        text = lint.comment_text(REPORT)
+        self.assertIn("- `## 판정` 절이 없다.", text)
+        self.assertIn("사람 확인이 필요한 트리거 1개", text)
+
+    def test_error_report_has_no_message(self):
+        """오류 메시지는 경로를 담을 수 있어 댓글에 옮기지 않는다."""
+        text = lint.comment_text({"result": "error", "error": "/home/runner/secret/harness_common.py 이 없다."})
+        self.assertIn("검사할 수 없음", text)
+        self.assertNotIn("secret", text)
+
+
+class PostReportTest(unittest.TestCase):
+    """--post-report: 기준 커밋 모듈이 lint 리포트를 읽어 댓글만 남긴다. 실패는 경고, 종료 0."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="mr-lint-post-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        event = self.tmp / "event.json"
+        event.write_text(json.dumps({"pull_request": {"number": 9, "body": "본문 BODY-TEXT", "base": {"sha": "b"},
+                                                      "head": {"sha": "h"}}}), encoding="utf-8")
+        self.env = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event),
+                    "GITHUB_API_URL": "https://api.github.com", "GITHUB_REPOSITORY": "o/r",
+                    "HARNESS_COMMENT_TOKEN": "tok-secret"}
+        self.report = self.tmp / "mr-lint.json"
+
+    def post(self, content, env=None):
+        if content is not None:
+            self.report.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
+        api = FakeApi(pages=[])
+        out = io.StringIO()
+        with mock.patch.object(lint, "http_json", api), redirect_stdout(out):
+            code = lint.main(["--post-report", str(self.report)], env=self.env if env is None else env)
+        self.assertEqual(code, 0)
+        self.assertNotIn("tok-secret", out.getvalue())
+        return api, out.getvalue()
+
+    def test_posts_rebuilt_text(self):
+        raw = dict(REPORT, files=[{"path": "secret/path.py"}], body="BODY-TEXT", failures=["a\n## b"])
+        built = lint.comment_text(raw)
+        with mock.patch.object(lint, "post_comment", return_value="created") as post:
+            _api, out = self.post(json.dumps(raw))
+        ctx, text, token = post.call_args.args
+        self.assertEqual((ctx["platform"], ctx["project"], ctx["number"], token), ("github", "o/r", "9", "tok-secret"))
+        self.assertEqual(text, built)
+        self.assertIn("- a ## b", text)
+        for needle in ("secret/path", "BODY-TEXT"):
+            self.assertNotIn(needle, text)
+        self.assertIn("판정 댓글 created", out)
+        # 실제 HTTP 경로(대역)로 POST 한 번
+        api, _ = self.post(json.dumps(raw))
+        self.assertEqual(api.calls[-1][:2], ("POST", "https://api.github.com/repos/o/r/issues/9/comments"))
+        self.assertEqual(api.calls[-1][3]["body"], built)
+
+    def test_missing_or_garbled_report_is_warning(self):
+        for content in (None, "not json", "[]", '{"result": "ok"}', b"\xff\xfe", "[" * 100000,
+                        json.dumps({"result": "pass", "pad": "x" * (lint.REPORT_MAX_BYTES + 1)})):
+            with self.subTest(content=(content or b"")[:20]):
+                if content is None and self.report.exists():
+                    self.report.unlink()
+                api, out = self.post(content)
+                self.assertIn("harness 경고", out)
+                self.assertEqual(api.calls, [])
+
+    def test_no_token_or_bad_context_is_warning(self):
+        env = {k: v for k, v in self.env.items() if k != "HARNESS_COMMENT_TOKEN"}
+        api, out = self.post(json.dumps(REPORT), env=env)
+        self.assertIn("HARNESS_COMMENT_TOKEN", out)
+        self.assertEqual(api.calls, [])
+        api, out = self.post(json.dumps(REPORT), env={**self.env, "GITHUB_EVENT_NAME": "push"})
+        self.assertIn("harness 경고", out)
+        self.assertEqual(api.calls, [])
+
+    def test_api_failure_is_warning(self):
+        error = urllib.error.HTTPError("https://api.github.com/x", 403, "Forbidden", {}, None)
+        self.report.write_text(json.dumps(REPORT), encoding="utf-8")
+        out = io.StringIO()
+        with mock.patch.object(lint, "http_json", FakeApi(error=error)), redirect_stdout(out):
+            code = lint.main(["--post-report", str(self.report)], env=self.env)
+        self.assertEqual(code, 0)
+        self.assertIn("HTTP 403", out.getvalue())
+
+
 class FragmentTest(unittest.TestCase):
     def test_structure(self):
         """T17: core/ci 조각 관례(test_ci.py)와 같은 형식"""
@@ -497,15 +657,22 @@ class FragmentTest(unittest.TestCase):
                                     "self": False, "render": False, "platform": "gitlab"}])
 
 
+def job_lines(body, name):
+    """ci.yml에서 job 하나의 본문 줄(주석·빈 줄·줄 끝 주석 제외)."""
+    block = re.search(rf"^  {re.escape(name)}:\n((?:(?:    .*)?\n)+)", body, re.M).group(1)
+    return [line.split("  #")[0].rstrip() for line in block.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")]
+
+
 class WorkflowTest(unittest.TestCase):
+    def setUp(self):
+        self.body = WORKFLOW.read_text(encoding="utf-8")
+
     def test_ci_mr_lint_job(self):
-        """T18: 결정 D-11·D-12·D-14"""
-        body = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("  pull_request:\n    types: [opened, synchronize, reopened, edited]\n", body)
-        self.assertNotIn("pull_request_target", body.replace("pull_request_target은", ""))
-        block = re.search(r"^  mr-lint:\n((?:(?:    .*)?\n)+)", body, re.M).group(1)
-        lines = [line.split("  #")[0].rstrip() for line in block.splitlines()
-                 if line.strip() and not line.lstrip().startswith("#")]
+        """T18: 결정 D-11·D-12·D-14. Codex 리뷰: PR 코드를 돌리는 lint job에는 쓰기 권한·토큰이 없다"""
+        self.assertIn("  pull_request:\n    types: [opened, synchronize, reopened, edited]\n", self.body)
+        self.assertNotIn("pull_request_target", self.body.replace("pull_request_target은", ""))
+        lines = job_lines(self.body, "mr-lint")
         self.assertEqual(lines, [
             "    if: github.event_name == 'pull_request'",
             "    runs-on: ubuntu-latest",
@@ -515,16 +682,13 @@ class WorkflowTest(unittest.TestCase):
             "      cancel-in-progress: true",
             "    permissions:",
             "      contents: read",
-            "      pull-requests: write",
             "    steps:",
             "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "        with:",
             "          fetch-depth: 0",
             "          persist-credentials: false",
             "      - name: PR 본문 lint",
-            "        env:",
-            "          HARNESS_COMMENT_TOKEN: ${{ github.token }}",
-            "        run: python3 core/ci/mr-lint/mr_lint.py --out mr-lint.json",
+            "        run: python3 core/ci/mr-lint/mr_lint.py --no-comment --out mr-lint.json",
             "      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
             "        if: always()",
             "        with:",
@@ -533,6 +697,49 @@ class WorkflowTest(unittest.TestCase):
             "          retention-days: 30",
             "          if-no-files-found: ignore",
         ])
+        joined = "\n".join(lines)
+        for needle in ("pull-requests: write", "token", "TOKEN", "secrets.", "env:"):
+            self.assertNotIn(needle, joined)
+
+    def test_ci_mr_lint_comment_job(self):
+        """Codex 리뷰: 댓글 job은 기준 커밋 코드만 토큰과 함께 돌리고 실패하지 않는다"""
+        lines = job_lines(self.body, "mr-lint-comment")
+        self.assertEqual(lines, [
+            "    needs: mr-lint",
+            "    if: always() && github.event_name == 'pull_request' && (needs.mr-lint.result == 'success'"
+            " || needs.mr-lint.result == 'failure')",
+            "    runs-on: ubuntu-latest",
+            "    timeout-minutes: 5",
+            "    concurrency:",
+            "      group: mr-lint-comment-${{ github.event.pull_request.number }}",
+            "      cancel-in-progress: true",
+            "    permissions:",
+            "      contents: read",
+            "      pull-requests: write",
+            "    steps:",
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "        with:",
+            "          ref: ${{ github.event.pull_request.base.sha }}",
+            "          persist-credentials: false",
+            "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            "        continue-on-error: true",
+            "        with:",
+            "          name: mr-lint",
+            "          path: ${{ runner.temp }}/mr-lint",
+            "      - name: PR 본문 lint 댓글",
+            "        env:",
+            "          HARNESS_COMMENT_TOKEN: ${{ github.token }}",
+            "        run: |",
+            "          if [ ! -f core/ci/mr-lint/mr_lint.py ]; then",
+            "            echo \"::warning::기준 커밋에 core/ci/mr-lint/mr_lint.py가 없어 판정 댓글을 건너뛴다.\"",
+            "            exit 0",
+            "          fi",
+            "          python3 -I -B core/ci/mr-lint/mr_lint.py --post-report \"$RUNNER_TEMP/mr-lint/mr-lint.json\""
+            " || echo \"::warning::판정 댓글 단계가 실패했다(lint 결과와 무관).\"",
+        ])
+        # 토큰이 있는 job에서는 PR head를 checkout하지 않는다
+        self.assertNotIn("head.sha", "\n".join(lines))
+        self.assertNotIn("fetch-depth", "\n".join(lines))
 
 
 class TemplateTest(unittest.TestCase):

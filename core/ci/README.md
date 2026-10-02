@@ -173,6 +173,7 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
   게시에 실패하면 경고만 내고 lint 결과는 그대로다. MR 파이프라인은 작성자 코드와 같이 돌아 이 토큰은 MR을 올릴 수 있는
   사람이 읽을 수 있다. 쓰려면 Reporter 역할·`api` 범위의 전용 프로젝트 액세스 토큰을 Masked로 등록한다(MR 파이프라인에서
   읽어야 하므로 Protected로 두면 보통 비어 있다). 이 노출을 받아들일 수 없으면 등록하지 않는다.
+  키트 자기 적용(GitHub)은 같은 이유로 검사 job(토큰 없음)과 댓글 job(기준 커밋 코드만 토큰 사용)을 나눴다(아래 "키트 자기 적용").
 - **통합 MR.** `Release.md` 템플릿에는 업무 참조·판정 절이 없어 통합 MR(`develop` → `main` 등)은 실패한다. 건너뛰려면 같은
   이름의 job을 로컬에 다시 적어 rules를 덮어쓴다.
 
@@ -237,9 +238,13 @@ PR이 workflow·러너·조각을 바꿨으면 job 로그에 경고가 나온다
 
 MR 본문 lint는 `ci` workflow의 `mr-lint` job이 같은 모듈 원본(`core/ci/mr-lint/mr_lint.py`)을 실행한다. 본문은 이벤트 파일의
 `pull_request.body`, 변경 범위는 `pull_request.base.sha`·`head.sha`다. PR 본문만 고쳐도 다시 돌도록 `pull_request` 타입에
-`edited`를 넣었다(같은 workflow의 다른 job도 함께 돈다). `pull_request` 이벤트만 쓰고(`pull_request_target`은 거부),
-job 권한은 `contents: read`·`pull-requests: write`다. 판정 댓글은 `GITHUB_TOKEN`으로 남기며 fork PR처럼 쓰기 권한이 없으면
-경고만 낸다. `security` workflow와 `run_fragment.py`는 이 job과 관계없다.
+`edited`를 넣었다(같은 workflow의 다른 job도 함께 돈다). `pull_request` 이벤트만 쓴다(`pull_request_target`은 거부).
+PR이 바꾼 검사 코드(`mr_lint.py`, `harness_common.py`)가 쓰기 토큰과 함께 돌지 않게 두 job으로 나눈다. `mr-lint`는 PR 커밋을
+`contents: read` 권한·토큰 없이 `--no-comment`로 검사하고(이 job의 종료 코드가 PR 체크다) `mr-lint.json`을 아티팩트로 올린다.
+`mr-lint-comment`는 `pull-requests: write` 권한으로 기준 커밋(`pull_request.base.sha`)을 checkout해 그 원본의
+`--post-report`로 아티팩트를 읽고, 결과·판정 값·불일치 여부·실패 항목(한 줄 300자, 30개까지, 줄바꿈·HTML·멘션·코드 울타리
+무력화)만 검증해 `GITHUB_TOKEN`으로 판정 댓글을 남긴다. 이 job은 실패하지 않는다. fork PR처럼 쓰기 권한이 없거나 기준 커밋에
+모듈이 없으면(이 job을 처음 들이는 PR) 경고만 낸다. `security` workflow와 `run_fragment.py`는 이 job과 관계없다.
 
 `ci.yml`의 `rehearsal` job은 `.github/scripts/rehearse.py`로 `init` 대상에 fixture를 만들어 조각 4종을 모두 실행한다.
 검출 시나리오(지운 Secret, lodash 4.17.20 CVE-2021-23337, log4j-core 2.14.1 CVE-2021-44228, alpine 3.10 CVE-2021-36159,

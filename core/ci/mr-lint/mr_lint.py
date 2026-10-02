@@ -2,13 +2,15 @@
 """MR 본문 lint(M2-2). 표준 라이브러리만 쓴다.
 
 GitLab 조각(`core/ci/gitlab/mr-lint.yml`)은 `harness init`이 복사한 `.harness/mr-lint/mr_lint.py`를,
-키트의 GitHub `ci` workflow는 이 원본을 실행한다. 판정 재실행에는 대상 저장소의 `harness.json`과
+키트의 GitHub `ci` workflow는 이 원본을 실행한다(PR 쪽 원본으로 토큰 없이 lint, 기준 커밋 원본으로
+`--post-report` 댓글). 판정 재실행에는 대상 저장소의 `harness.json`과
 `.claude/hooks/harness_common.py`(init이 복사)를 쓴다.
 
     python3 mr_lint.py [--project DIR] [--common PATH] [--out mr-lint.json] [--no-comment]
                        [--body-file FILE --base REV --head REV]   # CI 밖에서 실행할 때
+    python3 mr_lint.py --post-report mr-lint.json                 # 댓글 전용(키트 GitHub workflow)
 
-종료 코드: 통과 0, lint 실패 1, 입력·설정·git 오류 2.
+종료 코드: 통과 0, lint 실패 1, 입력·설정·git 오류 2. --post-report는 항상 0(실패는 경고).
 """
 
 from __future__ import annotations
@@ -46,6 +48,9 @@ MEASUREMENT_ROWS = (
 VERIFY_LINES = (("방법", ("방법",)), ("결과", ("결과",)), ("미검증", ("검증하지 못한", "미검증")))
 GITHUB_BOT = "github-actions[bot]"
 HTTP_TIMEOUT = 15
+COMMENT_ITEM_CHARS = 300  # 댓글 실패 항목 한 줄 길이 상한
+COMMENT_MAX_ITEMS = 30  # 댓글 실패 항목 수 상한(나머지는 개수만)
+REPORT_MAX_BYTES = 1_000_000  # --post-report가 읽는 리포트 크기 상한
 
 
 class LintError(Exception):
@@ -67,17 +72,34 @@ def content_lines(body: str) -> list[str]:
     return strip_comments(body.replace("\r\n", "\n").replace("\r", "\n")).split("\n")
 
 
+FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
+
+
+def fence_step(line: str, fence: str | None) -> tuple[str | None, bool]:
+    """CommonMark 코드 블록 경계. (다음 줄부터의 열린 울타리, 이 줄이 울타리 줄인가).
+
+    여는 줄은 공백 3칸까지 + 같은 문자 3개 이상(backtick이면 정보 문자열에 backtick이 없어야 한다).
+    닫는 줄은 여는 문자와 같은 문자를 여는 길이 이상 + 뒤에 공백만. 짧은 울타리나 다른 문자는 내용이다.
+    """
+    if fence is None:
+        match = FENCE_OPEN.match(line)
+        if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
+            return match.group(1), True
+        return None, False
+    match = FENCE_CLOSE.match(line)
+    if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence):
+        return None, True
+    return fence, False
+
+
 def unfenced(lines: list[str]) -> list[str]:
     """코드 블록 안 줄을 빈 줄로 바꾼다. 예시로 적은 `Closes`·체크 상자가 검사를 통과시키지 않게 한다."""
     out, fence = [], None
     for line in lines:
-        mark = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
-        if mark:
-            token = mark.group(1)[0]
-            fence = None if fence == token else (token if fence is None else fence)
-            out.append("")
-            continue
-        out.append("" if fence is not None else line)
+        inside = fence is not None
+        fence, marker = fence_step(line, fence)
+        out.append("" if marker or inside else line)
     return out
 
 
@@ -86,11 +108,9 @@ def split_sections(lines: list[str]) -> dict[str, list[str]]:
     sections: dict[str, list[str]] = {}
     current, fence = None, None
     for line in lines:
-        mark = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
-        if mark:
-            token = mark.group(1)[0]
-            fence = None if fence == token else (token if fence is None else fence)
-        elif fence is None and re.match(r"^##\s+\S", line) and not line.startswith("###"):
+        inside = fence is not None
+        fence, marker = fence_step(line, fence)
+        if not marker and not inside and re.match(r"^##\s+\S", line) and not line.startswith("###"):
             current = line[2:].strip().rstrip("#").strip()
             sections.setdefault(current, [])
             continue
@@ -412,18 +432,55 @@ def http_json(method: str, url: str, headers: dict, data: dict | None = None):
     return json.loads(raw.decode("utf-8")) if raw else None
 
 
+def comment_item(text: str) -> str:
+    """실패 항목 한 줄. 목록 밖으로 나가거나 HTML·멘션·이미지·코드 블록이 되지 않게 무력화하고 길이를 자른다."""
+    text = re.sub(r"\s+", " ", re.sub(r"[\x00-\x1f\x7f  ]", " ", text)).strip()
+    if len(text) > COMMENT_ITEM_CHARS:
+        text = text[:COMMENT_ITEM_CHARS - 1] + "…"
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("@", "@​")
+    text = re.sub(r"[\[\]!]", lambda m: "\\" + m.group(0), text)
+    return re.sub(r"([`~])\1{2,}", lambda m: "".join("\\" + ch for ch in m.group(0)), text)
+
+
+def sanitize_report(raw) -> dict:
+    """댓글에 쓸 필드만 검증해 새로 만든다. 모르는 키는 버린다. result가 허용 값이 아니면 ValueError."""
+    if not isinstance(raw, dict) or raw.get("result") not in ("pass", "fail", "error"):
+        raise ValueError("리포트 형식이 아니다(result).")
+    tier = raw.get("tier") if isinstance(raw.get("tier"), dict) else {}
+    clean_tier = {key: tier.get(key) if tier.get(key) in TIERS else None for key in ("body", "judge", "effective")}
+    clean_tier["mismatch"] = tier.get("mismatch") is True
+    # 오류 메시지는 경로를 담을 수 있어 옮기지 않는다(job 로그에 있다)
+    items = raw.get("failures") if raw["result"] != "error" and isinstance(raw.get("failures"), list) else []
+    failures = [comment_item(item) for item in items if isinstance(item, str) and item.strip()]
+    human = raw.get("human_check")
+    return {
+        "result": raw["result"],
+        "tier": clean_tier,
+        "failures": failures[:COMMENT_MAX_ITEMS],
+        "omitted": max(0, len(failures) - COMMENT_MAX_ITEMS),
+        "human_check": min(len(human), 999) if isinstance(human, list) else 0,
+    }
+
+
 def comment_text(report: dict) -> str:
+    """판정 댓글. 입력은 sanitize_report를 거친 필드만 쓴다(본문·경로는 옮기지 않는다)."""
+    report = sanitize_report(report)
     tier = report["tier"]
-    passed = report["result"] == "pass"
-    lines = [MARKER, f"### harness MR 본문 lint: {'통과' if passed else '실패'}", ""]
+    title = {"pass": "통과", "fail": "실패", "error": "검사할 수 없음"}[report["result"]]
+    lines = [MARKER, f"### harness MR 본문 lint: {title}", ""]
     if tier["effective"]:
         lines.append(f"- 적용 판정: {TIER_LABELS[tier['effective']]}({tier['effective']})")
-    lines.append(f"- 본문 판정: {tier['body'] or '없음'} · 변경 파일 판정(harness judge): {tier['judge'] or '없음'}"
-                 + (" · **불일치**" if tier["mismatch"] else ""))
-    if report.get("human_check"):
-        lines.append(f"- 사람 확인이 필요한 트리거 {len(report['human_check'])}개(job 로그). 해당하면 판정을 올린다.")
+    if report["result"] != "error":
+        lines.append(f"- 본문 판정: {tier['body'] or '없음'} · 변경 파일 판정(harness judge): {tier['judge'] or '없음'}"
+                     + (" · **불일치**" if tier["mismatch"] else ""))
+    if report["human_check"]:
+        lines.append(f"- 사람 확인이 필요한 트리거 {report['human_check']}개(job 로그). 해당하면 판정을 올린다.")
+    if report["result"] == "error":
+        lines.append("- 입력·설정·git 오류로 검사하지 못했다(종료 2). 원인은 job 로그에 있다.")
     if report["failures"]:
         lines += ["", "실패 항목:"] + [f"- {item}" for item in report["failures"]]
+        if report["omitted"]:
+            lines.append(f"- 외 {report['omitted']}개(job 로그)")
     lines += ["", "자세한 근거는 job 로그와 `mr-lint.json` 아티팩트에 있다."]
     return "\n".join(lines)
 
@@ -486,6 +543,32 @@ def try_comment(ctx: dict | None, report: dict, token: str | None) -> str:
     # fork PR의 읽기 전용 토큰 등. 댓글은 선택 기능이라 lint 결과를 바꾸지 않는다
     print(f"harness 경고: 판정 댓글을 남기지 못했다({reason}). 결과는 job 로그와 아티팩트에 있다.")
     return "failed"
+
+
+def post_report(path: str, env: dict) -> str:
+    """댓글 전용 모드. lint job이 남긴 리포트를 읽어 검증한 필드로 댓글을 만든다. 실패는 경고만 낸다.
+
+    키트 GitHub workflow는 PR 코드를 토큰 없이 lint하고, 기준 커밋의 이 모듈만 토큰을 받아 이 모드로 댓글을 남긴다.
+    리포트는 PR 코드가 쓴 신뢰할 수 없는 입력이라 sanitize_report를 거친 값만 쓴다.
+    """
+    token = env.get("HARNESS_COMMENT_TOKEN")
+    if not token:
+        print("harness 경고: HARNESS_COMMENT_TOKEN이 없어 판정 댓글을 남기지 않는다.")
+        return "skipped"
+    try:
+        raw = Path(path).read_bytes()
+        if len(raw) > REPORT_MAX_BYTES:
+            raise ValueError("리포트가 너무 크다.")
+        report = json.loads(raw.decode("utf-8"))
+        result = sanitize_report(report)["result"]  # 형식 확인. 댓글 문구는 comment_text가 다시 검증해 만든다
+        ctx = context_from_env(env)
+    except (OSError, ValueError, RecursionError, LintError) as exc:
+        reason = str(exc) if isinstance(exc, LintError) else type(exc).__name__
+        print(f"harness 경고: 리포트나 PR 정보를 읽을 수 없어 판정 댓글을 남기지 않는다({reason}).")
+        return "failed"
+    status = try_comment(ctx, report, token)
+    print(f"harness: 판정 댓글 {status} (결과 {result})")
+    return status
 
 
 # ---------------------------------------------------------------------------
@@ -565,8 +648,13 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> int:
     parser.add_argument("--body-file", help="CI 밖 실행: MR 본문 파일")
     parser.add_argument("--base", help="CI 밖 실행: 기준 커밋")
     parser.add_argument("--head", help="CI 밖 실행: 대상 커밋")
+    parser.add_argument("--post-report", metavar="JSON",
+                        help="댓글 전용: lint 리포트를 읽어 판정 댓글만 남긴다(검사하지 않음, 항상 종료 0)")
     args = parser.parse_args(argv)
     env = dict(os.environ) if env is None else env
+    if args.post_report is not None:
+        post_report(args.post_report, env)  # 댓글은 선택 기능이라 PR 체크를 실패시키지 않는다
+        return EXIT_PASS
     try:
         code, report = run(args, env)
     except LintError as exc:
