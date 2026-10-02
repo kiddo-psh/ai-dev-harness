@@ -1,0 +1,5 @@
+$ npm ci
+npm error code ECONNRESET
+npm error network aborted
+npm error network This is a problem related to network connectivity.
+ERROR: Job failed: exit code 1

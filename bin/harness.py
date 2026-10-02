@@ -9,6 +9,8 @@
                                              # 영역 디렉터리에 AGENTS.md 생성(루트 init 이후)
     python bin/harness.py check <target>     # 렌더링 결과와 실제 파일의 차이(드리프트) 검사
     python bin/harness.py check --self
+    python bin/harness.py classify-ci --jobs <jobs.json> [--trace-dir <dir>] [--out <file.jsonl>]
+                                             # 실패한 CI job의 원인 범주를 JSONL로 산출(trace는 <job_id>.log)
     python bin/harness.py version
 """
 
@@ -26,6 +28,7 @@ KIT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = KIT_ROOT / "core" / "templates"
 HOOKS_DIR = KIT_ROOT / "core" / "hooks"
 CI_DIR = KIT_ROOT / "core" / "ci"
+METRICS_DIR = KIT_ROOT / "core" / "metrics"
 # 매니페스트 항목의 base가 가리키는 원본 디렉터리
 SOURCE_DIRS = {"templates": TEMPLATES_DIR, "hooks": HOOKS_DIR, "ci": CI_DIR}
 # 매니페스트 항목의 requires가 가리킬 수 있는 설정 키. 설정에 그 키가 있을 때만 생성한다
@@ -113,6 +116,11 @@ _REVIEW_SPEC = importlib.util.spec_from_file_location("harness_review_common",
                                                       CI_DIR / "claude-review" / "review_common.py")
 review_common = importlib.util.module_from_spec(_REVIEW_SPEC)
 _REVIEW_SPEC.loader.exec_module(review_common)
+
+# CI 실패 분류는 M4-1 수집기도 쓰는 core/metrics 모듈에 둔다
+_CLASSIFY_SPEC = importlib.util.spec_from_file_location("harness_classify_ci", METRICS_DIR / "classify_ci.py")
+classify_ci = importlib.util.module_from_spec(_CLASSIFY_SPEC)
+_CLASSIFY_SPEC.loader.exec_module(classify_ci)
 
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 PLACEHOLDER_NAME = re.compile(r"[a-z_]+")
@@ -570,6 +578,27 @@ def cmd_check(args) -> int:
     return 1
 
 
+def cmd_classify_ci(args) -> int:
+    jobs_path = Path(args.jobs)
+    if not jobs_path.is_file():
+        raise HarnessError(f"job 메타데이터 파일이 없다: {jobs_path}")
+    trace_dir = Path(args.trace_dir) if args.trace_dir else None
+    if trace_dir is not None and not trace_dir.is_dir():
+        raise HarnessError(f"trace 디렉터리가 없다: {trace_dir}")
+    try:
+        jobs = classify_ci.load_jobs(jobs_path.read_bytes().decode("utf-8", errors="replace"))
+        records, skipped = classify_ci.classify_jobs(jobs, trace_dir)
+    except classify_ci.ClassifyError as exc:
+        raise HarnessError(f"{jobs_path}: {exc}") from exc
+    output = classify_ci.to_jsonl(records)
+    if args.out:
+        write_text(Path(args.out), output)
+    else:
+        sys.stdout.write(output)
+    print(f"실패 job {len(records)}개를 분류했다. 실패가 아닌 job {skipped}개는 제외했다.", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="harness", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -597,6 +626,12 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("target", nargs="?")
     check.add_argument("--self", action="store_true")
     check.set_defaults(func=cmd_check)
+
+    classify = sub.add_parser("classify-ci", help="실패한 CI job의 원인을 분류해 JSONL로 쓴다")
+    classify.add_argument("--jobs", required=True, help="job 메타데이터 JSON(GitLab job API 형태, 목록 또는 객체)")
+    classify.add_argument("--trace-dir", help="job trace 디렉터리(<job_id>.log). 없으면 메타데이터만으로 분류")
+    classify.add_argument("--out", help="JSONL 출력 파일. 생략하면 표준 출력")
+    classify.set_defaults(func=cmd_classify_ci)
 
     version = sub.add_parser("version")
     version.set_defaults(func=lambda _args: print(VERSION) or 0)
