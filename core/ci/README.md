@@ -146,6 +146,12 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 PR이 workflow·러너·조각을 바꿨으면 job 로그에 경고가 나온다.
 키트에는 lockfile과 이미지가 없어 의존성 감사·이미지 스캔은 리허설(M1-8)에서 돌린다.
 
+`ci.yml`의 `rehearsal` job은 `.github/scripts/rehearse.py`로 `init` 대상에 fixture를 만들어 조각 4종을 모두 실행한다.
+검출 시나리오(지운 Secret, lodash 4.17.20 CVE-2021-23337, log4j-core 2.14.1 CVE-2021-44228, alpine 3.10 CVE-2021-36159,
+SAST 발견, lockfile 누락, 이미지 입력 누락)는 종료 코드와 리포트의 기대 ID를 함께 본다. 도구 오류로 실패한 것을
+기대대로 실패한 것으로 읽지 않기 위해서다. 가짜 Secret과 취약 lockfile은 실행 중에 만들고 키트에 커밋하지 않는다.
+외부 레지스트리와 DB에 기대므로 필수 체크로 두지 않는다. 로컬에서는 `python .github/scripts/rehearse.py security`로 돌린다.
+
 ## 갱신
 
 도구 버전은 태그와 digest로 고정한다(보안 도구 자체가 공급망 경로다). 버전을 올리는 것도 보안 검사

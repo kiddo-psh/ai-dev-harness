@@ -20,8 +20,8 @@ jobs:
       - name: 자기 적용 드리프트 검사
         run: python bin/harness.py check --self
 
-      # 빈 저장소에 키트를 붙여 돌아가는지 확인하는 리허설. 마일스톤이 늘어나면 여기에
-      # hooks 설치, 판정 스크립트, 보안 CI 조각 검증을 같은 대상에 이어 붙인다.
+      # 빈 저장소에 키트를 붙여 돌아가는지 확인하는 리허설. hooks와 보안 검사 조각은 아래 rehearsal job에서
+      # 같은 방식으로 만든 대상에 실제로 돌린다. 판정 스크립트(M2)도 같은 대상에 이어 붙인다.
       - name: 리허설 (GitLab + Jira)
         run: |
           target="$RUNNER_TEMP/rehearsal-gitlab"
@@ -39,3 +39,21 @@ jobs:
           python bin/harness.py init "$target" --project-name rehearsal --platform github --tracker github --integration-branch main
           python bin/harness.py check "$target"
           test -f "$target/.github/PULL_REQUEST_TEMPLATE.md"
+
+  # 리허설 대상에 hooks와 보안 검사 조각 4종을 실제로 돌린다(M1-8). 검출 시나리오는 종료 코드와 리포트의
+  # 기대 ID를 함께 본다. Docker Hub·trivy DB·semgrep 레지스트리에 기대므로 필수 체크로 두지 않는다.
+  rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: hooks 리허설
+        run: python3 .github/scripts/rehearse.py hooks
+
+      - name: 보안 검사 리허설
+        run: python3 .github/scripts/rehearse.py security

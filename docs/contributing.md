@@ -84,6 +84,8 @@ python bin/harness.py check --self
 
 PR에는 `security` workflow가 `core/ci/gitlab/`의 Secret 탐지(차단)와 SAST(경고) 조각을 같은 이미지·스크립트로 실행한다
 (`.github/scripts/run_fragment.py`). 조각을 고치면 키트 PR에서 바로 그 조각이 돈다.
+`ci` workflow의 `rehearsal` job은 설치된 hooks와 보안 조각 4종의 검출 시나리오를 임시 대상 저장소에서 실행한다.
+외부 이미지·취약점 DB에 의존하므로 필수 체크에는 포함하지 않는다.
 PR이 workflow·러너·조각을 바꾸면 그 PR의 검사도 바뀐 정의로 돈다. 러너가 경고로 알리지만 막지는 않는다.
 이런 PR은 엄격이라 사람이 병합하는 것이 최종 방어선이다. 브랜치 보호에는 `secret-detection`·`sast` 필수 체크와
 "Require branches to be up to date before merging"을 함께 켠다(대상 브랜치가 앞서가도 검사가 다시 돌지 않는다).
