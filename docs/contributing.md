@@ -60,7 +60,7 @@ Conventional Commits를 쓴다. Scope는 변경 영역이다.
 | --- | --- |
 | 경량 | `docs/` 하위의 손으로 관리하는 문서, 주석, 테스트만 변경. 플랜 없이 판정과 근거를 시작 보고와 PR 본문에 남긴다 |
 | 표준 | 그 밖의 변경(`bin/harness.py`, `core/templates/`, 보안 검사가 아닌 CI 조각·워크플로 단계 포함). 플랜·구현·리뷰 산출물을 한 세션에서 만든다 |
-| 엄격 | `core/hooks/`의 차단·수정 로직 변경(오탐이 나면 팀이 hooks를 끈다), 보안 검사 변경 — `core/ci/`의 보안 검사 조각, `.github/workflows/`의 보안 검사 단계와 이를 실행하는 `.github/scripts/run_fragment.py`(틀려도 조용히 통과해 거짓 안심을 준다), Claude 리뷰 조각 — `core/ci/claude-review/`와 `core/ci/gitlab/claude-review.yml`(리뷰 토큰과 신뢰 경계를 다룬다. 틀리면 토큰이 새거나 리뷰가 조작된 입력을 신뢰한다) |
+| 엄격 | `core/hooks/`의 차단·수정 로직 변경(오탐이 나면 팀이 hooks를 끈다), 보안 검사 변경 — `core/ci/`의 보안 검사 조각, `.github/workflows/`의 보안 검사 단계와 이를 실행하는 `.github/scripts/run_fragment.py`(틀려도 조용히 통과해 거짓 안심을 준다), Claude 리뷰 조각 — `core/ci/claude-review/`, `core/ci/gitlab/claude-review.yml`, 시스템 프롬프트 템플릿 `core/templates/claude-review/`와 그 원본인 `core/templates/review-perspectives.md`의 공통·CI 절(리뷰 토큰과 신뢰 경계를 다룬다. 틀리면 토큰이 새거나 리뷰가 조작된 입력을 신뢰한다) |
 
 첫 소비자 저장소에 적용한 뒤에는 `harness.json` 스키마, CLI 인자, 자리표시자 이름, 판정 식별자
 (`lite`·`standard`·`strict`)를 깨는 변경도 엄격이다. 그 전에는 로드맵 M1-10의 적용 전 계약 리뷰에서
