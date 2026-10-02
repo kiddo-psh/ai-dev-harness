@@ -257,6 +257,160 @@ def is_user_settings(path: Path) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# 판정 (harness judge)
+# ---------------------------------------------------------------------------
+
+TIERS = ("lite", "standard", "strict")  # 뒤로 갈수록 강하다. 소비자 계약 식별자
+TRIGGER_TIERS = ("strict", "standard")
+LOCK_FILES = (
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb",
+    "gradle.lockfile", "poetry.lock", "uv.lock", "Pipfile.lock", "Cargo.lock", "go.sum",
+    "Gemfile.lock", "composer.lock",
+)
+
+# 영역에 trigger_paths가 없거나 영역 밖 파일일 때 쓰는 공통 기본. 지정하면 이 값을 대체한다.
+DEFAULT_TRIGGER_PATHS = {
+    "strict": [
+        *LOCK_FILES,
+        ".gitlab-ci.yml", "/.github/workflows/", "Jenkinsfile",
+        "**/db/migration/", "**/db/migrate/", "**/db/changelog/", "migrations/",
+    ],
+    "standard": [],
+}
+
+# 영역 AGENTS.md의 기본 트리거(스택 중립). triggers를 생략한 영역은 이 문장으로 사람 확인을 낸다.
+# 스택 고유 항목은 프로필이 채운다
+DEFAULT_AREA_TRIGGERS = [
+    "계약 문서(API·스키마·영역 간 교환 계약)의 변경, 또는 계약과 다른 구현",
+    "DB 마이그레이션",
+    "인증·인가, 토큰·세션·쿠키 처리",
+    "트랜잭션 경계의 신설·변경, 여러 저장소에 걸친 쓰기, 외부 시스템(메시지·캐시) 쓰기와 그 재시도·멱등성·부분 실패 처리",
+    "공용 모듈 또는 다른 담당자 소유 영역의 생산 코드",
+    "의존성·lock 파일, 운영 설정, 환경 변수 계약, CI 정의",
+]
+
+# 이 경로만 바뀌면 경량이다. 스택 중립 기본값이며 영역의 test_paths로 대체한다.
+DEFAULT_TEST_PATHS = [
+    "test/", "tests/", "__tests__/", "**/src/test/",
+    "test_*.py", "*_test.py", "*_test.go", "*_spec.rb",
+    # `*.spec.*` 전체를 쓰면 API 명세(`openapi.spec.yaml`)까지 경량이 된다. 판정은 하한이라 코드 확장자로 좁힌다
+    *(f"*.{kind}.{ext}" for kind in ("test", "spec") for ext in ("js", "jsx", "ts", "tsx", "mjs", "cjs")),
+    "*Test.java", "*Tests.java", "*Test.kt", "*Tests.kt",
+]
+
+# 문서는 저장소 루트 기준으로 본다.
+DOC_PATHS = ["*.md", "/docs/"]
+
+
+def validate_judge_rules(area: dict, source) -> None:
+    """영역의 trigger_paths·test_paths 선택 키를 검사한다."""
+    name = area.get("dir")
+    if "trigger_paths" in area:
+        rules = area["trigger_paths"]
+        if not isinstance(rules, dict):
+            raise ConfigError(f"{source}: 영역 {name}의 trigger_paths는 객체여야 한다")
+        unknown = sorted(set(rules) - set(TRIGGER_TIERS))
+        if unknown:
+            raise ConfigError(f"{source}: 영역 {name}의 trigger_paths에 알 수 없는 키가 있다: {', '.join(unknown)}"
+                              f" (허용: {', '.join(TRIGGER_TIERS)})")
+        for tier, patterns in rules.items():
+            if not _str_list(patterns, allow_empty=True):
+                raise ConfigError(f"{source}: 영역 {name}의 trigger_paths.{tier}는 비어 있지 않은 문자열 목록이어야 한다")
+    if "test_paths" in area and not _str_list(area["test_paths"], allow_empty=True):
+        raise ConfigError(f"{source}: 영역 {name}의 test_paths는 비어 있지 않은 문자열 목록이어야 한다")
+
+
+def normalize_change_path(raw: str) -> str:
+    """git·사용자 입력 경로를 저장소 기준 `a/b`로 맞춘다."""
+    parts = [part for part in raw.strip().replace("\\", "/").split("/") if part not in ("", ".")]
+    return "/".join(parts)
+
+
+def _first_match(patterns: list[str], path: str) -> str | None:
+    return next((p for p in patterns if compile_glob(p).fullmatch(path)), None)
+
+
+JUDGE_KEYS = {"trigger_paths", "test_paths", "triggers"}
+
+
+def validate_judge_root(block, source) -> None:
+    """최상위 judge: 영역 밖 파일에 적용하는 trigger_paths·test_paths와 사람 확인 문장 triggers."""
+    if not isinstance(block, dict):
+        raise ConfigError(f"{source}: judge는 객체여야 한다")
+    unknown = sorted(set(block) - JUDGE_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: judge에 알 수 없는 키가 있다: {', '.join(unknown)}")
+    validate_judge_rules({"dir": "(judge)", **block}, source)
+    if "triggers" in block and not _str_list(block["triggers"]):
+        raise ConfigError(f"{source}: judge.triggers는 비어 있지 않은 문자열 목록이어야 한다")
+
+
+def judge_path(path: str, area: dict | None, root: dict | None = None) -> tuple[str, str]:
+    """(tier, 근거 규칙). 영역 규칙은 영역 디렉터리 기준, 최상위 judge 규칙은 저장소 루트 기준 상대 경로에 맞춘다."""
+    owner = area if area else (root or {})
+    rel = path[len(area["dir"]) + 1:] if area else path  # 영역 경로 자체(하위 모듈)는 빈 문자열
+    rules = owner.get("trigger_paths", DEFAULT_TRIGGER_PATHS)
+    for tier in TRIGGER_TIERS:
+        hit = _first_match(rules.get(tier, []), rel)
+        if hit:
+            return tier, f"trigger_paths.{tier}:{hit}"
+    hit = _first_match(DOC_PATHS, path)
+    if hit:
+        return "lite", f"docs:{hit}"
+    tests = owner.get("test_paths", DEFAULT_TEST_PATHS)
+    hit = _first_match(tests, rel)
+    if hit:
+        return "lite", f"test_paths:{hit}"
+    return "standard", "default"
+
+
+def judge(paths: list[str], config: dict) -> dict:
+    """변경 경로 목록의 판정. 경로로 판정할 수 없는 영역 트리거는 human_check로 돌려준다(판정값은 하한)."""
+    areas = sorted(config.get("areas", []), key=lambda a: len(a["dir"]), reverse=True)
+    root = config.get("judge") or {}
+    files, human_check, seen = [], [], set()
+    for path in dict.fromkeys(normalize_change_path(p) for p in paths):
+        if not path:
+            continue
+        # 하위 모듈 커밋 변경은 영역 이름 그대로(`backend`) 나온다. stop-verify와 같이 영역 소유로 본다
+        area = next((a for a in areas if path == a["dir"] or path.startswith(a["dir"] + "/")), None)
+        tier, rule = judge_path(path, area, root)
+        files.append({"path": path, "area": area["dir"] if area else None, "tier": tier, "rule": rule})
+        owner = area["dir"] if area else None
+        if owner not in seen:
+            seen.add(owner)
+            # 영역 문서는 triggers가 없으면 기본 트리거를 렌더하므로 판정도 같은 문장을 낸다
+            triggers = area.get("triggers", DEFAULT_AREA_TRIGGERS) if area else root.get("triggers", [])
+            human_check.extend({"area": owner, "trigger": t} for t in triggers)
+    overall = max((f["tier"] for f in files), key=TIERS.index, default="lite")
+    return {"tier": overall, "files": files, "human_check": human_check}
+
+
+def changed_files(project: Path, base: str) -> tuple[str, list[str]]:
+    """(merge-base, 변경 경로). base와 HEAD의 merge-base 이후 커밋·작업 트리·추적 안 된 파일을 모은다.
+
+    rename은 옛 경로와 새 경로를 모두 넣는다(옮겨 간 쪽과 지워진 쪽 모두 판정 대상).
+    """
+    if base.startswith("-"):  # git 옵션으로 해석되지 않게 한다
+        raise ConfigError(f"기준 ref가 잘못됐다: {base}")
+    merge_base, err = git_result(project, "merge-base", base, "HEAD")
+    if merge_base is None:
+        raise ConfigError(f"기준 {base}와 HEAD의 merge-base를 구할 수 없다: {err}")
+    merge_base = merge_base.strip()
+    # 대상이 git 최상위의 하위 디렉터리일 수 있다. --relative는 대상 밖 변경을 빼고 대상 기준 경로를 낸다.
+    # ls-files는 기본으로 현재 디렉터리 아래만 대상 기준으로 낸다
+    diff, err = git_result(project, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames",
+                           "--relative", "-z", merge_base)
+    if diff is None:
+        raise ConfigError(f"git diff 실패: {err}")
+    untracked, err = git_result(project, "ls-files", "--others", "--exclude-standard", "-z")
+    if untracked is None:
+        raise ConfigError(f"git ls-files 실패: {err}")
+    paths = [p for p in (diff + untracked).split("\0") if p]
+    return merge_base, list(dict.fromkeys(paths))
+
+
+# ---------------------------------------------------------------------------
 # git과 기록
 # ---------------------------------------------------------------------------
 
