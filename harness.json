@@ -25,7 +25,7 @@
         "/.github/workflows/security.yml", "/.github/scripts/run_fragment.py"
       ],
       "standard": [
-        "/core/", "/bin/", "/.github/", "/AGENTS.md", "/CLAUDE.md", "/harness.json",
+        "/core/", "/bin/", "/.github/", "/profiles/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/harness.json",
         "/docs/templates/", "/docs/adr/0000-template.md", "/docs/ai-collaboration.md",
         "/docs/secret-environment-variables.md"
       ]
@@ -33,6 +33,7 @@
     "test_paths": ["/tests/"],
     "triggers": [
       "core/hooks/harness_common.py의 차단·수정 로직 변경이면 엄격",
+      ".github/workflows/ci.yml의 보안 검사 리허설 단계나 .github/scripts/rehearse.py의 보안 시나리오 변경이면 엄격",
       "harness.json 스키마·CLI 인자·자리표시자 이름·판정 식별자를 깨는 변경이면 첫 소비자 적용 뒤 엄격"
     ]
   }

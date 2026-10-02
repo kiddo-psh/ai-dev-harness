@@ -181,17 +181,45 @@ class KitSelfJudgeTest(unittest.TestCase):
         ".github/workflows/ci.yml": "standard", ".github/scripts/rehearse.py": "standard",
         "core/metrics/classify_ci.py": "standard", "AGENTS.md": "standard",
         "docs/templates/plan.md": "standard", "docs/secret-environment-variables.md": "standard",
-        "core/ci/README.md": "standard", "harness.json": "standard",
+        "core/ci/README.md": "standard", "harness.json": "standard", "README.md": "standard",
+        "profiles/README.md": "standard", "core/hooks/README.md": "standard",
+        "core/hooks/settings.template.json": "strict", ".claude/hooks/protect-paths.py": "strict",
+        ".github/PULL_REQUEST_TEMPLATE.md": "standard",
         # 경량: docs/ 아래 손으로 관리하는 문서, 테스트
         "docs/roadmap.md": "lite", "docs/contributing.md": "lite", "docs/install.md": "lite",
         "tests/test_judge.py": "lite", "tests/fixtures/classify_ci/jest.log": "lite",
     }
 
+    # 엄격 판정이 걸린 디렉터리. 새 파일이 생기면 EXPECTED에 판정을 적어야 이 테스트가 통과한다
+    WATCHED_DIRS = ("core/hooks/", "core/ci/gitlab/", ".github/workflows/", ".github/scripts/", ".claude/hooks/")
+
+    def config(self):
+        return harness.load_config(ROOT / "harness.json")
+
     def test_kit_paths_match_contributing_table(self):
-        config = harness.load_config(ROOT / "harness.json")
-        result = common.judge(list(self.EXPECTED), config)
+        result = common.judge(list(self.EXPECTED), self.config())
         self.assertEqual({f["path"]: f["tier"] for f in result["files"]}, self.EXPECTED)
-        self.assertTrue(result["human_check"])  # harness_common 차단 로직 여부는 사람이 본다
+
+    def test_new_files_in_watched_dirs_need_a_decision(self):
+        """리뷰 F9: 보안 조각·hook·워크플로가 새로 생기면 표준으로 조용히 떨어지지 않게 판정을 명시한다."""
+        tracked = subprocess.run(["git", "ls-files", *self.WATCHED_DIRS], cwd=ROOT, capture_output=True,
+                                 check=True).stdout.decode("utf-8").split()
+        missing = [path for path in tracked if path not in self.EXPECTED and not path.endswith("README.md")]
+        self.assertEqual(missing, [], "docs/contributing.md 판정표를 보고 EXPECTED와 harness.json judge에 추가한다")
+
+    def test_every_strict_rule_is_exercised(self):
+        """리뷰 F10: 엄격 규칙을 지우면 어느 경로든 판정이 바뀌어 실패해야 한다."""
+        config = self.config()
+        result = common.judge([p for p, tier in self.EXPECTED.items() if tier == "strict"], config)
+        used = {f["rule"] for f in result["files"]}
+        for pattern in config["judge"]["trigger_paths"]["strict"]:
+            self.assertIn(f"trigger_paths.strict:{pattern}", used, pattern)
+
+    def test_human_check_lists_unpathable_strict_conditions(self):
+        """리뷰 F8·F10: 경로로 가를 수 없는 엄격 조건은 사람 확인 문장으로 나와야 한다."""
+        triggers = " ".join(item["trigger"] for item in common.judge(["bin/harness.py"], self.config())["human_check"])
+        for name in ("core/hooks/harness_common.py", ".github/workflows/ci.yml", "rehearse.py", "harness.json 스키마"):
+            self.assertIn(name, triggers)
 
     def test_contributing_strict_row_names_the_rule_targets(self):
         """판정표 엄격 행이 바뀌면 이 테스트로 harness.json judge도 같이 고친다."""

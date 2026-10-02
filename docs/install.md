@@ -115,8 +115,10 @@ git diff --name-only origin/main | python bin/harness.py judge ../my-project --f
 - 파일마다 `trigger_paths.strict` → `trigger_paths.standard` → 문서(`*.md`, 루트 `docs/`) → `test_paths` 순으로 맞춰
   보고, 어디에도 안 맞으면 표준이다. 전체 판정은 가장 높은 값이다. 문서·테스트만 바뀌었으면 경량이다
 - 패턴은 gitignore 방식이고 영역 디렉터리 기준이다(`/src/auth/`는 `<영역>/src/auth/` 아래). 영역 밖 파일은
-  최상위 `judge`의 `trigger_paths`·`test_paths`(저장소 루트 기준)를 쓴다. `judge`나 영역의 `trigger_paths`가 없으면
-  공통 기본(lock 파일·CI 정의·DB 마이그레이션 → 엄격)을 쓴다. 지정하면 기본을 대체한다
+  최상위 `judge`의 `trigger_paths`·`test_paths`(저장소 루트 기준)를 쓴다. 기본값은 키 단위로 대체된다. `trigger_paths`를
+  지정하지 않은 곳에는 공통 기본(lock 파일·CI 정의·DB 마이그레이션 → 엄격)을, `test_paths`를 지정하지 않은 곳에는 기본
+  테스트 경로를 쓴다
+- 최상위 `judge.triggers`는 영역 밖 파일이 하나라도 바뀌면 출력된다. 문서만 바꿔도 나오므로 문장은 조건을 담아 쓴다
 - 영역의 `triggers`와 최상위 `judge.triggers` 문장(계약 불일치, 인가 등)은 경로로 판정할 수 없어 "사람 확인 필요"로만
   출력한다
 - `--files` 목록은 UTF-8(BOM 허용) 한 줄에 경로 하나다. `git diff --name-only`가 따옴표로 감싼 비ASCII 경로도 풀어 읽는다
