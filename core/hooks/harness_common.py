@@ -60,8 +60,6 @@ def _str_list(value, allow_empty=False) -> bool:
 
 
 def validate_hooks(hooks, source) -> None:
-    if hooks is None:
-        return
     if not isinstance(hooks, dict):
         raise ConfigError(f"{source}: hooks는 객체여야 한다")
     unknown = sorted(set(hooks) - HOOK_KEYS)
@@ -123,7 +121,8 @@ def load_config(project: Path) -> dict:
         raise ConfigError(f"{path}: {exc}") from exc
     if not isinstance(config, dict):
         raise ConfigError(f"{path}: 최상위는 객체여야 한다")
-    validate_hooks(config.get("hooks"), path)
+    if "hooks" in config:
+        validate_hooks(config["hooks"], path)
     validate_areas_for_hooks(config.get("areas", []), path)
     return config
 

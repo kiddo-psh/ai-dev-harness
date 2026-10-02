@@ -293,6 +293,8 @@ class ConfigTest(unittest.TestCase):
         bad = [None, [], {**self.BASE, "platfrom": "gitlab"},
                {**self.BASE, "project_name": 1}, {**self.BASE, "default_branch": []},
                {**self.BASE, "harness_version": 2}, {**self.BASE, "issue_prefix": []},
+               {**self.BASE, "hooks": None},
+               {**self.BASE, "tracker": "jira", "issue_prefix": "   "},
                {**self.BASE, "related_docs": [{"label": "docs", "path": "a", "typo": True}]}]
         for config in bad:
             with self.subTest(config=config), self.assertRaises(harness.HarnessError):

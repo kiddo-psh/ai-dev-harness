@@ -145,7 +145,7 @@ def validate_config(config: dict, source: Path | str) -> None:
         raise HarnessError(f"{source}: platform은 {sorted(PLATFORMS)} 중 하나여야 한다")
     if config["tracker"] not in TRACKERS:
         raise HarnessError(f"{source}: tracker는 {sorted(TRACKERS)} 중 하나여야 한다")
-    if config["tracker"] == "jira" and not config.get("issue_prefix"):
+    if config["tracker"] == "jira" and not config.get("issue_prefix", "").strip():
         raise HarnessError(f"{source}: tracker가 jira이면 issue_prefix(예: ABC123)가 필요하다")
     docs = config.get("related_docs", [])
     if not isinstance(docs, list) or any(
@@ -156,7 +156,8 @@ def validate_config(config: dict, source: Path | str) -> None:
         raise HarnessError(f"{source}: related_docs는 label·path를 가진 객체 목록이어야 한다")
     validate_areas(config.get("areas", []), source)
     try:
-        hooks_common.validate_hooks(config.get("hooks"), source)
+        if "hooks" in config:  # 키를 생략하면 기본값, 명시한 null은 객체 계약 위반이다
+            hooks_common.validate_hooks(config["hooks"], source)
     except hooks_common.ConfigError as exc:
         raise HarnessError(str(exc)) from exc
 
