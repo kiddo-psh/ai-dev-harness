@@ -131,6 +131,27 @@ git diff --name-only origin/main | python bin/harness.py judge ../my-project --f
 - `--files` 목록은 UTF-8(BOM 허용) 한 줄에 경로 하나다. `git diff --name-only`가 따옴표로 감싼 비ASCII 경로도 풀어 읽는다
 - 판정과 무관하게 종료 코드 0이다. 설정·git 오류는 2
 
+### 3.5 플랜·리뷰 파일 검사 (`harness lint-plans`)
+
+커밋하지 않는 `plans/`의 플랜·리뷰 파일이 양식을 채웠는지 로컬에서 검사한다. CI는 `plans/`를 볼 수 없으므로
+CI 쪽 확인은 MR 본문 검사가 맡는다.
+
+```bash
+python bin/harness.py lint-plans --target ../my-project       # plans/ 전체
+python bin/harness.py lint-plans ABC123-52 --target ../my-project   # 그 키의 플랜과 리뷰만
+```
+
+- 대상 파일: `<키>.md`는 플랜, `<키>-review*.md`(`-review.md`, `-review-A.md` 등)는 리뷰다. 키는 tracker가 github이면
+  숫자, jira이면 `<issue_prefix>-<숫자>`다. `-mapping`·`-self-review` 파일과, 같은 키의
+  `-review-A.md`·`-review-B.md` 중 하나라도 있을 때의 `-review.md`(엄격 단계 합본 대조표)는 제외하고, 그 밖의 이름은 무시한다
+- 플랜 실패: 판정 줄이 없거나 `엄격 | 표준 | 경량`이 그대로 남음, 판정 값이 엄격·표준·경량(strict·standard·lite) 중 하나가 아님, 템플릿 절 누락, 3장 인수 테스트 표가 없거나 데이터 행 0,
+  첫 칸 외 모두 빈 행(`| T1 | | | |`). 인수 테스트 표는 템플릿과 같은 머리 행으로 찾는다. 리뷰 실패: 템플릿 절 누락,
+  6장 측정 칸 빈 값과 템플릿 측정 항목의 행 누락
+- 경고: 템플릿의 `<…>` 자리표시자가 그대로 남음(인라인 코드·코드 블록 안은 보지 않는다)
+- 절 목록과 자리표시자는 대상의 `docs/templates/plan.md`·`review.md`에서 읽고, 없으면 키트 원본을 대상 설정으로 렌더해
+  쓴다. 절 제목은 공백과 끝의 괄호 주석을 빼고 비교한다. 표 구분줄은 `|---|`, `| :---: |` 등 GFM 변형을 모두 받는다
+- 종료 코드: 실패 없음 0(경고만 있어도 0), 실패 1, 설정 오류·없는 키 2. 파일은 고치지 않는다
+
 ## 4. 기존 저장소에 붙이기
 
 기존 파일을 말없이 덮어쓰지 않는다. 충돌하는 파일이 하나라도 있으면 **아무것도 쓰지 않고 중단**하고
