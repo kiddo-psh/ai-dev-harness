@@ -79,6 +79,12 @@ class JudgeTest(unittest.TestCase):
                                          "a/x": ("strict", "trigger_paths.strict:x")})
         self.assertEqual(result["files"][0]["area"], "a/b")
 
+    def test_area_without_triggers_uses_default_triggers(self):
+        """Codex P2(PR #34): 영역 문서는 triggers가 없으면 기본 트리거를 렌더한다. 판정도 같은 문장으로 사람 확인을 낸다."""
+        result = judge(["backend/a.py"], [{"dir": "backend", "verify": ["t"]}])
+        self.assertEqual([item["trigger"] for item in result["human_check"]], harness.DEFAULT_TRIGGERS)
+        self.assertEqual(harness.DEFAULT_TRIGGERS, common.DEFAULT_AREA_TRIGGERS)
+
     def test_exact_area_path_is_area_owned(self):
         """Codex P2(PR #34): 하위 모듈 커밋 변경은 영역 이름 그대로 나온다. 영역 트리거가 빠지면 안 된다."""
         area = {"dir": "backend", "verify": ["t"], "triggers": ["인가 변경"]}
@@ -150,17 +156,20 @@ class RootJudgeTest(unittest.TestCase):
     def test_root_rules_replace_default_for_files_outside_areas(self):
         config = {"judge": {"trigger_paths": {"strict": ["/infra/"]}, "test_paths": ["/it/"],
                             "triggers": ["인가 변경"]},
-                  "areas": [{"dir": "backend", "verify": ["t"]}]}
+                  "areas": [{"dir": "backend", "verify": ["t"], "triggers": ["영역 트리거"]}]}
         result = common.judge(["infra/a.tf", "package-lock.json", "it/x.sh", "backend/package-lock.json"], config)
         self.assertEqual(tiers(result), {"infra/a.tf": ("strict", "trigger_paths.strict:/infra/"),
                                          "package-lock.json": ("standard", "default"),
                                          "it/x.sh": ("lite", "test_paths:/it/"),
                                          "backend/package-lock.json": ("strict", "trigger_paths.strict:package-lock.json")})
-        self.assertEqual(result["human_check"], [{"area": None, "trigger": "인가 변경"}])
+        self.assertEqual(result["human_check"], [{"area": None, "trigger": "인가 변경"},
+                                                 {"area": "backend", "trigger": "영역 트리거"}])
 
     def test_root_triggers_only_when_outside_file_changed(self):
-        config = {"judge": {"triggers": ["인가 변경"]}, "areas": [{"dir": "backend", "verify": ["t"]}]}
-        self.assertEqual(common.judge(["backend/a.py"], config)["human_check"], [])
+        config = {"judge": {"triggers": ["인가 변경"]},
+                  "areas": [{"dir": "backend", "verify": ["t"], "triggers": ["영역 트리거"]}]}
+        self.assertEqual(common.judge(["backend/a.py"], config)["human_check"],
+                         [{"area": "backend", "trigger": "영역 트리거"}])
 
     def test_invalid_root_judge_rejected(self):
         base = {"project_name": "d", "platform": "github", "tracker": "github",
@@ -185,7 +194,7 @@ class KitSelfJudgeTest(unittest.TestCase):
         ".github/workflows/security.yml": "strict", ".github/scripts/run_fragment.py": "strict",
         # M2-4 Claude 리뷰: 토큰·신뢰 경계(결정표 1장 엄격). 판정표 문구 추가는 사람 확인
         "core/ci/gitlab/claude-review.yml": "strict", "core/ci/claude-review/review_common.py": "strict",
-        "core/templates/claude-review/system-prompt.md": "standard",
+        "core/templates/claude-review/system-prompt.md": "strict", "core/templates/review-perspectives.md": "standard",
         # 표준: CLI, 템플릿, 보안이 아닌 CI 조각·워크플로, 생성 파일
         "bin/harness.py": "standard", "core/templates/AGENTS.md": "standard",
         "core/hooks/harness_common.py": "standard", ".claude/hooks/harness_common.py": "standard",
@@ -229,7 +238,8 @@ class KitSelfJudgeTest(unittest.TestCase):
     def test_human_check_lists_unpathable_strict_conditions(self):
         """리뷰 F8·F10: 경로로 가를 수 없는 엄격 조건은 사람 확인 문장으로 나와야 한다."""
         triggers = " ".join(item["trigger"] for item in common.judge(["bin/harness.py"], self.config())["human_check"])
-        for name in ("core/hooks/harness_common.py", ".github/workflows/ci.yml", "rehearse.py", "harness.json 스키마"):
+        for name in ("core/hooks/harness_common.py", ".github/workflows/ci.yml", "rehearse.py", "harness.json 스키마",
+                     "review-perspectives.md"):
             self.assertIn(name, triggers)
 
     def test_contributing_strict_row_names_the_rule_targets(self):

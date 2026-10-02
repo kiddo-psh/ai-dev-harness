@@ -89,15 +89,6 @@ CONSUMER_RELATED_DOCS = [
     {"label": "Secret 및 환경변수 관리 규칙", "path": "docs/secret-environment-variables.md"},
 ]
 
-# 영역 AGENTS.md의 기본 트리거. 스택 중립 항목만 두고 스택 고유 항목은 프로필이 채운다.
-DEFAULT_TRIGGERS = [
-    "계약 문서(API·스키마·영역 간 교환 계약)의 변경, 또는 계약과 다른 구현",
-    "DB 마이그레이션",
-    "인증·인가, 토큰·세션·쿠키 처리",
-    "트랜잭션 경계의 신설·변경, 여러 저장소에 걸친 쓰기, 외부 시스템(메시지·캐시) 쓰기와 그 재시도·멱등성·부분 실패 처리",
-    "공용 모듈 또는 다른 담당자 소유 영역의 생산 코드",
-    "의존성·lock 파일, 운영 설정, 환경 변수 계약, CI 정의",
-]
 
 DEFAULT_REVIEW_FOCUS = [
     "계약 정합성",
@@ -113,6 +104,9 @@ NO_AREA_DOCS = "- 아직 지정한 기준 문서가 없다. 계약·스키마·�
 _HOOKS_SPEC = importlib.util.spec_from_file_location("harness_hooks_common", HOOKS_DIR / "harness_common.py")
 hooks_common = importlib.util.module_from_spec(_HOOKS_SPEC)
 _HOOKS_SPEC.loader.exec_module(hooks_common)
+
+# 영역 AGENTS.md의 기본 트리거. 판정의 사람 확인 목록과 같은 값이라 hook 공통 코드에 둔다
+DEFAULT_TRIGGERS = list(hooks_common.DEFAULT_AREA_TRIGGERS)
 
 # claude_review 검증은 대상에 복사되는 리뷰 공통 코드와 같은 규칙을 쓴다
 _REVIEW_SPEC = importlib.util.spec_from_file_location("harness_review_common",

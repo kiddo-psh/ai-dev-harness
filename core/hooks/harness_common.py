@@ -278,6 +278,17 @@ DEFAULT_TRIGGER_PATHS = {
     "standard": [],
 }
 
+# 영역 AGENTS.md의 기본 트리거(스택 중립). triggers를 생략한 영역은 이 문장으로 사람 확인을 낸다.
+# 스택 고유 항목은 프로필이 채운다
+DEFAULT_AREA_TRIGGERS = [
+    "계약 문서(API·스키마·영역 간 교환 계약)의 변경, 또는 계약과 다른 구현",
+    "DB 마이그레이션",
+    "인증·인가, 토큰·세션·쿠키 처리",
+    "트랜잭션 경계의 신설·변경, 여러 저장소에 걸친 쓰기, 외부 시스템(메시지·캐시) 쓰기와 그 재시도·멱등성·부분 실패 처리",
+    "공용 모듈 또는 다른 담당자 소유 영역의 생산 코드",
+    "의존성·lock 파일, 운영 설정, 환경 변수 계약, CI 정의",
+]
+
 # 이 경로만 바뀌면 경량이다. 스택 중립 기본값이며 영역의 test_paths로 대체한다.
 DEFAULT_TEST_PATHS = [
     "test/", "tests/", "__tests__/", "**/src/test/",
@@ -368,7 +379,8 @@ def judge(paths: list[str], config: dict) -> dict:
         owner = area["dir"] if area else None
         if owner not in seen:
             seen.add(owner)
-            triggers = area.get("triggers", []) if area else root.get("triggers", [])
+            # 영역 문서는 triggers가 없으면 기본 트리거를 렌더하므로 판정도 같은 문장을 낸다
+            triggers = area.get("triggers", DEFAULT_AREA_TRIGGERS) if area else root.get("triggers", [])
             human_check.extend({"area": owner, "trigger": t} for t in triggers)
     overall = max((f["tier"] for f in files), key=TIERS.index, default="lite")
     return {"tier": overall, "files": files, "human_check": human_check}
