@@ -69,7 +69,12 @@ def strip_comments(text: str) -> str:
 
 
 def content_lines(body: str) -> list[str]:
-    return strip_comments(body.replace("\r\n", "\n").replace("\r", "\n")).split("\n")
+    """검사할 줄. 코드 블록을 먼저 비운 뒤 HTML 주석을 지운다.
+
+    주석을 먼저 지우면 코드 블록 안의 `` ```<!-- x --> `` 같은 줄이 닫는 펜스로 바뀌어 뒤의 예시 글이 본문으로 읽힌다.
+    """
+    lines = unfenced(body.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+    return strip_comments("\n".join(lines)).split("\n")
 
 
 FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
@@ -213,7 +218,7 @@ def table_rows(lines: list[str]) -> list[list[str]]:
 
 def lint_body(body: str, judged: str | None, examples: tuple[str, ...] = ()) -> dict:
     """본문 검사 결과. judged는 CI가 다시 낸 판정(없으면 본문만), examples는 템플릿 예시 업무 키."""
-    lines = unfenced(content_lines(body))
+    lines = unfenced(content_lines(body))  # 주석을 지운 뒤 새로 생긴 펜스도 비운다
     sections = split_sections(lines)
     failures: list[str] = []
 

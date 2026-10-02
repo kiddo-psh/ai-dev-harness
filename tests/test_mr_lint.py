@@ -202,6 +202,13 @@ class BodyLintTest(unittest.TestCase):
         after = filled().replace("- Closes DEMO-7", "````\n```\n````\n- Closes DEMO-7")
         self.assertEqual(lint.lint_body(after, "standard")["failures"], [])
 
+    def test_comment_inside_fence_does_not_close_it(self):
+        """Codex P2(PR #40): 코드 블록 안의 `` ```<!-- x --> `` 줄이 주석 제거로 닫는 펜스가 되면 안 된다."""
+        body = filled().replace("- Closes DEMO-7", "```\n```<!-- note -->\n- Closes DEMO-9\n```")
+        self.assertIn("`Closes` 또는 `Refs`", " ".join(lint.lint_body(body, None)["failures"]))
+        # 코드 블록 밖의 주석은 그대로 지운다
+        self.assertEqual(lint.lint_body(filled().replace("- Closes DEMO-7", "- Closes DEMO-7 <!-- x -->"), None)["failures"], [])
+
     def test_fence_close_rules(self):
         """Codex 리뷰: 다른 문자는 닫지 않고, 더 긴 울타리는 닫고, 짧거나 뒤에 글자가 있으면 닫지 않는다."""
         self.assertEqual(lint.unfenced(["~~~", "```", "- a", "~~~", "- b"]), ["", "", "", "", "- b"])
