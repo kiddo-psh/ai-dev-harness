@@ -254,6 +254,9 @@ def render(text: str, ctx: dict, source: str = "<template>") -> str:
     rendered = PLACEHOLDER.sub(substitute, text)
     if unknown:
         raise HarnessError(f"{source}: 알 수 없는 자리표시자: {', '.join(sorted(set(unknown)))}")
+    unmatched = PLACEHOLDER.sub("", text)
+    if "{{" in unmatched or "}}" in unmatched:
+        raise HarnessError(f"{source}: 잘못된 자리표시자 형식")
     return rendered
 
 

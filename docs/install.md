@@ -288,9 +288,9 @@ CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각�
 `triggers`·`review_focus`를 설정 파일에 저장한다. 같은 영역을 `--force`로 다시 만들 때 생략한
 선택 항목은 이전 값을 유지한다.
 
-템플릿의 `{{name}}`은 키트가 가진 값으로 치환한다. 지원 이름은 `project_name`, `platform`,
+템플릿의 `{{name}}`은 키트가 가진 값으로 치환한다. 이름은 소문자와 밑줄만 사용한다. 지원 이름은 `project_name`, `platform`,
 `pr_noun`, `pr_long`, `ci_variables`, `tracker_name`, `issue_noun`, `issue_key`,
 `issue_key_example`, `branch_key_example`, `default_branch`, `integration_branch`, `related_docs`,
 `hook_python`이다. 영역 템플릿에는 `area_dir`, `area_docs`, `area_verify`, `area_triggers`,
-`area_review_focus`가 추가된다. 알 수 없는 이름은 생성 오류다. 생성 파일 목록과 원본 경로는
+`area_review_focus`가 추가된다. 알 수 없는 이름이나 잘못된 표기는 생성 오류다. 생성 파일 목록과 원본 경로는
 `core/templates/manifest.json`이 정의하며, 이는 소비자 설정이 아닌 키트 작성자용 계약이다.

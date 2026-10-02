@@ -53,6 +53,11 @@ class RenderTest(unittest.TestCase):
         with self.assertRaises(harness.HarnessError):
             harness.render("{{no_such_key}}", ctx)
 
+    def test_malformed_placeholders_fail(self):
+        for template in ("{{Bad-Name}}", "{{Missing}}", "{{unfinished", "orphan }}"):
+            with self.subTest(template=template), self.assertRaises(harness.HarnessError):
+                harness.render(template, {})
+
     def test_jira_requires_prefix(self):
         with self.assertRaises(harness.HarnessError):
             harness.validate_config({
