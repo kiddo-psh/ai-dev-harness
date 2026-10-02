@@ -154,6 +154,31 @@ class NormalizeTest(unittest.TestCase):
         self.assertEqual(oom["line"], 3)
 
 
+class ReviewRegressionTest(unittest.TestCase):
+    """분리 리뷰(plans/28-review.md) 지적 회귀."""
+
+    def test_eslint_warnings_only_not_format(self):
+        trace = "✖ 3 problems (0 errors, 3 warnings)\nTests:       1 failed, 4 passed, 5 total\n"
+        self.assertEqual(classify_ci.classify_job(job(), trace)["category"], "test")
+        trace = "✖ 3 problems (2 errors, 1 warning)\n"
+        self.assertEqual(classify_ci.classify_job(job(), trace)["category"], "format")
+
+    def test_timestamp_without_stream_marker_keeps_text(self):
+        trace = ("2026-10-02T01:02:03.1234567Z FAILED tests/a.py::t - assert 1\n"
+                 "2026-10-02T01:02:04.1234567Z Killed\n")
+        self.assertEqual(classify_ci.normalize_lines(trace)[:2], ["FAILED tests/a.py::t - assert 1", "Killed"])
+        rules = {m["rule"] for m in classify_ci.classify_job(job(), trace)["matches"]}
+        self.assertTrue({"test.pytest", "infra.oom"} <= rules)
+
+    def test_long_gradle_like_line_is_fast(self):
+        import time
+        line = "a" + " > b" * 40000 + " x"
+        start = time.monotonic()
+        classify_ci.classify_job(job(), line + "\n")
+        self.assertLess(time.monotonic() - start, 2.0)
+        self.assertEqual(classify_ci.classify_job(job(), "AppTest > testFoo() FAILED\n")["category"], "test")
+
+
 class FilterTest(unittest.TestCase):
     def test_only_failed_jobs(self):
         jobs = [job(1, status="success"), job(2, status="canceled"), job(3, status="skipped"),
@@ -179,7 +204,9 @@ class LoadTest(unittest.TestCase):
         cases = ["", "not json", "[1]", json.dumps({"name": "x", "status": "failed"}),
                  json.dumps({"id": "../x", "status": "failed"}), json.dumps({"id": True, "status": "failed"}),
                  json.dumps({"id": -1, "status": "failed"}), json.dumps({"id": 1}),
-                 json.dumps({"id": 1, "status": "failed", "name": 3})]
+                 json.dumps({"id": 1, "status": "failed", "name": 3}),
+                 json.dumps({"id": "9" * 19, "status": "failed"}), json.dumps({"id": 10 ** 18, "status": "failed"}),
+                 '[{"id": ' + "9" * 5000 + ', "status": "failed"}]']
         for text in cases:
             with self.subTest(text=text), self.assertRaises(classify_ci.ClassifyError):
                 classify_ci.load_jobs(text)

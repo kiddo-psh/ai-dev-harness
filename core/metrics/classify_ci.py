@@ -62,14 +62,15 @@ LOG_RULES = [
      r"The following files had format violations|Task :\S*spotless\w*Check FAILED|Execution failed for task '[^']*:spotless\w*'"
      r"|Run '[^']*spotlessApply' to fix"),
     ("format.prettier", "format", r"Code style issues found in|Forgot to run Prettier\?"),
-    ("format.eslint", "format", r"\b\d+ problems? \(\d+ errors?, \d+ warnings?\)"),
+    # 경고만 있으면 eslint는 0으로 끝나 job을 실패시키지 않으므로 오류가 1개 이상일 때만 맞춘다
+    ("format.eslint", "format", r"\b\d+ problems? \([1-9]\d* errors?, \d+ warnings?\)"),
     ("format.python", "format", r"\d+ files? would be reformatted|^would reformat |^Would reformat: "),
     ("format.java_lint", "format",
      r"Checkstyle rule violations were found|\[ant:checkstyle\]|ktlint\w* FAILED|Lint error > "),
 
     ("test.gradle", "test",
      r"There were failing tests|\d+ tests completed, \d+ failed|Task :\S*[tT]est FAILED|Execution failed for task '[^']*[tT]est'"
-     r"|^\S.* > .*\S FAILED$"),
+     r"|^(?=.*\S FAILED$)\S.* > "),  # 줄 끝을 먼저 확인해 ` > `가 많은 긴 줄에서 되추적이 커지지 않게 한다
     ("test.maven", "test", r"There are test failures|Tests run: \d+, Failures: \d+, Errors: \d+.*<<< FAIL"),
     ("test.jest", "test",
      r"^Tests:\s+.*\b\d+ failed|^Test Files\s+.*\b\d+ failed|^\s*FAIL\s+\S+\.(?:test|spec)\.[cm]?[jt]sx?\b"),
@@ -80,8 +81,9 @@ LOG_RULES = [
 _COMPILED_RULES = [(rule, category, re.compile(pattern)) for rule, category, pattern in LOG_RULES]
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
-# GitLab FF_TIMESTAMPS 접두: `2024-01-02T03:04:05.123456Z 00O+ `
-TIMESTAMP_PREFIX = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z \S+ ?")
+# GitLab FF_TIMESTAMPS 접두 `2024-01-02T03:04:05.123456Z 00O+ `, gh 로그 접두 `2024-01-02T03:04:05.1234567Z `
+TIMESTAMP_PREFIX = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z (?:[0-9a-f]{2}[OE]\+? )?")
+MAX_ID_DIGITS = 18
 
 
 class ClassifyError(Exception):
@@ -111,7 +113,7 @@ def _marker_matches(lines: list[str]) -> list[dict]:
             continue
         try:
             data = json.loads(hit.group(2))
-        except json.JSONDecodeError:
+        except ValueError:
             continue
         category = data.get("category") if isinstance(data, dict) else None
         if category not in CATEGORIES or category == "unclassified":
@@ -181,9 +183,9 @@ def _job_id(job: dict) -> int:
     value = job.get("id")
     if isinstance(value, bool):
         value = None
-    if isinstance(value, str) and value.isascii() and value.isdigit():
+    if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= MAX_ID_DIGITS:
         value = int(value)
-    if not isinstance(value, int) or value < 0:
+    if not isinstance(value, int) or not 0 <= value < 10 ** MAX_ID_DIGITS:
         raise ClassifyError(f"job id는 0 이상의 정수여야 한다: {job.get('id')!r}")
     return value
 
@@ -199,7 +201,7 @@ def load_jobs(text: str) -> list[dict]:
             break
         try:
             value, pos = decoder.raw_decode(text, pos)
-        except json.JSONDecodeError as exc:
+        except ValueError as exc:
             raise ClassifyError(f"job 메타데이터 JSON 오류: {exc}") from exc
         values.extend(value if isinstance(value, list) else [value])
     if not values:
