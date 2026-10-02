@@ -1,0 +1,18 @@
+$ npm ci
+added 812 packages in 21s
+$ npm test -- --ci
+
+> web@0.1.0 test
+> jest --ci
+
+PASS src/utils/date.test.ts
+FAIL src/pages/Booking.test.tsx
+  ● Booking › shows error when seat is taken
+
+    expect(received).toBeInTheDocument()
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       1 failed, 14 passed, 15 total
+Snapshots:   0 total
+Time:        6.12 s
+ERROR: Job failed: exit code 1

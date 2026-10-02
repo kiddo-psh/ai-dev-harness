@@ -1,0 +1,8 @@
+$ npm run build
+> web@0.1.0 build
+> vite build
+
+<--- Last few GCs --->
+FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
+Killed
+ERROR: Job failed: exit code 137

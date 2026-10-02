@@ -1,0 +1,6 @@
+$ ./gradlew test --no-daemon
+Could not resolve host: repo.example.invalid
+ReservationServiceTest > loadsFixtures() FAILED
+> Task :test FAILED
+Execution failed for task ':test'.
+> There were failing tests.

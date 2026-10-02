@@ -1,0 +1,21 @@
+$ ./gradlew clean test spotlessCheck --no-daemon --continue
+ReservationServiceTest > cancelReleasesSeat() FAILED
+> Task :test FAILED
+> Task :spotlessJavaCheck FAILED
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+* What went wrong:
+Execution failed for task ':test'.
+> There were failing tests.
+
+2: Task failed with an exception.
+* What went wrong:
+Execution failed for task ':spotlessJavaCheck'.
+> The following files had format violations:
+      src/main/java/app/ReservationService.java
+  Run './gradlew :spotlessApply' to fix these violations.
+
+BUILD FAILED in 58s
+ERROR: Job failed: exit code 1

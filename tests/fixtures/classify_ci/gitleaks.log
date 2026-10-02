@@ -1,0 +1,11 @@
+$ gitleaks git --no-banner --redact --report-format json --report-path gitleaks-report.json --exit-code 1 .
+Finding:     REDACTED
+RuleID:      generic-api-key
+File:        src/config.js
+Line:        3
+Fingerprint: 0000000:src/config.js:generic-api-key:3
+
+1 commits scanned.
+scanned ~420 bytes in 12ms
+leaks found: 1
+ERROR: Job failed: exit code 1
