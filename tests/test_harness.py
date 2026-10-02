@@ -480,7 +480,7 @@ class AreaCheckTest(AreaTestBase):
 
 
 class AreaTemplateTest(unittest.TestCase):
-    LINE_BUDGET = 70
+    LINE_BUDGET = 73  # M2-5: 리뷰 관점 원본의 공통 절(노이즈 제외·코드 대조)을 영역 문서에도 넣는다
 
     def rendered(self):
         ctx = harness.build_context({
@@ -502,6 +502,106 @@ class AreaTemplateTest(unittest.TestCase):
         for line in rules:
             with self.subTest(rule=line[:40]):
                 self.assertRegex(line, r"\[(hook|ci|사람)\]$")
+
+
+class IncludeTest(unittest.TestCase):
+    """manifest includes: 리뷰 관점 원본(review-perspectives.md)의 절을 자리표시자로 넣는다."""
+
+    CONFIG = {"project_name": "demo", "platform": "gitlab", "tracker": "jira", "issue_prefix": "DEMO",
+              "default_branch": "main", "integration_branch": "develop"}
+
+    def source_sections(self):
+        text = (harness.TEMPLATES_DIR / "review-perspectives.md").read_text(encoding="utf-8")
+        return harness.markdown_sections(text)
+
+    def first_bullet(self, section):
+        line = next(l for l in self.source_sections()[section].splitlines() if l.startswith("- "))
+        return line.split("{{")[0][:30]  # 자리표시자 앞까지만 비교한다
+
+    def test_sections_composed(self):
+        ctx = harness.build_context(self.CONFIG)
+        local, ci = ctx["review_perspectives"], ctx["review_perspectives_ci"]
+        for section, inside, outside in (("공통", [local, ci], []), ("로컬", [local], [ci]), ("CI", [ci], [local])):
+            for text in inside:
+                self.assertIn(self.first_bullet(section), text, section)
+            for text in outside:
+                self.assertNotIn(self.first_bullet(section), text, section)
+        for text in (local, ci):
+            self.assertNotIn("## ", text)
+            self.assertNotIn("\n\n", text)  # 절을 한 목록으로 잇는다
+            self.assertTrue(all(line.startswith("- ") for line in text.splitlines()))
+        self.assertTrue(all(line.endswith(" [사람]") for line in local.splitlines()))
+        self.assertNotIn("[사람]", ci)
+
+    def test_include_rendered_with_context(self):
+        for platform, noun in (("gitlab", "MR"), ("github", "PR")):
+            ctx = harness.build_context({**self.CONFIG, "platform": platform})
+            self.assertIn(f"{noun} 설명", ctx["review_perspectives_ci"])
+            self.assertNotIn("{{", ctx["review_perspectives"] + ctx["review_perspectives_ci"])
+
+    def test_invalid_includes_rejected(self):
+        good = {"name": "x_inc", "src": "review-perspectives.md", "sections": ["공통"]}
+        bad = [
+            "x",
+            [{**good, "sections": ["없는 절"]}],
+            [{**good, "sections": []}],
+            [{**good, "sections": [""]}],
+            [{**good, "name": "project_name"}],
+            [{**good, "name": "Bad-Name"}],
+            [{**good, "src": "../AGENTS.md"}],
+            [{**good, "src": "/abs.md"}],
+            [{**good, "src": "missing.md"}],
+            [good, good],
+            [{**good, "extra": 1}],
+            [{**good, "tag": "a b"}],
+            [{**good, "tag": "[x]"}],
+        ]
+        real = harness.read_manifest()
+        for includes in bad:
+            with self.subTest(includes=includes), \
+                    patch.object(harness, "read_manifest", return_value={**real, "includes": includes}), \
+                    self.assertRaises(harness.HarnessError):
+                harness.build_context(self.CONFIG)
+        with patch.object(harness, "read_manifest", return_value={**real, "includes": [good]}):
+            self.assertIn("x_inc", harness.build_context(self.CONFIG))
+
+    def test_duplicate_section_rejected(self):
+        with self.assertRaises(harness.HarnessError):
+            harness.markdown_sections("## a\n- x\n## a\n- y\n")
+
+    def test_generated_files_use_source(self):
+        tmp = Path(tempfile.mkdtemp(prefix="harness-include-"))
+        try:
+            target = tmp / "consumer"
+            self.assertEqual(run(["init", str(target), "--platform", "gitlab", "--tracker", "jira",
+                                  "--issue-prefix", "DEMO"])[0], 0)
+            self.assertEqual(run(["init", str(target), "--area", "backend", "--verify-cmd", "make t",
+                                  "--review-focus", "접근성"])[0], 0)
+            review = (target / "docs/templates/review.md").read_text(encoding="utf-8")
+            area = (target / "backend/AGENTS.md").read_text(encoding="utf-8")
+            for text in (review, area):
+                self.assertIn(self.first_bullet("공통"), text)
+                self.assertIn(self.first_bullet("로컬"), text)
+                self.assertNotIn(self.first_bullet("CI"), text)
+                self.assertNotIn("관점: 계약 정합성 · 정확성 · 보안(입력 검증, Secret 전체 1회)", text)
+            self.assertIn("이 영역에서 특히 볼 관점: 접근성.", area)
+            self.assertLess(area.index("이 영역에서 특히 볼 관점"), area.index(self.first_bullet("공통")))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_source_change_is_drift(self):
+        tmp = Path(tempfile.mkdtemp(prefix="harness-include-"))
+        try:
+            target = tmp / "consumer"
+            run(["init", str(target), "--platform", "github", "--tracker", "github"])
+            self.assertEqual(run(["check", str(target)])[0], 0)
+            original = harness.include_text
+            with patch.object(harness, "include_text", lambda inc: original(inc) + "\n- 새 관점"):
+                code, out = run(["check", str(target)])
+            self.assertEqual(code, 1)
+            self.assertIn("불일치: docs/templates/review.md", out)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class TierNameTest(unittest.TestCase):

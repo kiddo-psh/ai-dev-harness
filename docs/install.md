@@ -291,6 +291,9 @@ CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각�
 템플릿의 `{{name}}`은 키트가 가진 값으로 치환한다. 이름은 소문자와 밑줄만 사용한다. 지원 이름은 `project_name`, `platform`,
 `pr_noun`, `pr_long`, `ci_variables`, `tracker_name`, `issue_noun`, `issue_key`,
 `issue_key_example`, `branch_key_example`, `default_branch`, `integration_branch`, `related_docs`,
-`hook_python`이다. 영역 템플릿에는 `area_dir`, `area_docs`, `area_verify`, `area_triggers`,
+`hook_python`, `review_perspectives`, `review_perspectives_ci`다. 마지막 둘은 리뷰 관점 원본
+(`core/templates/review-perspectives.md`)의 절을 묶은 값이다(공통+로컬, 공통+CI). 영역 템플릿에는 `area_dir`, `area_docs`, `area_verify`, `area_triggers`,
 `area_review_focus`가 추가된다. 알 수 없는 이름이나 잘못된 표기는 생성 오류다. 생성 파일 목록과 원본 경로는
 `core/templates/manifest.json`이 정의하며, 이는 소비자 설정이 아닌 키트 작성자용 계약이다.
+매니페스트의 `includes`는 원본 파일의 `##` 절을 골라 자리표시자 값으로 넣는다. 원본을 고치면 생성 파일이 바뀌므로
+`check`가 불일치로 보고한다.
