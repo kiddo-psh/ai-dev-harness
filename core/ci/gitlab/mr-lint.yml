@@ -1,0 +1,50 @@
+# harness: MR 본문 lint
+#
+# MR 본문의 필수 절을 검사한다. `Closes`(또는 `Refs`) 줄, `## 검증`의 방법·결과·미검증 값, `## 영향 범위`의
+# 체크 1개 이상, `## 판정`(lite·standard·strict, 경량·표준·엄격). 변경 파일로 판정(harness judge)을 다시 계산해
+# 본문 판정과 높은 쪽을 적용하고, 다르면 불일치로 기록한다. 적용 판정이 엄격이면 `## 플랜 요약`·`## 리뷰 결과`가
+# "해당 없음"이 아니고 측정 칸에 빈칸이 없어야 한다. MR이 `plans/` 파일을 넣거나 `.gitignore`에 `/plans/`가 없어도
+# 실패한다. 검사할 수 없으면(MR 변수·필요 파일 없음, 본문 잘림, 얕은 clone) 통과로 넘기지 않고 실패한다.
+#
+# 검사 코드는 `harness init`이 대상 저장소에 넣은 `.harness/mr-lint/mr_lint.py`이고 판정은
+# `.claude/hooks/harness_common.py`와 `harness.json`을 쓴다(`harness check`가 드리프트를 본다).
+#
+# 사용법:
+#   include:
+#     - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/mr-lint.yml
+#
+# 변수:
+#   HARNESS_COMMENT_TOKEN  (선택) 판정 결과를 MR 댓글 하나로 남기고 다시 돌 때 갱신한다. 없으면 job 로그와
+#                          아티팩트만 남긴다. MR 파이프라인은 MR 작성자의 코드와 같이 돌므로 이 토큰은 MR을 올릴 수
+#                          있는 사람이 읽을 수 있다. Reporter 역할·`api` 범위의 전용 프로젝트 액세스 토큰만 쓴다.
+#   `stage`·`image` 등은 같은 이름의 job을 로컬에 다시 적어 덮어쓴다. `GIT_DEPTH`는 0이어야 한다.
+# 필요 조건: Docker executor runner, Docker Hub 접근, GitLab 16.7 이상(CI_MERGE_REQUEST_DESCRIPTION).
+# 예외: 없음. 끄려면 include에서 빼거나 같은 이름의 job을 `rules: [{when: never}]`로 덮어쓴다.
+# 한계: 본문만 고치면 파이프라인이 다시 돌지 않는다(새 파이프라인을 실행한다). CI 변수의 본문은 2700자에서
+#       잘리며, 잘렸으면 실패한다. MR이 검사 코드나 CI 정의를 바꾸면 우회할 수 있다(보안 검사가 아니다).
+# 리포트: mr-lint.json (판정·실패 항목·변경 파일 판정, 30일 보관)
+
+harness-mr-lint:
+  stage: test
+  image:
+    name: python:3.12.15-bookworm@sha256:e91fec3d1ac69f04e4eddcd29c327e630ce34658cf31075bfa7e8b0e052bafea
+    entrypoint: [""]
+  variables:
+    GIT_DEPTH: "0"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  interruptible: true
+  script:
+    - |
+      set -eu
+      fail() { echo "harness: $*"; exit 2; }
+      git config --global --add safe.directory "$CI_PROJECT_DIR"
+      for f in .harness/mr-lint/mr_lint.py .claude/hooks/harness_common.py harness.json; do
+        if [ ! -f "$f" ]; then fail "$f 이 없다. 키트의 harness init 으로 생성하고 커밋한다."; fi
+      done
+      python3 -I -B .harness/mr-lint/mr_lint.py --out mr-lint.json
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - mr-lint.json

@@ -40,6 +40,12 @@ python bin/harness.py version
 | `.claude/settings.json`, `.claude/hooks/` | Claude Code hooks ([설명](../core/hooks/README.md)) |
 | `harness.json` | 대상 저장소의 키트 설정. 이후 모든 명령이 이 파일을 읽는다 |
 | `.harness/claude-review/` | `harness.json`에 `claude_review` 블록이 있을 때만. Claude MR 리뷰 스크립트와 시스템 프롬프트(14절) |
+| `.harness/mr-lint/mr_lint.py` | `gitlab`만. MR 본문 lint 조각이 실행하는 검사 코드(5절) |
+| `.gitignore`의 `/plans/` 줄 | 생성 파일이 아니라 한 줄 추가다. 아래 참고 |
+
+`init`은 대상의 `.gitignore`에 `/plans/` 줄이 없을 때만 끝에 주석 한 줄과 함께 추가한다. 파일이 없으면 만들고,
+있으면 기존 내용은 그대로 둔다(줄 끝 형식도 따른다). 플랜·리뷰 파일(`plans/`)은 커밋하지 않으며 MR 본문 lint가
+이 줄이 없거나 MR이 `plans/` 파일을 넣으면 실패한다. `.gitignore`는 `check`가 보지 않는다.
 
 영역 `AGENTS.md`는 3절에서 따로 생성한다. GitLab CI 조각은 5절에서 연결한다.
 
@@ -197,6 +203,11 @@ python bin/harness.py init ../my-project --force --platform github --tracker git
 - 설정 방법·필요 조건·끄는 법은 [`core/ci/README.md`](../core/ci/README.md)를 따른다
 - Claude MR 리뷰 조각(`claude-review.yml`)은 선택이며 서버 준비가 필요하다. MR 파이프라인이 아니라 보호 브랜치
   파이프라인에서 돈다(14절)
+- MR 본문 lint 조각(`mr-lint.yml`)은 MR 본문의 필수 절(업무 참조, 판정, 검증, 영향 범위, 엄격이면 플랜 요약·리뷰 결과)과
+  `plans/` 규칙을 검사하고 실패하면 MR 파이프라인이 실패한다. `init`이 넣은 `.harness/mr-lint/mr_lint.py`,
+  `.claude/hooks/harness_common.py`, `harness.json`을 커밋해 두어야 한다. GitLab 16.7 이상이 필요하고, 본문만 고치면
+  다시 돌지 않으므로 새 파이프라인을 실행한다. 판정 댓글은 선택(`HARNESS_COMMENT_TOKEN`)이다. 통합 MR(`Release.md`)은
+  업무 참조·판정 절이 없어 실패하므로 필요하면 rules를 덮어쓴다([`core/ci/README.md`](../core/ci/README.md) "MR 본문 lint")
 
 ## 6. hooks 설정
 
@@ -304,7 +315,8 @@ rm .claude/settings.json harness.json
 
 문서(`AGENTS.md`, `CLAUDE.md`, `docs/`)와 병합 요청 템플릿은 저장소의 내용이므로 지울지는 따로 판단한다.
 CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각의 job 참조도 지운다.
-Claude MR 리뷰를 켰다면 `.harness/claude-review/`도 지운다(14절).
+Claude MR 리뷰를 켰다면 `.harness/claude-review/`도 지운다(14절). GitLab이면 `.harness/mr-lint/`도 지운다.
+`.gitignore`의 `/plans/` 줄은 남겨 둬도 된다.
 
 `.claude/settings.local.json`은 개인 설정이라 키트가 만들지 않았다. 지우지 않는다.
 

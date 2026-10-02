@@ -53,7 +53,7 @@
 완료 기준: diff 기반 3단계 자동 판정이 MR 댓글로 붙고, MR 본문 필수 절이 비면 CI가 실패한다.
 
 - [x] M2-1 판정 스크립트 `harness judge`: 변경 파일 목록과 경로 규칙(`harness.json`의 `areas[].trigger_paths`·최상위 `judge`, 문장 트리거는 사람 확인)으로 경량·표준·엄격(`lite`·`standard`·`strict`)을 산출. 사람 판정과 다르면 기록(측정 4번, M2-2) (#27)
-- [ ] M2-2 MR 본문 lint CI 조각: `Closes`, 검증 절(방법·결과·미검증), 영향 범위 체크박스 중 하나 이상 필수. 엄격 판정이면 플랜 요약·리뷰 결과 절 필수. diff에 `plans/` 경로가 있거나 `.gitignore`에 `/plans/`가 없으면 실패(영역 `AGENTS.md` 5장의 `[ci]` 규칙)
+- [x] M2-2 MR 본문 lint CI 조각: `Closes`, 검증 절(방법·결과·미검증), 영향 범위 체크박스 중 하나 이상 필수. 엄격 판정이면 플랜 요약·리뷰 결과 절 필수. diff에 `plans/` 경로가 있거나 `.gitignore`에 `/plans/`가 없으면 실패(영역 `AGENTS.md` 5장의 `[ci]` 규칙) (#37)
 - [x] M2-3 플랜·리뷰 파일 lint `harness lint-plans`: 템플릿 절 누락, 측정 칸 빈칸, 인수 테스트 표 0행 검출. 로컬 CLI이고 hooks 연결은 후속(#22). `plans/`는 커밋하지 않아 CI가 볼 수 없으므로 CI 쪽은 M2-2 MR 본문의 측정 칸 검사가 대신한다 (#38)
 - [x] M2-4 Claude MR 리뷰 CI 조각 이관: feelm의 수집·생성·게시 스크립트를 `core/ci/claude-review/`로 옮기고 프로젝트 고유값을 설정으로 분리. 도구 없는 실행·네트워크 가드 문서화 (#32)
 - [x] M2-5 리뷰 프롬프트 단일화: 로컬 W1/W2 리뷰 관점과 CI Claude 리뷰 시스템 프롬프트를 한 파일(`core/templates/review-perspectives.md`)에서 생성. CI 프롬프트 파일은 M2-4에서 `review_perspectives_ci`로 렌더 (#29)

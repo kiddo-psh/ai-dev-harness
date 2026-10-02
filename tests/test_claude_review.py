@@ -524,12 +524,13 @@ class InitCheckTest(unittest.TestCase):
 
     def test_without_block_nothing_changes(self):
         config = dict(BASE_CONFIG)
+        review = ".harness/claude-review/"  # .harness/ 아래 다른 파일(mr-lint, M2-2)은 블록과 무관하게 생긴다
         outputs = harness.render_all(config, self_mode=False)
-        self.assertFalse([dest for dest in outputs if dest.startswith(".harness/")])
+        self.assertFalse([dest for dest in outputs if dest.startswith(review)])
         with_block = harness.render_all({**config, "claude_review": BLOCK}, self_mode=False)
-        self.assertEqual({k: v for k, v in with_block.items() if not k.startswith(".harness/")}, outputs)
+        self.assertEqual({k: v for k, v in with_block.items() if not k.startswith(review)}, outputs)
         target = self.init(config)
-        self.assertFalse((target / ".harness").exists())
+        self.assertFalse((target / review).exists())
         self.assertEqual(run(["check", str(target)])[0], 0)
         self_outputs = harness.render_all(harness.load_config(ROOT / "harness.json"), self_mode=True)
         self.assertFalse([dest for dest in self_outputs if dest.startswith(".harness/")])  # D-34

@@ -168,7 +168,9 @@ class RehearseTest(unittest.TestCase):
 class CiWorkflowTest(unittest.TestCase):
     def test_rehearsal_job(self):
         body = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertTrue(body.startswith("name: ci\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n"))
+        # M2-2(#37): PR 본문 수정에도 mr-lint가 다시 돌도록 edited를 더했다. 다른 job도 같은 트리거로 돈다
+        self.assertRegex(body, r"^name: ci\n\non:\n  push:\n    branches: \[main\]\n(?:  #.*\n)?"
+                               r"  pull_request:\n    types: \[opened, synchronize, reopened, edited\]\n\njobs:\n")
         self.assertNotRegex(body, r"(?m)^(?:defaults|env):")
         block = re.search(r"^  rehearsal:\n((?:(?:    .*)?\n)+)", body, re.M).group(1)
         lines = [line.split("  #")[0].rstrip() for line in block.splitlines()
@@ -187,7 +189,10 @@ class CiWorkflowTest(unittest.TestCase):
             "      - name: 보안 검사 리허설",
             "        run: python3 .github/scripts/rehearse.py security",
         ])
-        self.assertNotIn("continue-on-error", body)
+        # M2-2(#37): 실패를 가리는 continue-on-error는 판정 댓글 job(PR 체크가 아닌 선택 기능)의 아티팩트 내려받기에만 둔다
+        comment_job = re.search(r"^  mr-lint-comment:\n(?:(?:    .*)?\n)+", body, re.M).group(0)
+        self.assertNotIn("continue-on-error", body.replace(comment_job, ""))
+        self.assertEqual(comment_job.count("continue-on-error"), 1)
 
 
 if __name__ == "__main__":
