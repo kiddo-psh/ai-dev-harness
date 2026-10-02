@@ -183,6 +183,58 @@ class SelectTest(unittest.TestCase):
         self.assertEqual(groups["ignored"], ["38.md", "XYZ-1.md"])
 
 
+class ReviewFindingTest(unittest.TestCase):
+    """분리 리뷰(plans/38-review.md) 지적 회귀."""
+
+    ACCEPTANCE = ("| # | 테스트 (파일 또는 클래스.메서드) | 전제 · 입력 | 기대 결과 (응답 · 오류 코드 · 상태 변화) |\n"
+                  "| --- | --- | --- | --- |\n| T1 | `XTest.test_a` | 입력 `a \\| b` | 종료 0 |\n"
+                  "| T2 | `XTest.test_b` | 잘못된 입력 | 종료 2 |\n")
+
+    def test_missing_acceptance_table_not_replaced_by_other_table(self):
+        # F1: 인수 테스트 표를 지우면 대체 검증 표를 대신 읽어 통과하던 문제
+        text = fixture("plan.md").replace(self.ACCEPTANCE, "").replace(
+            "| 변경 | 대체 검증 | 통과 조건 |\n| --- | --- | --- |\n",
+            "| 변경 | 대체 검증 | 통과 조건 |\n| --- | --- | --- |\n| 문서 | 대조 | 일치 |\n")
+        failures, _ = lint_plan(text)
+        self.assertEqual(failures, ["## 3. 인수 테스트 목록: 인수 테스트 표가 없다"])
+
+    def test_deleted_measurement_row(self):
+        # F2: 측정 행을 지우는 것도 빈 측정 칸이다
+        text = fixture("review.md").replace("| 리뷰 세션 모델 | 합성 |\n", "")
+        failures, _ = lint_review(text)
+        self.assertEqual(failures, ["## 6. 측정 칸: 측정 항목이 없다: 리뷰 세션 모델"])
+
+    def test_measurement_row_without_value_cell(self):
+        # F5: 값 칸이 없는 행
+        text = fixture("review.md").replace("| 리뷰 세션 모델 | 합성 |", "| 리뷰 세션 모델 |")
+        failures, _ = lint_review(text)
+        self.assertEqual(failures, ["## 6. 측정 칸: 측정 칸이 비었다: 리뷰 세션 모델"])
+
+    def test_tier_value_must_be_single(self):
+        # F3: 판정 값은 하나만, 비어 있으면 실패
+        for tier in ("**엄격 | 표준**", "", "**엄격 \\| 표준 \\| 경량**", "미정"):
+            with self.subTest(tier=tier):
+                failures, _ = lint_plan(fixture("plan.md").replace("판정: **표준**", f"판정: {tier}"))
+                self.assertEqual(len(failures), 1, failures)
+        for tier in ("**엄격**", "경량", "standard", "**strict**"):
+            with self.subTest(tier=tier):
+                failures, _ = lint_plan(fixture("plan.md").replace("판정: **표준**", f"판정: {tier}"))
+                self.assertEqual(failures, [])
+
+    def test_tier_read_only_from_header(self):
+        # F5: 본문의 `판정:` 문장은 판정 줄로 보지 않는다
+        text = fixture("plan.md").replace("## 4. 미확정 항목\n", "## 4. 미확정 항목\n\n판정: 엄격 | 표준 | 경량 중 고를 때 참고\n")
+        self.assertEqual(lint_plan(text), ([], []))
+
+    def test_placeholder_inside_inline_code_not_warned(self):
+        # F5: 템플릿 자리표시자라도 인라인 코드 안이면 경고하지 않는다
+        placeholder = "<한 줄>"
+        self.assertIn(placeholder, PLAN_SPEC["placeholders"])
+        text = fixture("plan.md").replace("## 4. 미확정 항목\n", f"## 4. 미확정 항목\n\n양식의 `{placeholder}`는 지운다.\n")
+        self.assertEqual(lint_plan(text), ([], []))
+        self.assertEqual(len(lint_plan(text.replace(f"`{placeholder}`", placeholder))[1]), 1)
+
+
 class CliTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -200,6 +252,16 @@ class CliTest(unittest.TestCase):
 
     def lint(self, *argv):
         return run(["lint-plans", *argv, "--target", str(self.repo)])
+
+    def test_key_must_be_tracker_key(self):
+        # F4: 키 인자도 tracker 이슈 키 형식이어야 한다
+        self.write("10-review-A.md", fixture("review.md"))
+        self.write("m2-decisions.md", "# 결정\n")
+        for key in ("10-review-A", "m2-decisions", "abc"):
+            with self.subTest(key=key):
+                code, _, err = run(["lint-plans", key, "--target", str(self.repo)])
+                self.assertEqual(code, 2)
+                self.assertIn("이슈 키", err)
 
     def test_exit_codes(self):  # T15
         self.write("7.md", fixture("plan.md"))

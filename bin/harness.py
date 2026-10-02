@@ -686,7 +686,8 @@ def cmd_classify_ci(args) -> int:
 PLAN_TEMPLATE = "docs/templates/plan.md"
 REVIEW_TEMPLATE = "docs/templates/review.md"
 LINT_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-UNCHOSEN_TIER = re.compile(r"엄격\s*\|\s*표준\s*\|\s*경량")
+UNCHOSEN_TIER = re.compile(r"엄격\s*\\?\|\s*표준\s*\\?\|\s*경량")
+TIER_WORDS = re.compile(r"엄격|표준|경량|\bstrict\b|\bstandard\b|\blite\b")
 TEMPLATE_PLACEHOLDER = re.compile(r"<[^<>\n]+>")
 TABLE_DELIMITER = re.compile(r"\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*")
 CELL_SPLIT = re.compile(r"(?<!\\)\|")
@@ -743,15 +744,29 @@ def table_cells(line: str) -> list[str]:
     return [cell.strip() for cell in CELL_SPLIT.split(body)]
 
 
-def first_table(lines: list[str]) -> list[list[str]] | None:
-    """절 안의 첫 GFM 표의 데이터 행(칸 목록). 머리 행 다음에 구분줄이 와야 표로 본다. 없으면 None."""
-    for i in range(len(lines) - 1):
+def section_tables(lines: list[str]) -> list[tuple[list[str], list[list[str]]]]:
+    """절 안의 GFM 표 목록: (머리 칸, 데이터 행). 머리 행 다음에 구분줄이 와야 표로 본다."""
+    tables, i = [], 0
+    while i < len(lines) - 1:
         if "|" in lines[i] and "|" in lines[i + 1] and TABLE_DELIMITER.fullmatch(lines[i + 1]):
-            rows = []
-            for line in lines[i + 2:]:
-                if "|" not in line or not line.strip():
-                    break
-                rows.append(table_cells(line))
+            rows, j = [], i + 2
+            while j < len(lines) and "|" in lines[j] and lines[j].strip():
+                rows.append(table_cells(lines[j]))
+                j += 1
+            tables.append((table_cells(lines[i]), rows))
+            i = j
+        else:
+            i += 1
+    return tables
+
+
+def first_table(lines: list[str], header: list[str] | None = None) -> list[list[str]] | None:
+    """머리 칸이 템플릿 표와 같은 표의 데이터 행. header가 없으면 첫 표. 없으면 None.
+
+    같은 절의 다른 표(예: 대체 검증 표)를 인수 테스트 표로 잘못 읽지 않게 머리로 고른다.
+    """
+    for cells, rows in section_tables(lines):
+        if header is None or [normalize_heading(c) for c in cells] == [normalize_heading(c) for c in header]:
             return rows
     return None
 
@@ -760,7 +775,8 @@ def template_spec(text: str) -> dict:
     lines = strip_fences(text)
     _head, sections = lint_sections(lines)
     placeholders = sorted({m.group(0) for line in lines for m in TEMPLATE_PLACEHOLDER.finditer(INLINE_CODE.sub("", line))})
-    return {"headings": [h for h in sections if not h.startswith("\0")], "placeholders": placeholders}
+    return {"headings": [h for h in sections if not h.startswith("\0")], "placeholders": placeholders,
+            "sections": sections}
 
 
 def numbered_heading(spec: dict, number: str, source: str) -> str:
@@ -777,13 +793,17 @@ def lint_document(text: str, spec: dict, kind: str) -> tuple[list[str], list[str
     failures = [f"절 누락: ## {h}" for h in spec["headings"] if h not in sections]
     if kind == "plan":
         tier_lines = [line for line in head if "판정:" in line]
+        # 판정 값은 `판정:` 뒤 첫 `·` 앞까지다(템플릿: `> 판정: **엄격 | 표준 | 경량** · 트리거: ...`)
+        tier_values = [TIER_WORDS.findall(line.split("판정:", 1)[1].split("·", 1)[0]) for line in tier_lines]
         if not tier_lines:
             failures.append("판정 줄(`판정:`)이 없다")
         elif any(UNCHOSEN_TIER.search(line) for line in tier_lines):
             failures.append("판정을 고르지 않았다: `엄격 | 표준 | 경량`이 그대로 남았다")
+        elif any(len(set(values)) != 1 for values in tier_values):
+            failures.append("판정 값은 엄격·표준·경량(strict·standard·lite) 중 하나여야 한다")
         heading = spec["acceptance"]
         if heading in sections:
-            rows = first_table(sections[heading])
+            rows = first_table(sections[heading], spec.get("acceptance_header"))
             if rows is None:
                 failures.append(f"## {heading}: 인수 테스트 표가 없다")
             elif not rows:
@@ -794,7 +814,7 @@ def lint_document(text: str, spec: dict, kind: str) -> tuple[list[str], list[str
     else:
         heading = spec["measurement"]
         if heading in sections:
-            rows = first_table(sections[heading])
+            rows = first_table(sections[heading], spec.get("measurement_header"))
             if rows is None:
                 failures.append(f"## {heading}: 측정 표가 없다")
             elif not rows:
@@ -802,6 +822,11 @@ def lint_document(text: str, spec: dict, kind: str) -> tuple[list[str], list[str
             for row in rows or []:
                 if len(row) < 2 or not all(row[1:]):
                     failures.append(f"## {heading}: 측정 칸이 비었다: {row[0] or '(항목 없음)'}")
+            # 행을 지운 것도 빈 측정 칸이다. 템플릿의 측정 항목이 모두 있어야 한다
+            present = {normalize_heading(row[0]) for row in rows or [] if row}
+            for label in spec.get("measurement_rows", []) if rows else []:  # 빈 표는 위에서 한 번만 보고한다
+                if normalize_heading(label) not in present:
+                    failures.append(f"## {heading}: 측정 항목이 없다: {label}")
     body = "\n".join(INLINE_CODE.sub("", line) for line in lines)
     warnings = [f"자리표시자가 남았다: {p}" for p in spec["placeholders"] if p in body]
     return failures, warnings
@@ -821,18 +846,27 @@ def load_lint_spec(target: Path, config: dict, rel: str, number: str, key: str) 
     if not spec["headings"]:
         raise HarnessError(f"{source}: 템플릿에 `## ` 절이 없다")
     spec[key] = numbered_heading(spec, number, source)
+    tables = section_tables(spec.pop("sections")[spec[key]])
+    if not tables:
+        raise HarnessError(f"{source}: 템플릿 {number}장에 표가 없다")
+    header, rows = tables[0]
+    spec[f"{key}_header"] = header
+    if key == "measurement":
+        spec["measurement_rows"] = [row[0] for row in rows if row and row[0]]
     spec["source"] = source
     return spec
 
 
+def plan_key_pattern(config: dict) -> re.Pattern:
+    """플랜 파일 키: github은 이슈 번호, jira는 `<issue_prefix>-<번호>`(대소문자 무시)."""
+    if config["tracker"] == "jira":
+        return re.compile(re.escape(config.get("issue_prefix", "")) + r"-\d+", re.IGNORECASE)
+    return re.compile(r"\d+")
+
+
 def classify_plan_files(names: list[str], config: dict, key: str | None) -> dict[str, list[str]]:
     """D-15: `<키>.md` 플랜, `<키>-review*.md` 리뷰, `-mapping`·`-self-review` 제외, 그 밖은 무시."""
-    if key is not None:
-        key_pattern = re.escape(key)
-    elif config["tracker"] == "jira":
-        key_pattern = re.escape(config.get("issue_prefix", "")) + r"-\d+"
-    else:
-        key_pattern = r"\d+"
+    key_pattern = re.escape(key) if key is not None else plan_key_pattern(config).pattern
     pattern = re.compile(rf"({key_pattern})(-review.*)?\.md", re.IGNORECASE if config["tracker"] == "jira" else 0)
     groups: dict[str, list[str]] = {"plan": [], "review": [], "excluded": [], "ignored": []}
     for name in sorted(names):
@@ -862,6 +896,9 @@ def cmd_lint_plans(args) -> int:
     if args.key is not None and not LINT_KEY.fullmatch(args.key):
         raise HarnessError(f"키는 영문·숫자·`.`·`_`·`-`만 쓴다: {args.key!r}")
     config = load_config(target / CONFIG_NAME)
+    if args.key is not None and not plan_key_pattern(config).fullmatch(args.key):
+        raise HarnessError(f"키는 {config['tracker']} 이슈 키 형식이어야 한다(예: {build_context(config)['branch_key_example']}): "
+                           f"{args.key!r}")
     plans_dir = target / "plans"
     names = [p.name for p in plans_dir.iterdir() if p.is_file()] if plans_dir.is_dir() else []
     groups = classify_plan_files(names, config, args.key)
