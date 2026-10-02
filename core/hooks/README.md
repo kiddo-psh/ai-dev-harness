@@ -42,7 +42,7 @@ AI 코딩 세션(Claude Code)에 거는 하드 가드레일. `init`이 대상 �
 - `stop_verify`: 영역(`areas[].dir`) 밖의 파일이 바뀌었을 때 실행할 명령. 영역 안의 변경은 그 영역의
   `areas[].verify`를 실행한다. 파일을 수정하지 않는 명령만 적는다.
 - `stop_timeout_sec`: 명령별 시간 제한(1~840초, 기본 300). 모든 명령을 합친 예산도 840초다.
-- `python`: hook을 실행할 인터프리터(기본 `python3`). Windows에서는 `python3`이 Microsoft Store 별칭인 경우가
+- `python`: hook을 실행할 명령 이름(기본 `python3`, 기존 Windows launcher `py -3`도 허용). 셸 메타문자·경로·임의 인자는 거절한다. Windows에서는 `python3`이 Microsoft Store 별칭인 경우가
   많아 hooks가 조용히 실패한다(종료 코드 49). `python`이나 `py`로 바꾼다.
 
 ## 동작
@@ -69,8 +69,8 @@ hooks는 실수를 막는 장치이지 보안 경계가 아니다. 최종 방어
 
 - **Bash로 쓰는 경로는 보지 않는다.** `sed -i`, 리다이렉션(`>`), `git checkout -- <파일>`, 패키지 관리자 명령은
   보호 경로를 바꿀 수 있다. 명령 문자열을 추측해 막으면 오탐과 미탐이 모두 커서 1차에서는 다루지 않는다.
-- `check`는 `.claude/hooks/`에 추가된 파일을 보지 않는다. 같은 이름의 패키지(`harness_common/`)를 넣으면 hook을
-  무력화할 수 있다. 도구 쓰기는 자기 보호가 막으므로 Bash나 사람을 거치는 경로다.
+- `check`는 `.claude/hooks/`에 추가된 파일이나 디렉터리를 드리프트로 보고한다. 다만 검사 실행 전에
+  임의 코드를 실행한 경우까지 막는 보안 경계는 아니다.
 - 사용자 설정(`~/.claude/settings.json`)의 `disableAllHooks`는 확인 창을 거치면 바뀐다.
 - hook 스크립트 파일이 없으면 Python이 종료 코드 2를 내서 모든 편집이 거부된다. `init --force`로 다시 설치한다.
 - Claude Code 외의 도구(Codex, IDE 확장 등)에는 적용되지 않는다.
@@ -97,4 +97,4 @@ hooks는 실수를 막는 장치이지 보안 경계가 아니다. 최종 방어
 
 - `judge.py`: diff에서 경량·표준·엄격(`lite`·`standard`·`strict`)을 산출(M2-1). CLI `harness judge`와 같은 코드
 - 플랜·리뷰 파일 lint, 엄격 판정 플랜 승인에 따른 `block` 해제(M2-3)
-- 세션 시작 시점 기준선(SessionStart)으로 기존 변경을 종료 검증에서 빼기, `check`의 관리 디렉터리 여분 파일 검사(후속 이슈)
+- 세션 시작 시점 기준선(SessionStart)으로 기존 변경을 종료 검증에서 빼기

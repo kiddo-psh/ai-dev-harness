@@ -60,8 +60,6 @@ def _str_list(value, allow_empty=False) -> bool:
 
 
 def validate_hooks(hooks, source) -> None:
-    if hooks is None:
-        return
     if not isinstance(hooks, dict):
         raise ConfigError(f"{source}: hooks는 객체여야 한다")
     unknown = sorted(set(hooks) - HOOK_KEYS)
@@ -88,9 +86,9 @@ def validate_hooks(hooks, source) -> None:
             raise ConfigError(f"{source}: hooks.stop_timeout_sec는 1~{MAX_STOP_TIMEOUT} 정수여야 한다")
     if "python" in hooks:
         value = hooks["python"]
-        # settings.json의 JSON 문자열 안에 그대로 들어가므로 따옴표·역슬래시·제어 문자를 받지 않는다
-        if not _nonempty_str(value) or any(ch in '"\\' or ord(ch) < 0x20 for ch in value):
-            raise ConfigError(f"{source}: hooks.python은 따옴표·역슬래시·제어 문자 없는 명령 이름이어야 한다")
+        # settings.json의 shell 명령 앞에 들어간다. 기존 Windows launcher 형태만 예외다.
+        if not isinstance(value, str) or not (re.fullmatch(r"[A-Za-z0-9_.-]+", value) or value == "py -3"):
+            raise ConfigError(f"{source}: hooks.python은 명령 이름 또는 'py -3'이어야 한다")
 
 
 def _normalized_dir(value) -> bool:
@@ -123,7 +121,8 @@ def load_config(project: Path) -> dict:
         raise ConfigError(f"{path}: {exc}") from exc
     if not isinstance(config, dict):
         raise ConfigError(f"{path}: 최상위는 객체여야 한다")
-    validate_hooks(config.get("hooks"), path)
+    if "hooks" in config:
+        validate_hooks(config["hooks"], path)
     validate_areas_for_hooks(config.get("areas", []), path)
     return config
 

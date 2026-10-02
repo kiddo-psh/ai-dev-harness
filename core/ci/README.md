@@ -17,14 +17,15 @@ core/ci/claude-review/   도구 없는 Claude MR 리뷰 (M2-4, feelm 이관)
 
 ## 사용법
 
-태그(또는 커밋 SHA)로 고정해 참조한다. 쓰는 조각만 넣는다.
+게시된 전체 커밋 SHA로 고정해 참조한다. 쓰는 조각만 넣는다. 릴리스 태그가 게시되면 변경되지 않는 태그도
+사용할 수 있다. 현재 0.2.0은 키트 버전이며 원격 태그 게시를 뜻하지 않는다.
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<tag>/core/ci/gitlab/secret-detection.yml
-  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<tag>/core/ci/gitlab/dependency-audit.yml
-  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<tag>/core/ci/gitlab/sast.yml
-  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<tag>/core/ci/gitlab/image-scan.yml
+  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/secret-detection.yml
+  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/dependency-audit.yml
+  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/sast.yml
+  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/image-scan.yml
 
 variables:
   HARNESS_SCAN_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA   # image-scan을 쓸 때

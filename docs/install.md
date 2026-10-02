@@ -40,7 +40,7 @@ python bin/harness.py version
 | `.claude/settings.json`, `.claude/hooks/` | Claude Code hooks ([설명](../core/hooks/README.md)) |
 | `harness.json` | 대상 저장소의 키트 설정. 이후 모든 명령이 이 파일을 읽는다 |
 
-영역 `AGENTS.md`는 3절에서 따로 생성한다. CI 조각은 아직 제공하지 않는다(5절).
+영역 `AGENTS.md`는 3절에서 따로 생성한다. GitLab CI 조각은 5절에서 연결한다.
 
 ## 3. 새 저장소에 붙이기
 
@@ -84,7 +84,7 @@ python bin/harness.py init ../my-project --area backend \
 - `--area`는 대상의 `harness.json`을 쓰므로 `--platform` 같은 루트 인자와 함께 쓸 수 없다
 - 경로는 대상 저장소 기준 상대 경로다. `./web/`처럼 줘도 `web`으로 정규화된다. 절대 경로와 `..`는 거부한다
 - 같은 `--area`를 다시 실행하면 `harness.json`의 해당 항목을 제자리에서 바꾼다. 다만 이미 있는
-  `<영역>/AGENTS.md` 파일은 `--force` 없이 덮어쓰지 않는다
+  `<영역>/AGENTS.md` 파일은 `--force` 없이 덮어쓰지 않는다. 생략한 trigger·review focus·문서는 이전 값을 유지한다
 
 결과로 `<영역>/AGENTS.md`가 생기고 `harness.json`의 `areas`에 설정이 기록된다.
 
@@ -115,10 +115,15 @@ git commit -m "chore: ai-dev-harness 적용"
 1. **먼저 깨끗한 작업 트리에서 시작한다.** 커밋하지 않은 변경이 있으면 커밋하거나 stash한다
 2. 위 목록을 보고 각 파일을 어떻게 할지 정한다
    - 기존 내용이 없어도 되면 → `--force`
-   - 기존 내용을 살려야 하면 → 그 파일을 다른 이름으로 옮겨 두고 `init` 후 내용을 손으로 합친다
-3. `--force`로 실행한다
+   - 기존 내용을 살려야 하면 → 생성 파일을 덮어쓰기 전에 별도 브랜치에서 내용을 검토한다. 특히 기존
+     `.claude/settings.json` 병합은 아직 지원하지 않는다. 수동 병합 파일은 `check`에서 드리프트로 표시된다
+3. `--force`로 실행한다. `harness.json`이 아직 없다면 필요한 루트 인자도 함께 준다
 
 ```bash
+# 기존 harness.json이 있는 경우
+python bin/harness.py init ../my-project --force
+
+# 기존 harness.json이 없는 GitHub 저장소의 예
 python bin/harness.py init ../my-project --force --platform github --tracker github
 ```
 
@@ -129,23 +134,20 @@ python bin/harness.py init ../my-project --force --platform github --tracker git
 - **`--force`는 생성 대상 파일만 덮어쓴다.** `harness.json`도 다시 쓰지만 기존 파일을 읽어서 쓰므로
   `hooks`, `areas` 같은 설정은 보존된다. 바뀌는 것은 `harness_version`이 키트 버전으로 맞춰지는 것과
   들여쓰기·키 순서뿐이다
-- **`harness.json`이 이미 있으면 `--platform`·`--tracker` 같은 인자는 조용히 무시된다.** 파일의 값이
-  이긴다. 값을 바꾸려면 `harness.json`을 직접 고치고 `init --force`로 다시 생성한다
+- **`harness.json`이 이미 있으면 `--platform`·`--tracker` 같은 루트 인자를 함께 쓸 수 없다.** 값을
+  바꾸려면 `harness.json`을 직접 고치고 `init --force`로 다시 생성한다. `--config`와 루트 인자도 함께 쓸 수 없다
 - **부분 적용은 지원하지 않는다.** 일부 파일만 생성하는 인자는 없다. 필요 없는 파일은 생성 후 지우면
   되지만, 그러면 `check`가 "없음"으로 보고한다(8절)
 
 ## 5. CI 조각
 
-> **아직 쓸 수 없다.** 보안 검사 CI 조각은 로드맵 M1-6에서 만들고 있고, 현재 `core/ci/`에는 예정 구조만 있다.
-> 이 절은 M1-6이 병합되면 설정 방법으로 채운다.
+보안 검사 네 조각은 GitLab MR 파이프라인에서 사용할 수 있다([ADR-0003](adr/0003-gitlab-ci-remote-include.md)).
 
-예정된 방식은 다음과 같다([ADR-0003](adr/0003-gitlab-ci-remote-include.md)).
-
-- **GitLab 전용이다.** 대상 저장소의 `.gitlab-ci.yml`이 키트의 조각을 `include: remote:`로 태그 고정해 참조한다.
+- **GitLab 전용이다.** 대상 저장소의 `.gitlab-ci.yml`이 키트의 조각을 `include: remote:`로 게시된 전체 커밋 SHA에 고정해 참조한다.
   파일은 복사하지 않는다
-- **GitHub 저장소용 조각은 계획에 없다.** GitHub Actions에서는 같은 도구(gitleaks, trivy, semgrep)를 직접
-  호출해야 한다. 키트 저장소 자신의 적용 예는 M1-7에서 만든다
-- 설정 방법·필요 조건·끄는 법은 조각과 함께 [`core/ci/README.md`](../core/ci/README.md)에 들어간다
+- **GitHub 저장소용 조각은 없다.** GitHub Actions에서는 같은 도구(gitleaks, trivy, semgrep)를 직접
+  호출해야 한다. 키트 저장소 자신의 적용 예는 `.github/workflows/security.yml`이다
+- 설정 방법·필요 조건·끄는 법은 [`core/ci/README.md`](../core/ci/README.md)를 따른다
 
 ## 6. hooks 설정
 
@@ -170,7 +172,7 @@ hooks는 `init`이 설치하지만, 무엇을 보호하고 무엇을 검증할�
 | `protected_paths` | 객체 목록 | 지정하면 기본 목록을 **대체**한다. `pattern` 필수, `mode`는 `block` 또는 `ask` 필수, `reason`은 선택 |
 | `stop_verify` | 문자열 목록 | 영역 밖 파일이 바뀌었을 때 실행할 명령. 파일을 고치지 않는 명령만 적는다 |
 | `stop_timeout_sec` | 1~840 정수 | 명령별 시간 제한. 기본 300. 전체 예산도 840초다 |
-| `python` | 명령 이름 | hook을 실행할 인터프리터. 기본 `python3`. 따옴표·역슬래시·제어 문자를 쓸 수 없다 |
+| `python` | 명령 이름 또는 `py -3` | hook을 실행할 인터프리터. 기본 `python3`. 셸 메타문자·경로·임의 인자는 허용하지 않는다 |
 
 규칙과 기본 보호 목록, 우회 경로는 [`core/hooks/README.md`](../core/hooks/README.md)에 자세히 있다.
 
@@ -223,8 +225,8 @@ python bin/harness.py check ../my-project
 ```
 
 - 드리프트가 없으면 검사한 파일 수를 출력하고 종료 코드 0
-- 템플릿과 다르거나 없는 파일이 있으면 목록을 출력하고 종료 코드 1
-- `harness.json`의 `harness_version`이 키트 버전과 다르면 주의 문구가 먼저 나온다
+- 템플릿과 다르거나 없는 파일, `.claude/hooks/`의 여분 파일이 있으면 목록을 출력하고 종료 코드 1
+- `harness.json`의 `harness_version`이 키트 버전과 달라도 종료 코드 1
 
 생성된 파일은 손으로 고치지 않는다. 내용을 바꾸려면 키트의 `core/templates/`를 고치고 다시 생성한다.
 저장소 고유 내용은 생성 대상이 아닌 별도 문서에 둔다.
@@ -241,7 +243,7 @@ hooks가 실제로 동작하는지는 `check`로 알 수 없다. Claude Code 세
 | hooks 전체 | `.claude/settings.local.json`에 `{"disableAllHooks": true}`. 개인 설정이라 커밋하지 않는다 |
 | 보호 경로 하나 | `harness.json`의 `hooks.protected_paths`를 조정한다 |
 | 종료 검증 | `hooks.stop_verify`를 지우거나 더 빠른 명령으로 바꾼다. 영역의 `verify`는 필수라 영역 단위로는 끌 수 없다 |
-| CI 조각 하나 | 아직 제공하지 않는다(5절). 제공되면 [`core/ci/README.md`](../core/ci/README.md)에 끄는 법을 둔다 |
+| CI 조각 하나 | `.gitlab-ci.yml`의 해당 `include`를 제거한다. [`core/ci/README.md`](../core/ci/README.md) |
 
 ## 10. 제거
 
@@ -252,7 +254,7 @@ rm .claude/settings.json harness.json
 ```
 
 문서(`AGENTS.md`, `CLAUDE.md`, `docs/`)와 병합 요청 템플릿은 저장소의 내용이므로 지울지는 따로 판단한다.
-CI 조각(5절, 제공 예정)을 붙였다면 CI 정의에서 해당 `include`와 그 조각의 job 참조도 지운다.
+CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각의 job 참조도 지운다.
 
 `.claude/settings.local.json`은 개인 설정이라 키트가 만들지 않았다. 지우지 않는다.
 
@@ -274,5 +276,21 @@ CI 조각(5절, 제공 예정)을 붙였다면 CI 정의에서 해당 `include`�
 
 - 판정 단계와 플랜·리뷰를 켜는 조건: [기여 규칙](contributing.md)
 - hooks의 규칙·동작·알려진 우회: [`core/hooks/README.md`](../core/hooks/README.md)
-- CI 조각(M1-6 진행 중, GitLab 전용 예정): [`core/ci/README.md`](../core/ci/README.md)
+- GitLab CI 조각: [`core/ci/README.md`](../core/ci/README.md)
 - 설계 결정의 배경: [ADR](adr/README.md)
+
+## 13. 첫 소비자 계약 (0.2.0)
+
+`harness.json`의 루트 키는 `harness_version`, `project_name`, `platform`, `tracker`, `issue_prefix`,
+`default_branch`, `integration_branch`, `related_docs`, `areas`, `hooks`다. 알 수 없는 키나 타입이
+틀린 값은 오류로 처리한다. `related_docs` 항목은 문자열 `label`·`path`만 가진다. `areas` 항목은
+`dir`·`verify`와 선택 항목 `triggers`·`review_focus`·`docs`를 가진다. 영역을 새로 만들면 기본
+`triggers`·`review_focus`를 설정 파일에 저장한다. 같은 영역을 `--force`로 다시 만들 때 생략한
+선택 항목은 이전 값을 유지한다.
+
+템플릿의 `{{name}}`은 키트가 가진 값으로 치환한다. 이름은 소문자와 밑줄만 사용한다. 지원 이름은 `project_name`, `platform`,
+`pr_noun`, `pr_long`, `ci_variables`, `tracker_name`, `issue_noun`, `issue_key`,
+`issue_key_example`, `branch_key_example`, `default_branch`, `integration_branch`, `related_docs`,
+`hook_python`이다. 영역 템플릿에는 `area_dir`, `area_docs`, `area_verify`, `area_triggers`,
+`area_review_focus`가 추가된다. 알 수 없는 이름이나 잘못된 표기는 생성 오류다. 생성 파일 목록과 원본 경로는
+`core/templates/manifest.json`이 정의하며, 이는 소비자 설정이 아닌 키트 작성자용 계약이다.

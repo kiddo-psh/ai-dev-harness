@@ -196,6 +196,12 @@ class ProtectPathsTest(ProtectPathsCase):
         self.assertEqual(result.returncode, 1)
         self.assertIsNone(decision)
 
+    def test_null_hooks_config_fails_open(self):
+        self.write_config({"hooks": None})
+        result, decision = self.edit(self.project / "x")
+        self.assertEqual(result.returncode, 1)
+        self.assertIsNone(decision)
+
     def test_event_logged(self):
         self.init_git()
         self.edit(self.project / "package-lock.json")

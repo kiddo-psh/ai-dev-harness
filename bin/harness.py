@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 KIT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = KIT_ROOT / "core" / "templates"
 HOOKS_DIR = KIT_ROOT / "core" / "hooks"
@@ -30,6 +30,9 @@ SOURCE_DIRS = {"templates": TEMPLATES_DIR, "hooks": HOOKS_DIR}
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
 AREA_TEMPLATE = "AREA-AGENTS.md"
 AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs"}
+CONFIG_KEYS = {"harness_version", "project_name", "platform", "tracker", "issue_prefix",
+               "default_branch", "integration_branch", "related_docs", "areas", "hooks"}
+RELATED_DOC_KEYS = {"label", "path"}
 CONFIG_NAME = "harness.json"
 
 PLATFORMS = {
@@ -126,24 +129,35 @@ def load_config(path: Path) -> dict:
 
 
 def validate_config(config: dict, source: Path | str) -> None:
+    if not isinstance(config, dict):
+        raise HarnessError(f"{source}: 최상위 설정은 객체여야 한다")
+    unknown = sorted(set(config) - CONFIG_KEYS)
+    if unknown:
+        raise HarnessError(f"{source}: 알 수 없는 설정 키: {', '.join(unknown)}")
     required = ["project_name", "platform", "tracker", "default_branch", "integration_branch"]
-    missing = [key for key in required if not config.get(key)]
+    missing = [key for key in required if not isinstance(config.get(key), str) or not config[key].strip()]
     if missing:
         raise HarnessError(f"{source}: 필수 항목이 비어 있다: {', '.join(missing)}")
+    for key in ("harness_version", "issue_prefix"):
+        if key in config and not isinstance(config[key], str):
+            raise HarnessError(f"{source}: {key}는 문자열이어야 한다")
     if config["platform"] not in PLATFORMS:
         raise HarnessError(f"{source}: platform은 {sorted(PLATFORMS)} 중 하나여야 한다")
     if config["tracker"] not in TRACKERS:
         raise HarnessError(f"{source}: tracker는 {sorted(TRACKERS)} 중 하나여야 한다")
-    if config["tracker"] == "jira" and not config.get("issue_prefix"):
+    if config["tracker"] == "jira" and not config.get("issue_prefix", "").strip():
         raise HarnessError(f"{source}: tracker가 jira이면 issue_prefix(예: ABC123)가 필요하다")
     docs = config.get("related_docs", [])
     if not isinstance(docs, list) or any(
-        not isinstance(d, dict) or not d.get("label") or not d.get("path") for d in docs
+        not isinstance(d, dict) or set(d) != RELATED_DOC_KEYS or
+        any(not isinstance(d[key], str) or not d[key].strip() for key in RELATED_DOC_KEYS)
+        for d in docs
     ):
         raise HarnessError(f"{source}: related_docs는 label·path를 가진 객체 목록이어야 한다")
     validate_areas(config.get("areas", []), source)
     try:
-        hooks_common.validate_hooks(config.get("hooks"), source)
+        if "hooks" in config:  # 키를 생략하면 기본값, 명시한 null은 객체 계약 위반이다
+            hooks_common.validate_hooks(config["hooks"], source)
     except hooks_common.ConfigError as exc:
         raise HarnessError(str(exc)) from exc
 
@@ -241,6 +255,9 @@ def render(text: str, ctx: dict, source: str = "<template>") -> str:
     rendered = PLACEHOLDER.sub(substitute, text)
     if unknown:
         raise HarnessError(f"{source}: 알 수 없는 자리표시자: {', '.join(sorted(set(unknown)))}")
+    unmatched = PLACEHOLDER.sub("", text)
+    if "{{" in unmatched or "}}" in unmatched:
+        raise HarnessError(f"{source}: 잘못된 자리표시자 형식")
     return rendered
 
 
@@ -252,7 +269,31 @@ def render(text: str, ctx: dict, source: str = "<template>") -> str:
 def load_manifest() -> list[dict]:
     if not MANIFEST_PATH.is_file():
         raise HarnessError(f"매니페스트가 없다: {MANIFEST_PATH}")
-    data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HarnessError(f"매니페스트를 읽을 수 없다: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+        raise HarnessError("매니페스트 files는 목록이어야 한다")
+    seen = set()
+    for entry in data["files"]:
+        if not isinstance(entry, dict) or not {"src", "dest"} <= set(entry) or set(entry) - {"src", "dest", "base", "platform", "self", "render"}:
+            raise HarnessError("매니페스트 항목의 키가 잘못됐다")
+        base = entry.get("base", "templates")
+        if not isinstance(base, str) or base not in SOURCE_DIRS:
+            raise HarnessError(f"매니페스트 base는 {sorted(SOURCE_DIRS)} 중 하나여야 한다: {base}")
+        for key in ("src", "dest"):
+            value = entry[key]
+            if (not isinstance(value, str) or not value or "\\" in value or
+                    value.startswith("/") or any(part in ("", ".", "..") for part in value.split("/")) or
+                    re.match(r"^[A-Za-z]:", value)):
+                raise HarnessError(f"매니페스트 {key} 경로가 잘못됐다: {value!r}")
+        if entry["dest"] in seen:
+            raise HarnessError(f"매니페스트 목적지가 중복된다: {entry['dest']}")
+        seen.add(entry["dest"])
+        if ("platform" in entry and (not isinstance(entry["platform"], str) or entry["platform"] not in PLATFORMS) or
+                any(key in entry and not isinstance(entry[key], bool) for key in ("self", "render"))):
+            raise HarnessError(f"매니페스트 선택 값이 잘못됐다: {entry['dest']}")
     return data["files"]
 
 
@@ -306,9 +347,15 @@ def resolve_target(args) -> tuple[Path, bool]:
 
 def config_from_args(args, target: Path) -> dict:
     if args.config:
+        conflicting = [flag for flag in ROOT_ONLY_FLAGS if flag != "config" and getattr(args, flag) is not None]
+        if conflicting:
+            raise HarnessError(f"--config 와 루트 설정 인자를 함께 쓸 수 없다: {', '.join(conflicting)}")
         return load_config(Path(args.config))
     existing = target / CONFIG_NAME
     if existing.is_file():
+        conflicting = [flag for flag in ROOT_ONLY_FLAGS if flag != "config" and getattr(args, flag) is not None]
+        if conflicting:
+            raise HarnessError(f"기존 {CONFIG_NAME} 과 루트 설정 인자를 함께 쓸 수 없다: {', '.join(conflicting)}")
         return load_config(existing)
     config = {
         "harness_version": VERSION,
@@ -336,12 +383,13 @@ def cmd_init_area(args, target: Path) -> int:
         raise HarnessError(f"{config_path} 이 없다. 루트 init 을 먼저 실행한다")
     config = load_config(config_path)
     area = {"dir": normalize_area_dir(args.area, "--area"), "verify": args.verify_cmd}
-    for key, values in (("triggers", args.trigger), ("review_focus", args.review_focus),
-                        ("docs", args.area_doc)):
-        if values:
-            area[key] = values
     areas = list(config.get("areas", []))
     same = [i for i, existing in enumerate(areas) if existing.get("dir") == area["dir"]]
+    previous = areas[same[0]] if same else {}
+    area["triggers"] = args.trigger or previous.get("triggers") or list(DEFAULT_TRIGGERS)
+    area["review_focus"] = args.review_focus or previous.get("review_focus") or list(DEFAULT_REVIEW_FOCUS)
+    if args.area_doc or previous.get("docs"):
+        area["docs"] = args.area_doc or previous["docs"]
     if same:
         areas[same[0]] = area  # 같은 영역을 다시 생성하면 기존 항목을 제자리에서 바꾼다
     else:
@@ -367,6 +415,9 @@ def cmd_init(args) -> int:
         if getattr(args, flag):
             raise HarnessError(f"--{flag.replace('_', '-')} 는 --area 와 함께 쓴다")
     if self_mode:
+        given = [flag for flag in ROOT_ONLY_FLAGS if getattr(args, flag) is not None]
+        if given:
+            raise HarnessError(f"--self 는 루트 설정 인자를 함께 쓸 수 없다: {', '.join(given)}")
         config = load_config(KIT_ROOT / CONFIG_NAME)
     else:
         config = config_from_args(args, target)
@@ -398,8 +449,9 @@ def cmd_check(args) -> int:
     target, self_mode = resolve_target(args)
     config = load_config(target / CONFIG_NAME)
     recorded = config.get("harness_version")
-    if recorded and recorded != VERSION:
-        print(f"주의: 설정의 harness_version {recorded} 과 키트 {VERSION} 이 다르다.")
+    version_drift = recorded != VERSION
+    if version_drift:
+        print(f"버전 불일치: 설정의 harness_version {recorded!r} 과 키트 {VERSION} 이 다르다.")
     outputs = render_all(config, self_mode)
     missing, drifted = [], []
     for dest, content in outputs.items():
@@ -408,14 +460,23 @@ def cmd_check(args) -> int:
             missing.append(dest)
         elif path.read_text(encoding="utf-8").replace("\r\n", "\n") != content:
             drifted.append(dest)
-    if not missing and not drifted:
+    hooks_dir = target / ".claude" / "hooks"
+    expected_hooks = {Path(dest).name for dest in outputs if dest.startswith(".claude/hooks/")}
+    extra_hooks = sorted(p.relative_to(target).as_posix() for p in hooks_dir.iterdir()
+                         if p.name not in expected_hooks) if hooks_dir.is_dir() else []
+    if not missing and not drifted and not extra_hooks and not version_drift:
         print(f"드리프트 없음: {len(outputs)}개 파일이 템플릿과 일치한다.")
         return 0
     for dest in missing:
         print(f"없음:   {dest}")
     for dest in drifted:
         print(f"불일치: {dest}")
-    print("템플릿을 고친 뒤 `init --self`(또는 `init <target> --force`)로 다시 생성한다.")
+    for dest in extra_hooks:
+        print(f"여분:   {dest}")
+    if extra_hooks:
+        print("관리 hook 디렉터리의 여분 항목을 확인하고 제거한다.")
+    if version_drift or missing or drifted:
+        print("설정과 템플릿을 확인한 뒤 `init --self`(또는 `init <target> --force`)로 다시 생성한다.")
     return 1
 
 
