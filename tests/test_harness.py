@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("harness", ROOT / "bin" / "harness.py")
@@ -58,6 +59,22 @@ class RenderTest(unittest.TestCase):
                 "project_name": "demo", "platform": "gitlab", "tracker": "jira",
                 "default_branch": "main", "integration_branch": "develop",
             }, "test")
+
+    def test_manifest_rejects_invalid_entries(self):
+        cases = [{"files": {}}, {"files": [{"src": "../secret", "dest": "x"}]},
+                 {"files": [{"src": "AGENTS.md", "dest": "x"},
+                            {"src": "CLAUDE.md", "dest": "x"}]},
+                 {"files": [{"src": "AGENTS.md", "dest": "/absolute"}]},
+                 {"files": [{"src": "AGENTS.md", "dest": "x", "base": []}]},
+                 {"files": [{"src": "AGENTS.md", "dest": "x", "platform": []}]}]
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            with patch.object(harness, "MANIFEST_PATH", manifest):
+                for data in cases:
+                    with self.subTest(data=data):
+                        manifest.write_text(json.dumps(data), encoding="utf-8")
+                        with self.assertRaises(harness.HarnessError):
+                            harness.load_manifest()
 
     def test_every_template_renders_for_both_platforms(self):
         for platform, tracker in (("gitlab", "jira"), ("github", "github")):
@@ -118,6 +135,17 @@ class InitAndCheckTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("불일치: AGENTS.md", out)
 
+    def test_existing_config_rejects_root_flags_without_changes(self):
+        target = self.tmp / "existing-config"
+        self.assertEqual(run(["init", str(target), "--platform", "github", "--tracker", "github"])[0], 0)
+        before = (target / "harness.json").read_bytes()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code, _ = run(["init", str(target), "--force", "--platform", "gitlab"])
+        self.assertEqual(code, 2)
+        self.assertIn("기존 harness.json", err.getvalue())
+        self.assertEqual((target / "harness.json").read_bytes(), before)
+
 
 class AreaTestBase(unittest.TestCase):
     """루트 init을 마친 대상 저장소에서 영역 AGENTS.md를 다룬다."""
@@ -158,9 +186,18 @@ class AreaInitTest(AreaTestBase):
         before = self.config()
         self.init_area("--verify-cmd", "./gradlew build")
         after = self.config()
-        self.assertEqual(after["areas"], [{"dir": "backend", "verify": ["./gradlew build"]}])
+        self.assertEqual(after["areas"], [{"dir": "backend", "verify": ["./gradlew build"],
+                                           "triggers": harness.DEFAULT_TRIGGERS,
+                                           "review_focus": harness.DEFAULT_REVIEW_FOCUS}])
         for key, value in before.items():
             self.assertEqual(after[key], value)
+
+    def test_saved_defaults_survive_kit_default_change(self):
+        self.init_area("--verify-cmd", "make test")
+        with patch.object(harness, "DEFAULT_TRIGGERS", ["changed"]), \
+                patch.object(harness, "DEFAULT_REVIEW_FOCUS", ["changed"]):
+            code, out = run(["check", str(self.target)])
+        self.assertEqual(code, 0, out)
 
     def test_trigger_override(self):
         self.init_area("--verify-cmd", "make test", "--trigger", "A 변경", "--trigger", "B 변경")
@@ -170,12 +207,16 @@ class AreaInitTest(AreaTestBase):
             self.assertNotIn(trigger, text)
 
     def test_reinit_updates_entry(self):
-        self.init_area("--verify-cmd", "old")
+        self.init_area("--verify-cmd", "old", "--trigger", "custom", "--review-focus", "security",
+                       "--area-doc", "docs/api.md")
         code, _ = self.init_area("--verify-cmd", "new", "--force")
         self.assertEqual(code, 0)
         areas = self.config()["areas"]
         self.assertEqual(len(areas), 1)
         self.assertEqual(areas[0]["verify"], ["new"])
+        self.assertEqual(areas[0]["triggers"], ["custom"])
+        self.assertEqual(areas[0]["review_focus"], ["security"])
+        self.assertEqual(areas[0]["docs"], ["docs/api.md"])
         self.assertIn("- `new`", self.area_text())
 
     def test_existing_file_needs_force(self):
@@ -243,6 +284,15 @@ class ConfigTest(unittest.TestCase):
     BASE = {"project_name": "demo", "platform": "github", "tracker": "github",
             "default_branch": "main", "integration_branch": "main"}
 
+    def test_invalid_root_fields_rejected(self):
+        bad = [None, [], {**self.BASE, "platfrom": "gitlab"},
+               {**self.BASE, "project_name": 1}, {**self.BASE, "default_branch": []},
+               {**self.BASE, "harness_version": 2}, {**self.BASE, "issue_prefix": []},
+               {**self.BASE, "related_docs": [{"label": "docs", "path": "a", "typo": True}]}]
+        for config in bad:
+            with self.subTest(config=config), self.assertRaises(harness.HarnessError):
+                harness.validate_config(config, "test")
+
     def test_invalid_areas_rejected(self):
         bad_areas = [
             "backend",
@@ -286,6 +336,9 @@ class ConfigTest(unittest.TestCase):
             {"python": 'py "x'},
             {"python": "C:\\py.exe"},
             {"python": "python\nrm"},
+            {"python": "python; true"},
+            {"python": "python && true"},
+            {"python": "py -3; true"},
         ]
         for hooks in bad_hooks:
             with self.subTest(hooks=hooks):
@@ -343,6 +396,23 @@ class HookInstallTest(unittest.TestCase):
         code, out = run(["check", str(target)])
         self.assertEqual(code, 1)
         self.assertIn("불일치: .claude/hooks/protect-paths.py", out)
+
+    def test_check_detects_extra_hook_file(self):
+        target = self.init("extra", "--platform", "github", "--tracker", "github")
+        (target / ".claude" / "hooks" / "harness_common").mkdir()
+        code, out = run(["check", str(target)])
+        self.assertEqual(code, 1)
+        self.assertIn("여분:   .claude/hooks/harness_common", out)
+
+    def test_check_detects_version_mismatch(self):
+        target = self.init("version", "--platform", "github", "--tracker", "github")
+        path = target / "harness.json"
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["harness_version"] = "0.1.0"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        code, out = run(["check", str(target)])
+        self.assertEqual(code, 1)
+        self.assertIn("버전 불일치", out)
 
     def test_hook_python_rendered(self):
         target = self.init("py", "--platform", "github", "--tracker", "github")
