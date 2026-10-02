@@ -687,7 +687,7 @@ PLAN_TEMPLATE = "docs/templates/plan.md"
 REVIEW_TEMPLATE = "docs/templates/review.md"
 LINT_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 UNCHOSEN_TIER = re.compile(r"엄격\s*\\?\|\s*표준\s*\\?\|\s*경량")
-TIER_WORDS = re.compile(r"엄격|표준|경량|\bstrict\b|\bstandard\b|\blite\b")
+TIER_VALUE = re.compile(r"엄격|표준|경량|strict|standard|lite")
 TEMPLATE_PLACEHOLDER = re.compile(r"<[^<>\n]+>")
 TABLE_DELIMITER = re.compile(r"\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*")
 CELL_SPLIT = re.compile(r"(?<!\\)\|")
@@ -793,14 +793,17 @@ def lint_document(text: str, spec: dict, kind: str) -> tuple[list[str], list[str
     failures = [f"절 누락: ## {h}" for h in spec["headings"] if h not in sections]
     if kind == "plan":
         tier_lines = [line for line in head if "판정:" in line]
-        # 판정 값은 `판정:` 뒤 첫 `·` 앞까지다(템플릿: `> 판정: **엄격 | 표준 | 경량** · 트리거: ...`)
-        tier_values = [TIER_WORDS.findall(line.split("판정:", 1)[1].split("·", 1)[0]) for line in tier_lines]
         if not tier_lines:
             failures.append("판정 줄(`판정:`)이 없다")
-        elif any(UNCHOSEN_TIER.search(line) for line in tier_lines):
+        elif len(tier_lines) > 1:
+            failures.append("판정 줄(`판정:`)이 여러 개다")
+        elif UNCHOSEN_TIER.search(tier_lines[0]):
             failures.append("판정을 고르지 않았다: `엄격 | 표준 | 경량`이 그대로 남았다")
-        elif any(len(set(values)) != 1 for values in tier_values):
-            failures.append("판정 값은 엄격·표준·경량(strict·standard·lite) 중 하나여야 한다")
+        else:
+            # 값은 `판정:` 뒤 첫 `·` 앞 전체다(템플릿: `> 판정: **표준** · 트리거: ...`). 강조 기호만 떼고 통째로 맞춘다
+            value = tier_lines[0].split("판정:", 1)[1].split("·", 1)[0].strip().strip("*_` ").strip()
+            if not TIER_VALUE.fullmatch(value):
+                failures.append("판정 값은 엄격·표준·경량(strict·standard·lite) 중 하나여야 한다")
         heading = spec["acceptance"]
         if heading in sections:
             rows = first_table(sections[heading], spec.get("acceptance_header"))
@@ -836,7 +839,10 @@ def load_lint_spec(target: Path, config: dict, rel: str, number: str, key: str) 
     """대상의 렌더된 템플릿을 쓰고, 없으면 키트 원본을 대상 설정으로 렌더한다."""
     path = target / rel
     if path.is_file():
-        text, source = path.read_text(encoding="utf-8"), rel
+        try:
+            text, source = path.read_bytes().decode("utf-8-sig"), rel
+        except (OSError, UnicodeDecodeError) as exc:
+            raise HarnessError(f"템플릿을 UTF-8로 읽을 수 없다: {path}: {exc}") from exc
     else:
         original = TEMPLATES_DIR / rel
         if not original.is_file():

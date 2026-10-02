@@ -221,6 +221,15 @@ class ReviewFindingTest(unittest.TestCase):
                 failures, _ = lint_plan(fixture("plan.md").replace("판정: **표준**", f"판정: {tier}"))
                 self.assertEqual(failures, [])
 
+    def test_tier_value_parsed_whole(self):
+        # Codex P2(PR #39): 반복·부정·판정 줄 여러 개
+        for tier in ("엄격 엄격", "엄격하지 않음", "**표준** 아님", "표준 또는 엄격"):
+            with self.subTest(tier=tier):
+                failures, _ = lint_plan(fixture("plan.md").replace("판정: **표준**", f"판정: {tier}"))
+                self.assertEqual(failures, ["판정 값은 엄격·표준·경량(strict·standard·lite) 중 하나여야 한다"])
+        doubled = fixture("plan.md").replace("> 판정: **표준**", "> 판정: **표준**\n> 판정: **엄격**")
+        self.assertEqual(lint_plan(doubled)[0], ["판정 줄(`판정:`)이 여러 개다"])
+
     def test_tier_read_only_from_header(self):
         # F5: 본문의 `판정:` 문장은 판정 줄로 보지 않는다
         text = fixture("plan.md").replace("## 4. 미확정 항목\n", "## 4. 미확정 항목\n\n판정: 엄격 | 표준 | 경량 중 고를 때 참고\n")
@@ -252,6 +261,16 @@ class CliTest(unittest.TestCase):
 
     def lint(self, *argv):
         return run(["lint-plans", *argv, "--target", str(self.repo)])
+
+    def test_unreadable_template_is_config_error(self):
+        # Codex P2(PR #39): 대상 템플릿을 읽을 수 없으면 traceback 대신 종료 2
+        self.write("7.md", fixture("plan.md"))
+        template = self.repo / "docs" / "templates" / "plan.md"
+        template.parent.mkdir(parents=True, exist_ok=True)
+        template.write_bytes("## 0. 작업 정보\n".encode("utf-16"))
+        code, _, err = self.lint()
+        self.assertEqual(code, 2)
+        self.assertIn("템플릿을 UTF-8로 읽을 수 없다", err)
 
     def test_key_must_be_tracker_key(self):
         # F4: 키 인자도 tracker 이슈 키 형식이어야 한다
