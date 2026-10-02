@@ -263,8 +263,9 @@ def is_user_settings(path: Path) -> bool:
 TIERS = ("lite", "standard", "strict")  # 뒤로 갈수록 강하다. 소비자 계약 식별자
 TRIGGER_TIERS = ("strict", "standard")
 LOCK_FILES = (
-    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "gradle.lockfile",
-    "poetry.lock", "uv.lock", "Cargo.lock", "go.sum",
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb",
+    "gradle.lockfile", "poetry.lock", "uv.lock", "Pipfile.lock", "Cargo.lock", "go.sum",
+    "Gemfile.lock", "composer.lock",
 )
 
 # 영역에 trigger_paths가 없거나 영역 밖 파일일 때 쓰는 공통 기본. 지정하면 이 값을 대체한다.
@@ -272,15 +273,17 @@ DEFAULT_TRIGGER_PATHS = {
     "strict": [
         *LOCK_FILES,
         ".gitlab-ci.yml", "/.github/workflows/", "Jenkinsfile",
-        "**/db/migration/", "migrations/",
+        "**/db/migration/", "**/db/migrate/", "**/db/changelog/", "migrations/",
     ],
     "standard": [],
 }
 
 # 이 경로만 바뀌면 경량이다. 스택 중립 기본값이며 영역의 test_paths로 대체한다.
 DEFAULT_TEST_PATHS = [
-    "test/", "tests/", "__tests__/", "spec/", "**/src/test/",
-    "test_*.py", "*_test.py", "*_test.go", "*.test.*", "*.spec.*",
+    "test/", "tests/", "__tests__/", "**/src/test/",
+    "test_*.py", "*_test.py", "*_test.go", "*_spec.rb",
+    # `*.spec.*` 전체를 쓰면 API 명세(`openapi.spec.yaml`)까지 경량이 된다. 판정은 하한이라 코드 확장자로 좁힌다
+    *(f"*.{kind}.{ext}" for kind in ("test", "spec") for ext in ("js", "jsx", "ts", "tsx", "mjs", "cjs")),
     "*Test.java", "*Tests.java", "*Test.kt", "*Tests.kt",
 ]
 
@@ -356,6 +359,8 @@ def changed_files(project: Path, base: str) -> tuple[str, list[str]]:
 
     rename은 옛 경로와 새 경로를 모두 넣는다(옮겨 간 쪽과 지워진 쪽 모두 판정 대상).
     """
+    if base.startswith("-"):  # git 옵션으로 해석되지 않게 한다
+        raise ConfigError(f"기준 ref가 잘못됐다: {base}")
     merge_base, err = git_result(project, "merge-base", base, "HEAD")
     if merge_base is None:
         raise ConfigError(f"기준 {base}와 HEAD의 merge-base를 구할 수 없다: {err}")

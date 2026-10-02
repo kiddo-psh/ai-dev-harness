@@ -117,6 +117,7 @@ git diff --name-only origin/main | python bin/harness.py judge ../my-project --f
 - 패턴은 gitignore 방식이고 영역 디렉터리 기준이다(`/src/auth/`는 `<영역>/src/auth/` 아래). 영역 밖 파일과
   `trigger_paths`가 없는 영역에는 공통 기본(lock 파일·CI 정의·DB 마이그레이션 → 엄격)을 쓴다
 - 영역의 `triggers` 문장(계약 불일치, 인가 등)은 경로로 판정할 수 없어 "사람 확인 필요"로만 출력한다
+- `--files` 목록은 UTF-8(BOM 허용) 한 줄에 경로 하나다. `git diff --name-only`가 따옴표로 감싼 비ASCII 경로도 풀어 읽는다
 - 판정과 무관하게 종료 코드 0이다. 설정·git 오류는 2
 
 ## 4. 기존 저장소에 붙이기

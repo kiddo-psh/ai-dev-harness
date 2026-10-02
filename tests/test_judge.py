@@ -113,6 +113,22 @@ class JudgeTest(unittest.TestCase):
                                                  {"area": "backend", "trigger": "트랜잭션 경계"}])
         self.assertEqual(result["tier"], "standard")
 
+    def test_spec_and_api_files_not_lite(self):
+        """분리 리뷰 F3: API 명세 파일이 테스트로 분류돼 경량이 되면 안 된다."""
+        for path in ["spec/openapi.yaml", "api/openapi.spec.yaml", "src/a.test.yaml"]:
+            with self.subTest(path=path):
+                self.assertEqual(judge([path])["tier"], "standard")
+        for path in ["web/a.spec.ts", "web/b.test.jsx", "spec/models/user_spec.rb"]:
+            with self.subTest(path=path):
+                self.assertEqual(judge([path])["tier"], "lite")
+
+    def test_more_default_strict(self):
+        """분리 리뷰 F4: 흔한 lock 파일과 마이그레이션 경로."""
+        for path in ["Gemfile.lock", "php/composer.lock", "Pipfile.lock", "npm-shrinkwrap.json", "bun.lockb",
+                     "db/migrate/20240101_add.rb", "src/main/resources/db/changelog/1.xml"]:
+            with self.subTest(path=path):
+                self.assertEqual(judge([path])["tier"], "strict")
+
     def test_path_normalization(self):
         result = judge([".\\backend\\x.java", "./README.md", "README.md", "", "  "],
                        [{"dir": "backend", "verify": ["t"]}])
@@ -192,6 +208,42 @@ class JudgeCliTest(unittest.TestCase):
         self.assertEqual(result["tier"], "standard")
         self.assertEqual(set(result["files"][0]), {"path", "area", "tier", "rule"})
         self.assertEqual(self.judge_json("--files", "-", stdin="docs/x.md\n")["tier"], "lite")
+
+    def test_git_quoted_paths_from_pipe(self):
+        """분리 리뷰 F1: git diff --name-only가 따옴표로 감싼 비ASCII 경로도 판정한다."""
+        git(self.repo, "init", "-q", "-b", "main")
+        self.write(".github/workflows/배포.yml")
+        self.write("README.md")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "base")
+        empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+        names = subprocess.run(["git", "-c", "core.quotepath=true", "diff", "--name-only", empty_tree, "HEAD"],
+                               cwd=self.repo, capture_output=True, check=True).stdout.decode("utf-8")
+        self.assertIn('"', names)  # git 기본 설정은 비ASCII 경로를 따옴표로 감싼다
+        result = self.judge_json("--files", "-", stdin=names)
+        self.assertIn(".github/workflows/배포.yml", {f["path"] for f in result["files"]})
+        self.assertEqual(result["tier"], "strict")
+
+    def test_unquote_git_path(self):
+        self.assertEqual(harness.unquote_git_path('"a/\\354\\240\\225 b\\t.md"'), "a/정 b\t.md")
+        self.assertEqual(harness.unquote_git_path('"say \\"hi\\".md"'), 'say "hi".md')
+        self.assertEqual(harness.unquote_git_path("plain.md"), "plain.md")
+        self.assertEqual(harness.unquote_git_path('"bad\\q"'), '"bad\\q"')
+
+    def test_file_list_encoding(self):
+        """분리 리뷰 F2: BOM은 무시하고 UTF-8이 아니면 종료 2."""
+        listing = self.repo / "list.txt"
+        listing.write_bytes(b"\xef\xbb\xbfpackage-lock.json\n")
+        self.assertEqual(self.judge_json("--files", str(listing))["tier"], "strict")
+        listing.write_bytes("package-lock.json\n".encode("utf-16"))
+        code, _, err = run(["judge", str(self.repo), "--files", str(listing)])
+        self.assertEqual(code, 2)
+        self.assertIn("UTF-8", err)
+
+    def test_base_option_like_rejected(self):
+        self.commit_all()
+        code, _, err = run(["judge", str(self.repo), "--base=--output=x"])
+        self.assertEqual(code, 2)
 
     def test_human_output(self):
         run(["init", str(self.repo), "--area", "backend", "--verify-cmd", "make test"])

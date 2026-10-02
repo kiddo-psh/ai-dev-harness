@@ -493,12 +493,43 @@ def cmd_check(args) -> int:
 TIER_LABELS = {"lite": "경량", "standard": "표준", "strict": "엄격"}
 
 
+GIT_QUOTE_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def unquote_git_path(line: str) -> str:
+    """`git diff --name-only`가 비ASCII·특수 문자 경로에 쓰는 C 방식 따옴표를 푼다(`"a/\\354\\240\\225.md"`)."""
+    if len(line) < 2 or not (line.startswith('"') and line.endswith('"')):
+        return line
+    body, out, i = line[1:-1], bytearray(), 0
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\":
+            out += ch.encode("utf-8")
+            i += 1
+        elif re.match(r"[0-7]{3}", body[i + 1:i + 4]):
+            out.append(int(body[i + 1:i + 4], 8))
+            i += 4
+        elif body[i + 1:i + 2] in GIT_QUOTE_ESCAPES:
+            out.append(GIT_QUOTE_ESCAPES[body[i + 1]])
+            i += 2
+        else:
+            return line  # git이 만든 형식이 아니면 그대로 둔다
+    return out.decode("utf-8", errors="replace")
+
+
 def read_file_list(source: str) -> list[str]:
     try:
-        text = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+        if source == "-":
+            stream = getattr(sys.stdin, "buffer", None)
+            data = stream.read() if stream is not None else sys.stdin.read().encode("utf-8")
+        else:
+            data = Path(source).read_bytes()
+        text = data.decode("utf-8-sig")  # 메모장 등이 붙인 BOM이 첫 경로에 섞이지 않게 한다
     except OSError as exc:
         raise HarnessError(f"파일 목록을 읽을 수 없다: {source}: {exc}") from exc
-    return [line for line in text.splitlines() if line.strip()]
+    except UnicodeDecodeError as exc:
+        raise HarnessError(f"파일 목록은 UTF-8이어야 한다: {source}: {exc}") from exc
+    return [unquote_git_path(line.strip()) for line in text.splitlines() if line.strip()]
 
 
 def cmd_judge(args) -> int:
