@@ -55,6 +55,16 @@ def remove_tree(path: Path) -> None:
     shutil.rmtree(path, onerror=writable_remove)
 
 
+def remove_container_cache(repo: Path) -> None:
+    """trivy 컨테이너가 root 소유로 만든 캐시는 같은 Docker 마운트에서 지운다."""
+    if not (repo / TRIVY_CACHE).is_dir():
+        return
+    result = run(["docker", "run", "--rm", "-v", f"{repo}:/work", "--entrypoint", "sh",
+                  IMAGE_FIXTURE, "-c", "rm -rf /work/.trivycache"])
+    if result.returncode != 0:
+        raise RehearsalError(f"컨테이너 캐시 정리 실패: {result.stderr.strip()[:200]}")
+
+
 def git(repo: Path, *args: str) -> str:
     result = run(["git", "-C", str(repo), *args])
     if result.returncode != 0:
@@ -278,6 +288,7 @@ def run_security(names: list[str]) -> int:
             print(f"rehearsal {scenario['name']}: {status}", flush=True)
             if problems:
                 failed.append(scenario["name"])
+            remove_container_cache(repo)
             remove_tree(repo)
     finally:
         remove_tree(work)
