@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
+import types
 from pathlib import Path
 import re
 import stat
@@ -14,10 +14,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-_COMMON_SPEC = importlib.util.spec_from_file_location(
-    "harness_review_common", Path(__file__).resolve().with_name("review_common.py"))
-common = importlib.util.module_from_spec(_COMMON_SPEC)
-_COMMON_SPEC.loader.exec_module(common)
+# 공통 코드는 원본에서 직접 컴파일한다. importlib 로더는 __pycache__의 바이트코드를 원본과 대조하지 않고
+# 쓸 수 있어, check가 보지 않는 .pyc 하나로 신뢰 판정을 바꿀 수 있다.
+_COMMON_PATH = Path(__file__).resolve().with_name("review_common.py")
+common = types.ModuleType("harness_review_common")
+common.__file__ = str(_COMMON_PATH)
+sys.modules["harness_review_common"] = common
+exec(compile(_COMMON_PATH.read_bytes(), str(_COMMON_PATH), "exec"), common.__dict__)
 
 # 스크립트는 대상 저장소의 `.harness/claude-review/`에 있다. 저장소 루트의 harness.json이 정책이다.
 ROOT = Path(__file__).resolve().parents[2]

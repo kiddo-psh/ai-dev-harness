@@ -37,7 +37,7 @@
 | --- | --- | --- |
 | `infra/claude-review/{collect-mr,generate-review,publish-review,review-status,auth-check}.py` | `core/ci/claude-review/` (init이 `.harness/claude-review/`로 복사) | 대상 브랜치 `develop`·환경 `claude-review`·댓글 표식·규칙 문서 allowlist·크기 상한·시간 제한을 `harness.json` `claude_review`로, CLI 경로·작업 디렉터리를 서버 설정 `/etc/<review_name>/config.json`으로. 공통 판정을 `review_common.py`로 모음. 자격 증명을 `api_key`(기본)·`oauth` 중 하나로 고름. 시스템 프롬프트를 `review_perspectives_ci` 렌더 파일로 |
 | `infra/claude-review/{network-guard,sandbox-probe}.py` | `core/ci/claude-review/` | 테이블 이름·계정·홈·CLI 버전·GitLab 호스트·차단 IP를 서버 설정으로. 차단 IP는 두 개 이상에서 하나 이상으로, 기본값 없음 |
-| `infra/claude-review/test_*.py` 7개 (`test_comment_trigger.py` 제외) | `tests/test_claude_review_*.py` | 정책·서버 설정을 주입하도록 호출만 바꿈. 단언 수 유지 |
+| `infra/claude-review/test_*.py` 7개 (`test_comment_trigger.py` 제외) | `tests/test_claude_review_*.py` | 정책·서버 설정 주입, 프로젝트 경로·IP fixture 교체, 입력 파일 0600. 기대값 변경 3건(network-guard 거절 입력 "공개 IP 1개" → "사설 IP 1개", 프롬프트 문구 2건은 M2-5 원본 문구). 단언 수 유지 |
 | `infra/claude-review/feelm-claude-review-{guard,probe,runner}.service` | `core/ci/claude-review/examples/*.service.example` + `docs/install.md` 14절 | 이름·계정·경로를 `claude-review`로, 다른 Runner 설정 경로 제거. sandbox 지시어는 그대로 |
 | `.gitlab/ci/common.yml`의 `claude-auth-check`·`claude-mr-review` | `core/ci/gitlab/claude-review.yml` | 러너 태그·환경 이름·대상 브랜치를 `HARNESS_REVIEW_*` 변수로, job 이름에 `harness-` 접두사, stage `test` |
 | `infra/claude-review/README.md` | `core/ci/README.md` "Claude MR 리뷰", `docs/install.md` 14절 | 운영 기록·서버 수치·IP·호스트 제거 |

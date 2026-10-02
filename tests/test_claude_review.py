@@ -544,6 +544,123 @@ class InitCheckTest(unittest.TestCase):
                         harness.load_manifest()
 
 
+class ReviewFindingTest(unittest.TestCase):
+    """분리 리뷰 A·B(plans/32-review.md) 반영 회귀."""
+
+    def test_timeouts_cannot_be_raised(self):
+        # A-F2: 원본 값이 조각의 job 제한 안에 드는 최악의 경우다. 올리면 게시 도중 job이 끊길 수 있다
+        for key, value in common.DEFAULT_TIMEOUTS.items():
+            with self.subTest(key=key):
+                with self.assertRaises(common.PolicyError):
+                    common.validate_policy({**BLOCK, "timeouts": {key: value + 1}})
+                lowered = common.validate_policy({**BLOCK, "timeouts": {key: value - 1}})
+                self.assertEqual(lowered["timeouts"][key], value - 1)
+
+    def test_rules_doc_path_rejects_hidden_and_control(self):
+        # B-F3: 숨김 경로와 제어 문자
+        for path in (".git/config", "docs/.secret.md", "a\x00b.md", "a\x1fb.md"):
+            with self.subTest(path=path), self.assertRaises(common.PolicyError):
+                common.validate_policy({**BLOCK, "rules_docs": [{"path": path}]})
+        common.validate_policy({**BLOCK, "rules_docs": [{"path": "docs/rules.md", "when_changed": [".github/"]}]})
+
+    def test_guidance_does_not_follow_symlink(self):
+        # B-F3: 규칙 문서가 링크면 저장소 밖 내용이 신뢰 문서로 들어간다
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "repo"
+            root.mkdir()
+            outside = Path(directory).resolve() / "outside.md"
+            outside.write_text("glrt-OUTSIDE", encoding="utf-8")
+            try:
+                (root / "AGENTS.md").symlink_to(outside)
+            except OSError:
+                self.skipTest("심볼릭 링크를 만들 수 없는 환경")
+            policy = common.validate_policy({**BLOCK, "rules_docs": [{"path": "AGENTS.md"}]})
+            payload = {"files": [{"old_path": "a.py", "new_path": "a.py", "diff": "+z"}]}
+            with patch.object(generator, "ROOT", root), self.assertRaises(Exception) as raised:
+                generator.load_guidance(payload, policy)
+            self.assertEqual(raised.exception.code, "TRUSTED_GUIDANCE_UNAVAILABLE")
+            (root / "AGENTS.md").unlink()
+            (root / "AGENTS.md").write_text("rules", encoding="utf-8")
+            with patch.object(generator, "ROOT", root):
+                self.assertIn("rules", generator.load_guidance(payload, policy))
+
+    def test_scripts_ignore_cached_bytecode(self):
+        # B-F2: check가 보지 않는 __pycache__의 .pyc로 공통 코드를 바꿀 수 없어야 한다
+        import importlib.util as util
+        import py_compile
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            shutil.copy(SCRIPTS / "review_common.py", target / "review_common.py")
+            shutil.copy(SCRIPTS / "review-status.py", target / "review-status.py")
+            forged = target / "forged.py"
+            forged.write_text((SCRIPTS / "review_common.py").read_text(encoding="utf-8") + "\nFORGED = True\n",
+                              encoding="utf-8")
+            cache = Path(util.cache_from_source(str(target / "review_common.py")))
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            py_compile.compile(str(forged), cfile=str(cache), doraise=True,
+                               invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+            spec = util.spec_from_file_location("status_copy", target / "review-status.py")
+            module = util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.assertFalse(hasattr(module.common, "FORGED"))
+
+    def _fake_stat(self, mode, uid):
+        return os.stat_result((mode, 0, 0, 1, uid, 0, 10, 0, 0, 0))
+
+    def test_server_config_file_owner_and_mode(self):
+        # A-F1: 파일 단위 root 소유·그룹/기타 쓰기 금지 검사가 실제로 거절한다
+        import stat as st
+        cases = [(st.S_IFREG | 0o644, 0, True), (st.S_IFREG | 0o640, 0, True),
+                 (st.S_IFREG | 0o664, 0, False), (st.S_IFREG | 0o646, 0, False),
+                 (st.S_IFREG | 0o644, 1000, False), (st.S_IFDIR | 0o755, 0, False)]
+        for mode, uid, ok in cases:
+            with self.subTest(mode=oct(mode), uid=uid), patch.object(common.os, "name", "posix"), \
+                    patch.object(Path, "lstat", return_value=self._fake_stat(mode, uid)):
+                if ok:
+                    common._require_root_owned(Path("/etc/review/config.json"), regular=True)
+                else:
+                    with self.assertRaises(common.ReviewError) as raised:
+                        common._require_root_owned(Path("/etc/review/config.json"), regular=True)
+                    self.assertEqual(raised.exception.code, "UNSAFE_SERVER_CONFIG")
+
+    def test_server_config_file_checked_before_read(self):
+        calls = []
+
+        def check(path, regular):
+            calls.append(regular)
+            if regular:
+                raise common.ReviewError("UNSAFE_SERVER_CONFIG")
+
+        with patch.object(common, "_require_root_owned", side_effect=check), \
+                patch.object(Path, "read_text", side_effect=AssertionError("읽으면 안 된다")), \
+                self.assertRaises(common.ReviewError):
+            common.load_server_config(Path("/etc/review/config.json"))
+        self.assertEqual(calls[-1], True)
+        self.assertTrue(all(flag is False for flag in calls[:-1]) and len(calls) > 1)
+
+    def test_guard_trusted_file(self):
+        # A-F1: network-guard의 설정 파일 검사
+        import stat as st
+        root_dir = self._fake_stat(st.S_IFDIR | 0o755, 0)
+
+        def fake(file_stat, parent=root_dir):
+            def lstat(path):
+                return file_stat if path.name == "config.json" else parent
+            return lstat
+
+        good = self._fake_stat(st.S_IFREG | 0o644, 0)
+        with patch.object(Path, "lstat", autospec=True, side_effect=fake(good)):
+            guard.trusted_file("/etc/review/config.json")
+        for file_stat, parent in ((self._fake_stat(st.S_IFREG | 0o664, 0), root_dir),
+                                  (self._fake_stat(st.S_IFREG | 0o644, 1000), root_dir),
+                                  (good, self._fake_stat(st.S_IFDIR | 0o777, 0)),
+                                  (good, self._fake_stat(st.S_IFDIR | 0o755, 1000))):
+            with self.subTest(file=oct(file_stat.st_mode), parent=oct(parent.st_mode)), \
+                    patch.object(Path, "lstat", autospec=True, side_effect=fake(file_stat, parent)), \
+                    self.assertRaises(ValueError):
+                guard.trusted_file("/etc/review/config.json")
+
+
 class ResidueTest(unittest.TestCase):
     """T2: 이관한 파일에 원본 프로젝트 고유값이 남지 않는다."""
 

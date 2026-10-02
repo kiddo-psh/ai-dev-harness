@@ -41,9 +41,11 @@ DEFAULT_LIMITS = {
     "max_context_file_bytes": 48 * 1024,
     "max_repository_context_bytes": 192 * 1024,
 }
-# 시간 제한(초)과 상한. 상한은 조각의 job 제한(주 실행 8분, 인증 검사 5분) 안에 들어가게 정했다.
+# 시간 제한(초). 낮추기만 할 수 있다. 원본 값에서 주 실행의 최악(Claude 240초 + GitLab 호출 10회 × 20초 = 440초)이
+# 조각의 RUNNER_SCRIPT_TIMEOUT 8분, after_script(GitLab 호출 2회 = 40초)가 1분 안에 든다. 올리면 게시 도중 job이 끊겨
+# 오래된 댓글 정리나 진행 중 상태 댓글 갱신이 빠진다.
 DEFAULT_TIMEOUTS = {"claude_seconds": 240, "auth_check_seconds": 120, "gitlab_seconds": 20}
-TIMEOUT_CEILINGS = {"claude_seconds": 300, "auth_check_seconds": 240, "gitlab_seconds": 60}
+TIMEOUT_CEILINGS = dict(DEFAULT_TIMEOUTS)
 DEFAULTS = {"environment": "claude-review", "review_name": "claude-review", "credential": "api_key",
             "comment_marker": "harness-claude-review"}
 
@@ -78,7 +80,14 @@ def _safe_relative(value: object) -> bool:
         return False
     if re.match(r"^[A-Za-z]:", value) or any(char.isspace() for char in value):
         return False
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return False
     return all(part not in ("", ".", "..") for part in value.split("/"))
+
+
+def _safe_doc_path(value: object) -> bool:
+    """신뢰 문서로 읽을 경로. `.git/config`처럼 숨김 경로는 규칙 문서가 아니므로 거절한다."""
+    return _safe_relative(value) and not any(part.startswith(".") for part in value.split("/"))
 
 
 def _non_empty_token(value: object) -> bool:
@@ -127,7 +136,7 @@ def _validate_rules_docs(docs: object, source: str) -> list[dict]:
     for doc in docs:
         if not isinstance(doc, dict) or "path" not in doc or set(doc) - RULES_DOC_KEYS:
             raise PolicyError(f"{source}: claude_review.rules_docs 항목은 path와 선택 when_changed만 가진다")
-        if not _safe_relative(doc["path"]):
+        if not _safe_doc_path(doc["path"]):
             raise PolicyError(f"{source}: claude_review.rules_docs path는 저장소 안의 상대 경로여야 한다")
         if doc["path"] in seen:
             raise PolicyError(f"{source}: claude_review.rules_docs path가 중복된다")

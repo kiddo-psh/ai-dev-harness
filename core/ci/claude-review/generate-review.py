@@ -3,19 +3,23 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
+import sys
+import types
 from pathlib import Path
 import re
 import stat
 import subprocess
 import tempfile
 
-_COMMON_SPEC = importlib.util.spec_from_file_location(
-    "harness_review_common", Path(__file__).resolve().with_name("review_common.py"))
-common = importlib.util.module_from_spec(_COMMON_SPEC)
-_COMMON_SPEC.loader.exec_module(common)
+# 공통 코드는 원본에서 직접 컴파일한다. importlib 로더는 __pycache__의 바이트코드를 원본과 대조하지 않고
+# 쓸 수 있어, check가 보지 않는 .pyc 하나로 신뢰 판정을 바꿀 수 있다.
+_COMMON_PATH = Path(__file__).resolve().with_name("review_common.py")
+common = types.ModuleType("harness_review_common")
+common.__file__ = str(_COMMON_PATH)
+sys.modules["harness_review_common"] = common
+exec(compile(_COMMON_PATH.read_bytes(), str(_COMMON_PATH), "exec"), common.__dict__)
 
 # 스크립트는 대상 저장소의 `.harness/claude-review/`에 있다. 규칙 문서와 문맥은 보호 브랜치 체크아웃에서 읽는다.
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,8 +110,12 @@ def guidance_paths(payload: dict[str, object], rules_docs: list[dict]) -> list[P
 def load_guidance(payload: dict[str, object], policy: dict) -> str:
     sections = []
     total = 0
+    root = ROOT.resolve()
     for path in guidance_paths(payload, policy["rules_docs"]):
         try:
+            # 링크를 거치면 저장소 밖 파일이 신뢰 문서로 들어간다. 경로 그대로의 일반 파일만 읽는다
+            if path.resolve(strict=True) != root.joinpath(path.relative_to(ROOT)) or not path.is_file():
+                raise GenerationError("TRUSTED_GUIDANCE_UNAVAILABLE")
             content = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             raise GenerationError("TRUSTED_GUIDANCE_UNAVAILABLE") from None
