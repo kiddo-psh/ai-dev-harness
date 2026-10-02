@@ -69,12 +69,18 @@ for id in <실패한 job id ...>; do
 done
 ```
 
-GitHub Actions (`gh`, `failure_reason`·`stage`가 없어 로그와 job 이름으로만 분류된다)
+GitHub Actions (`gh`, `failure_reason`·`stage`가 없어 로그와 job 이름으로만 분류된다).
+시간 초과(`timed_out`)는 실패로 넣고 GitLab의 `job_execution_timeout` 사유로 바꾼다. 빼면 시간 초과 job이 제외 수로만 잡힌다.
+보안 job은 `harness-*` 이름으로 알아보므로, 키트 저장소처럼 보안 검사 job 이름이 다르면(`security.yml`의
+`secret-detection`·`sast`) 아래처럼 `harness-` 접두를 붙인다. 다른 저장소는 `$security`에 그 저장소의 보안 job 이름을 적는다.
 
 ```bash
 gh api --paginate "repos/{owner}/{repo}/actions/runs/<run_id>/jobs" \
-  --jq '.jobs[] | {id, name, stage: null, failure_reason: null,
-                   status: (if .conclusion == "failure" then "failed" else (.conclusion // .status) end)}' > jobs.json
+  --jq '["secret-detection", "sast"] as $security | .jobs[] | {id, stage: null,
+          name: (if (.name | IN($security[])) then "harness-" + .name else .name end),
+          failure_reason: (if .conclusion == "timed_out" then "job_execution_timeout" else null end),
+          status: (if .conclusion == "failure" or .conclusion == "timed_out" then "failed"
+                   else (.conclusion // .status) end)}' > jobs.json
 mkdir -p traces
 for id in <실패한 job id ...>; do
   gh api "repos/{owner}/{repo}/actions/jobs/$id/logs" > "traces/$id.log"
