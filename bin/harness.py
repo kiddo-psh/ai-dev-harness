@@ -11,6 +11,8 @@
     python bin/harness.py check --self
     python bin/harness.py judge [<target>|--self] [--base <ref> | --files <목록 파일|->] [--json]
                                              # 변경 파일로 경량·표준·엄격(lite·standard·strict) 판정
+    python bin/harness.py classify-ci --jobs <jobs.json> [--trace-dir <dir>] [--out <file.jsonl>]
+                                             # 실패한 CI job의 원인 범주를 JSONL로 산출(trace는 <job_id>.log)
     python bin/harness.py version
 """
 
@@ -28,6 +30,7 @@ VERSION = "0.2.0"
 KIT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = KIT_ROOT / "core" / "templates"
 HOOKS_DIR = KIT_ROOT / "core" / "hooks"
+METRICS_DIR = KIT_ROOT / "core" / "metrics"
 # 매니페스트 항목의 base가 가리키는 원본 디렉터리
 SOURCE_DIRS = {"templates": TEMPLATES_DIR, "hooks": HOOKS_DIR}
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
@@ -108,7 +111,13 @@ _HOOKS_SPEC = importlib.util.spec_from_file_location("harness_hooks_common", HOO
 hooks_common = importlib.util.module_from_spec(_HOOKS_SPEC)
 _HOOKS_SPEC.loader.exec_module(hooks_common)
 
+# CI 실패 분류는 M4-1 수집기도 쓰는 core/metrics 모듈에 둔다
+_CLASSIFY_SPEC = importlib.util.spec_from_file_location("harness_classify_ci", METRICS_DIR / "classify_ci.py")
+classify_ci = importlib.util.module_from_spec(_CLASSIFY_SPEC)
+_CLASSIFY_SPEC.loader.exec_module(classify_ci)
+
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
+PLACEHOLDER_NAME = re.compile(r"[a-z_]+")
 
 
 class HarnessError(Exception):
@@ -225,6 +234,10 @@ def build_context(config: dict) -> dict:
     docs = config.get("related_docs") or []
     ctx["related_docs"] = "\n".join(f"- [{d['label']}]({d['path']})" for d in docs)
     ctx["hook_python"] = (config.get("hooks") or {}).get("python", hooks_common.DEFAULT_PYTHON)
+    for include in load_includes():  # 다른 파일의 절을 자리표시자 값으로 넣는다. 포함 내용도 같은 컨텍스트로 렌더한다
+        if include["name"] in ctx:
+            raise HarnessError(f"매니페스트 include 이름이 기존 자리표시자와 겹친다: {include['name']}")
+        ctx[include["name"]] = render(include_text(include), ctx, source=f"{include['src']}#{include['name']}")
     return ctx
 
 
@@ -273,7 +286,7 @@ def render(text: str, ctx: dict, source: str = "<template>") -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_manifest() -> list[dict]:
+def read_manifest() -> dict:
     if not MANIFEST_PATH.is_file():
         raise HarnessError(f"매니페스트가 없다: {MANIFEST_PATH}")
     try:
@@ -282,6 +295,74 @@ def load_manifest() -> list[dict]:
         raise HarnessError(f"매니페스트를 읽을 수 없다: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("files"), list):
         raise HarnessError("매니페스트 files는 목록이어야 한다")
+    return data
+
+
+def valid_template_path(value) -> bool:
+    return (isinstance(value, str) and bool(value) and "\\" not in value and not value.startswith("/") and
+            all(part not in ("", ".", "..") for part in value.split("/")) and not re.match(r"^[A-Za-z]:", value))
+
+
+def load_includes() -> list[dict]:
+    """매니페스트 includes: 원본 파일(templates 기준)의 `## 절`을 골라 자리표시자 값으로 쓴다."""
+    includes = read_manifest().get("includes", [])
+    if not isinstance(includes, list):
+        raise HarnessError("매니페스트 includes는 목록이어야 한다")
+    seen = set()
+    for entry in includes:
+        if not isinstance(entry, dict) or not {"name", "src", "sections"} <= set(entry) <= {"name", "src", "sections", "tag"}:
+            raise HarnessError("매니페스트 include 항목은 name·src·sections(선택 tag)를 가져야 한다")
+        if "tag" in entry and (not isinstance(entry["tag"], str) or not re.fullmatch(r"[^\[\]\s]+", entry["tag"])):
+            raise HarnessError(f"매니페스트 include tag가 잘못됐다: {entry['tag']!r}")
+        name = entry["name"]
+        if not isinstance(name, str) or not PLACEHOLDER_NAME.fullmatch(name):
+            raise HarnessError(f"매니페스트 include 이름은 소문자와 밑줄만 쓴다: {name!r}")
+        if name.startswith("area_"):  # 영역 자리표시자 이름공간. 영역 문서에서 조용히 가려지는 것을 막는다
+            raise HarnessError(f"매니페스트 include 이름은 area_로 시작할 수 없다: {name}")
+        if name in seen:
+            raise HarnessError(f"매니페스트 include 이름이 중복된다: {name}")
+        seen.add(name)
+        if not valid_template_path(entry["src"]):
+            raise HarnessError(f"매니페스트 include src 경로가 잘못됐다: {entry['src']!r}")
+        sections = entry["sections"]
+        if not isinstance(sections, list) or not sections or any(
+                not isinstance(s, str) or not s.strip() for s in sections):
+            raise HarnessError(f"매니페스트 include {name}의 sections는 비어 있지 않은 문자열 목록이어야 한다")
+    return includes
+
+
+def markdown_sections(text: str) -> dict[str, str]:
+    """`## 제목` 단위 본문. 첫 `##` 앞의 설명은 버린다."""
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in text.replace("\r\n", "\n").split("\n"):
+        if line.startswith("## "):
+            current = line[3:].strip()
+            if current in sections:
+                raise HarnessError(f"절 제목이 중복된다: {current}")
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+    return {name: "\n".join(lines).strip("\n") for name, lines in sections.items()}
+
+
+def include_text(include: dict) -> str:
+    path = TEMPLATES_DIR / include["src"]
+    if not path.is_file():
+        raise HarnessError(f"include 원본이 없다: {path}")
+    sections = markdown_sections(path.read_text(encoding="utf-8"))
+    missing = [s for s in include["sections"] if s not in sections]
+    if missing:
+        raise HarnessError(f"{include['src']}에 절이 없다: {', '.join(missing)}")
+    text = "\n".join(sections[s] for s in include["sections"])  # 절 본문은 목록이라 한 목록으로 잇는다
+    if "tag" in include:
+        text = "\n".join(f"{line} [{include['tag']}]" if line.startswith("- ") else line
+                         for line in text.split("\n"))
+    return text
+
+
+def load_manifest() -> list[dict]:
+    data = read_manifest()
     seen = set()
     for entry in data["files"]:
         if not isinstance(entry, dict) or not {"src", "dest"} <= set(entry) or set(entry) - {"src", "dest", "base", "platform", "self", "render"}:
@@ -291,9 +372,7 @@ def load_manifest() -> list[dict]:
             raise HarnessError(f"매니페스트 base는 {sorted(SOURCE_DIRS)} 중 하나여야 한다: {base}")
         for key in ("src", "dest"):
             value = entry[key]
-            if (not isinstance(value, str) or not value or "\\" in value or
-                    value.startswith("/") or any(part in ("", ".", "..") for part in value.split("/")) or
-                    re.match(r"^[A-Za-z]:", value)):
+            if not valid_template_path(value):
                 raise HarnessError(f"매니페스트 {key} 경로가 잘못됐다: {value!r}")
         if entry["dest"] in seen:
             raise HarnessError(f"매니페스트 목적지가 중복된다: {entry['dest']}")
@@ -562,6 +641,27 @@ def cmd_judge(args) -> int:
     return 0
 
 
+def cmd_classify_ci(args) -> int:
+    jobs_path = Path(args.jobs)
+    if not jobs_path.is_file():
+        raise HarnessError(f"job 메타데이터 파일이 없다: {jobs_path}")
+    trace_dir = Path(args.trace_dir) if args.trace_dir else None
+    if trace_dir is not None and not trace_dir.is_dir():
+        raise HarnessError(f"trace 디렉터리가 없다: {trace_dir}")
+    try:
+        jobs = classify_ci.load_jobs(jobs_path.read_bytes().decode("utf-8", errors="replace"))
+        records, skipped = classify_ci.classify_jobs(jobs, trace_dir)
+    except classify_ci.ClassifyError as exc:
+        raise HarnessError(f"{jobs_path}: {exc}") from exc
+    output = classify_ci.to_jsonl(records)
+    if args.out:
+        write_text(Path(args.out), output)
+    else:
+        sys.stdout.write(output)
+    print(f"실패 job {len(records)}개를 분류했다. 실패가 아닌 job {skipped}개는 제외했다.", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="harness", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -598,6 +698,12 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--files", help="변경 파일 목록(줄 단위). - 이면 표준 입력")
     judge.add_argument("--json", action="store_true", help="JSON으로 출력")
     judge.set_defaults(func=cmd_judge)
+
+    classify = sub.add_parser("classify-ci", help="실패한 CI job의 원인을 분류해 JSONL로 쓴다")
+    classify.add_argument("--jobs", required=True, help="job 메타데이터 JSON(GitLab job API 형태, 목록 또는 객체)")
+    classify.add_argument("--trace-dir", help="job trace 디렉터리(<job_id>.log). 없으면 메타데이터만으로 분류")
+    classify.add_argument("--out", help="JSONL 출력 파일. 생략하면 표준 출력")
+    classify.set_defaults(func=cmd_classify_ci)
 
     version = sub.add_parser("version")
     version.set_defaults(func=lambda _args: print(VERSION) or 0)

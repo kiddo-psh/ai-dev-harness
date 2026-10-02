@@ -1,0 +1,3 @@
+$ git fetch origin
+fatal: unable to access 'https://git.example.invalid/group/app.git/': Could not resolve host: git.example.invalid
+ERROR: Job failed: exit code 128
