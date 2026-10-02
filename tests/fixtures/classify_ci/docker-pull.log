@@ -1,0 +1,6 @@
+Running with gitlab-runner 17.0.0
+Preparing the "docker" executor
+Using Docker executor with image node:20 ...
+Pulling docker image node:20 ...
+WARNING: Failed to pull image with policy "always": toomanyrequests: You have reached your pull rate limit.
+ERROR: Job failed: failed to pull image "node:20" with specified policies [always]: toomanyrequests: You have reached your pull rate limit.

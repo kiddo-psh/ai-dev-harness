@@ -1,0 +1,4 @@
+$ ./gradlew test --no-daemon
+> Task :test
+ReservationServiceTest > waitsForLock() FAILED
+ERROR: Job failed: execution took longer than 1h0m0s seconds
