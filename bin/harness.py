@@ -9,12 +9,15 @@
                                              # 영역 디렉터리에 AGENTS.md 생성(루트 init 이후)
     python bin/harness.py check <target>     # 렌더링 결과와 실제 파일의 차이(드리프트) 검사
     python bin/harness.py check --self
+    python bin/harness.py judge [<target>|--self] [--base <ref> | --files <목록 파일|->] [--json]
+                                             # 변경 파일로 경량·표준·엄격(lite·standard·strict) 판정
     python bin/harness.py version
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import json
 import re
@@ -29,7 +32,7 @@ HOOKS_DIR = KIT_ROOT / "core" / "hooks"
 SOURCE_DIRS = {"templates": TEMPLATES_DIR, "hooks": HOOKS_DIR}
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
 AREA_TEMPLATE = "AREA-AGENTS.md"
-AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs"}
+AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs", "trigger_paths", "test_paths"}
 CONFIG_KEYS = {"harness_version", "project_name", "platform", "tracker", "issue_prefix",
                "default_branch", "integration_branch", "related_docs", "areas", "hooks"}
 RELATED_DOC_KEYS = {"label", "path"}
@@ -198,6 +201,10 @@ def validate_areas(areas, source: Path | str) -> None:
                 not isinstance(item, str) or not item.strip() for item in items
             ):
                 raise HarnessError(f"{source}: 영역 {dir_}의 {key}는 비어 있지 않은 문자열 목록이어야 한다")
+        try:
+            hooks_common.validate_judge_rules(area, source)
+        except hooks_common.ConfigError as exc:
+            raise HarnessError(str(exc)) from exc
 
 
 def build_context(config: dict) -> dict:
@@ -388,6 +395,9 @@ def cmd_init_area(args, target: Path) -> int:
     previous = areas[same[0]] if same else {}
     area["triggers"] = args.trigger or previous.get("triggers") or list(DEFAULT_TRIGGERS)
     area["review_focus"] = args.review_focus or previous.get("review_focus") or list(DEFAULT_REVIEW_FOCUS)
+    # 경로 판정 규칙도 생성 시점의 기본값을 설정에 굳힌다. 키트 기본값이 바뀌어도 기존 영역 판정은 그대로다
+    area["trigger_paths"] = previous.get("trigger_paths", copy.deepcopy(hooks_common.DEFAULT_TRIGGER_PATHS))
+    area["test_paths"] = previous.get("test_paths", list(hooks_common.DEFAULT_TEST_PATHS))
     if args.area_doc or previous.get("docs"):
         area["docs"] = args.area_doc or previous["docs"]
     if same:
@@ -480,6 +490,47 @@ def cmd_check(args) -> int:
     return 1
 
 
+TIER_LABELS = {"lite": "경량", "standard": "표준", "strict": "엄격"}
+
+
+def read_file_list(source: str) -> list[str]:
+    try:
+        text = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HarnessError(f"파일 목록을 읽을 수 없다: {source}: {exc}") from exc
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def cmd_judge(args) -> int:
+    target, _self_mode = resolve_target(args) if args.self or args.target else (Path.cwd(), False)
+    config = load_config(target / CONFIG_NAME)
+    if args.files is not None:
+        base, paths = None, read_file_list(args.files)
+    else:
+        ref = args.base or f"origin/{config['default_branch']}"
+        try:
+            base, paths = hooks_common.changed_files(target, ref)
+        except hooks_common.ConfigError as exc:
+            raise HarnessError(str(exc)) from exc
+    result = {"base": base, **hooks_common.judge(paths, config)}
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    print(f"판정: {result['tier']} ({TIER_LABELS[result['tier']]})")
+    if base:
+        print(f"기준: {base}")
+    if not result["files"]:
+        print("변경 파일 없음")
+    for item in sorted(result["files"], key=lambda f: (-hooks_common.TIERS.index(f["tier"]), f["path"])):
+        area = f" [{item['area']}]" if item["area"] else ""
+        print(f"  {item['tier']:<8} {item['path']}{area}  {item['rule']}")
+    if result["human_check"]:
+        print("사람 확인 필요(경로로 판정하지 않는 트리거. 해당하면 판정을 올린다):")
+        for item in result["human_check"]:
+            print(f"  [{item['area']}] {item['trigger']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="harness", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -507,6 +558,15 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("target", nargs="?")
     check.add_argument("--self", action="store_true")
     check.set_defaults(func=cmd_check)
+
+    judge = sub.add_parser("judge", help="변경 파일로 경량·표준·엄격을 판정한다")
+    judge.add_argument("target", nargs="?", help="대상 저장소(기본 현재 디렉터리)")
+    judge.add_argument("--self", action="store_true")
+    source = judge.add_mutually_exclusive_group()
+    source.add_argument("--base", help="비교 기준 ref(기본 origin/<default_branch>). merge-base 이후 변경과 작업 트리를 본다")
+    source.add_argument("--files", help="변경 파일 목록(줄 단위). - 이면 표준 입력")
+    judge.add_argument("--json", action="store_true", help="JSON으로 출력")
+    judge.set_defaults(func=cmd_judge)
 
     version = sub.add_parser("version")
     version.set_defaults(func=lambda _args: print(VERSION) or 0)

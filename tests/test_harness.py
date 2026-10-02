@@ -193,7 +193,9 @@ class AreaInitTest(AreaTestBase):
         after = self.config()
         self.assertEqual(after["areas"], [{"dir": "backend", "verify": ["./gradlew build"],
                                            "triggers": harness.DEFAULT_TRIGGERS,
-                                           "review_focus": harness.DEFAULT_REVIEW_FOCUS}])
+                                           "review_focus": harness.DEFAULT_REVIEW_FOCUS,
+                                           "trigger_paths": harness.hooks_common.DEFAULT_TRIGGER_PATHS,
+                                           "test_paths": harness.hooks_common.DEFAULT_TEST_PATHS}])
         for key, value in before.items():
             self.assertEqual(after[key], value)
 
@@ -203,6 +205,19 @@ class AreaInitTest(AreaTestBase):
                 patch.object(harness, "DEFAULT_REVIEW_FOCUS", ["changed"]):
             code, out = run(["check", str(self.target)])
         self.assertEqual(code, 0, out)
+
+    def test_judge_rules_preserved_on_reinit(self):
+        self.init_area("--verify-cmd", "make test")
+        config = self.config()
+        config["areas"][0]["trigger_paths"] = {"strict": ["/src/auth/"]}
+        config["areas"][0]["test_paths"] = ["it/"]
+        (self.target / "harness.json").write_text(json.dumps(config), encoding="utf-8")
+        code, _ = self.init_area("--verify-cmd", "make check", "--force")
+        self.assertEqual(code, 0)
+        area = self.config()["areas"][0]
+        self.assertEqual(area["trigger_paths"], {"strict": ["/src/auth/"]})
+        self.assertEqual(area["test_paths"], ["it/"])
+        self.assertEqual(area["verify"], ["make check"])
 
     def test_trigger_override(self):
         self.init_area("--verify-cmd", "make test", "--trigger", "A 변경", "--trigger", "B 변경")
@@ -313,6 +328,12 @@ class ConfigTest(unittest.TestCase):
             [{"dir": "./backend", "verify": ["t"]}],
             [{"dir": "backend", "verify": ["t"]}, {"dir": "backend", "verify": ["u"]}],
             [{"dir": "backend", "verify": ["t"], "trigger": ["오타"]}],
+            [{"dir": "backend", "verify": ["t"], "trigger_paths": ["/src/"]}],
+            [{"dir": "backend", "verify": ["t"], "trigger_paths": {"lite": ["x"]}}],
+            [{"dir": "backend", "verify": ["t"], "trigger_paths": {"strict": "/src/"}}],
+            [{"dir": "backend", "verify": ["t"], "trigger_paths": {"strict": [""]}}],
+            [{"dir": "backend", "verify": ["t"], "test_paths": "tests/"}],
+            [{"dir": "backend", "verify": ["t"], "test_paths": [" "]}],
         ]
         for areas in bad_areas:
             with self.subTest(areas=areas):
@@ -322,6 +343,9 @@ class ConfigTest(unittest.TestCase):
     def test_valid_areas_accepted(self):
         harness.validate_config({**self.BASE, "areas": [
             {"dir": "apps/web", "verify": ["npm test"], "review_focus": ["접근성"]},
+            {"dir": "backend", "verify": ["t"], "trigger_paths": {"strict": ["/src/auth/"], "standard": []},
+             "test_paths": []},
+            {"dir": "infra", "verify": ["t"], "trigger_paths": {"standard": ["*.tf"]}},
         ]}, "test")
 
     def test_invalid_hooks_rejected(self):

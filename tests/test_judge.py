@@ -1,0 +1,230 @@
+"""`harness judge`와 hooks 공통 판정 함수 테스트."""
+
+import importlib.util
+import io
+import json
+import shutil
+import subprocess
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parent.parent
+SPEC = importlib.util.spec_from_file_location("harness", ROOT / "bin" / "harness.py")
+harness = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(harness)
+common = harness.hooks_common
+
+
+def judge(paths, areas=()):
+    return common.judge(paths, {"areas": list(areas)})
+
+
+def tiers(result):
+    return {f["path"]: (f["tier"], f["rule"]) for f in result["files"]}
+
+
+class JudgeTest(unittest.TestCase):
+    def test_docs_only_is_lite(self):
+        result = judge(["README.md", "docs/a.txt", "core/templates/x.md"])
+        self.assertEqual(result["tier"], "lite")
+        self.assertEqual(tiers(result)["README.md"], ("lite", "docs:*.md"))
+        self.assertEqual(tiers(result)["docs/a.txt"], ("lite", "docs:/docs/"))
+
+    def test_nested_docs_dir_is_not_doc(self):
+        self.assertEqual(judge(["src/docs/a.txt"])["tier"], "standard")
+
+    def test_tests_only_is_lite(self):
+        paths = ["tests/test_x.py", "web/src/a.test.ts", "app/src/test/java/A.java", "pkg/b_test.go"]
+        result = judge(paths)
+        self.assertEqual(result["tier"], "lite")
+        for path in paths:
+            self.assertTrue(tiers(result)[path][1].startswith("test_paths:"), path)
+
+    def test_default_strict(self):
+        for path in ["package-lock.json", "web/yarn.lock", ".github/workflows/ci.yml", ".gitlab-ci.yml",
+                     "db/migrations/1.sql", "src/main/resources/db/migration/V1__a.sql", "Jenkinsfile"]:
+            with self.subTest(path=path):
+                result = judge([path])
+                self.assertEqual(result["tier"], "strict")
+                self.assertTrue(result["files"][0]["rule"].startswith("trigger_paths.strict:"))
+
+    def test_nested_workflows_not_default_strict(self):
+        self.assertEqual(judge(["sub/.github/workflows/ci.yml"])["tier"], "standard")
+
+    def test_other_is_standard(self):
+        self.assertEqual(tiers(judge(["src/app.py"])), {"src/app.py": ("standard", "default")})
+
+    def test_area_rules_relative_and_replace_default(self):
+        area = {"dir": "backend", "verify": ["t"], "trigger_paths": {"strict": ["/src/auth/"]}}
+        result = judge(["backend/src/auth/A.java", "backend/package-lock.json", "src/auth/B.java"], [area])
+        got = tiers(result)
+        self.assertEqual(got["backend/src/auth/A.java"], ("strict", "trigger_paths.strict:/src/auth/"))
+        self.assertEqual(got["backend/package-lock.json"], ("standard", "default"))
+        self.assertEqual(got["src/auth/B.java"], ("standard", "default"))  # 영역 밖은 공통 기본
+        self.assertEqual(result["files"][0]["area"], "backend")
+        self.assertIsNone(result["files"][2]["area"])
+
+    def test_area_without_rules_uses_default(self):
+        result = judge(["backend/package-lock.json"], [{"dir": "backend", "verify": ["t"]}])
+        self.assertEqual(result["tier"], "strict")
+
+    def test_deepest_area_owns(self):
+        areas = [{"dir": "a", "verify": ["t"], "trigger_paths": {"strict": ["x"]}},
+                 {"dir": "a/b", "verify": ["t"], "trigger_paths": {"strict": []}}]
+        result = judge(["a/b/x", "a/x"], areas)
+        self.assertEqual(tiers(result), {"a/b/x": ("standard", "default"),
+                                         "a/x": ("strict", "trigger_paths.strict:x")})
+        self.assertEqual(result["files"][0]["area"], "a/b")
+
+    def test_area_prefix_is_directory_boundary(self):
+        area = {"dir": "app", "verify": ["t"], "trigger_paths": {"strict": ["*.py"]}}
+        self.assertIsNone(judge(["apple/x.py"], [area])["files"][0]["area"])
+
+    def test_standard_pattern_blocks_lite(self):
+        area = {"dir": "backend", "verify": ["t"], "trigger_paths": {"standard": ["*.md"]}}
+        self.assertEqual(judge(["backend/x.md"], [area])["tier"], "standard")
+
+    def test_custom_test_paths(self):
+        area = {"dir": "backend", "verify": ["t"], "test_paths": ["it/"]}
+        result = judge(["backend/it/A.java", "backend/tests/B.java"], [area])
+        self.assertEqual(tiers(result)["backend/it/A.java"][0], "lite")
+        self.assertEqual(tiers(result)["backend/tests/B.java"][0], "standard")
+
+    def test_strict_beats_doc(self):
+        self.assertEqual(judge(["migrations/README.md"])["tier"], "strict")
+
+    def test_max_tier_and_empty(self):
+        self.assertEqual(judge(["README.md", "tests/a.py", "src/a.py", "go.sum"])["tier"], "strict")
+        self.assertEqual(judge(["README.md", "src/a.py"])["tier"], "standard")
+        empty = judge([])
+        self.assertEqual((empty["tier"], empty["files"], empty["human_check"]), ("lite", [], []))
+
+    def test_case_insensitive(self):
+        self.assertEqual(judge(["Package-Lock.JSON"])["tier"], "strict")
+
+    def test_human_check_lists_area_triggers(self):
+        areas = [{"dir": "backend", "verify": ["t"], "triggers": ["인증·인가", "트랜잭션 경계"]},
+                 {"dir": "web", "verify": ["t"], "triggers": ["접근성"]}]
+        result = judge(["backend/a.java", "backend/b.java", "README.md"], areas)
+        self.assertEqual(result["human_check"], [{"area": "backend", "trigger": "인증·인가"},
+                                                 {"area": "backend", "trigger": "트랜잭션 경계"}])
+        self.assertEqual(result["tier"], "standard")
+
+    def test_path_normalization(self):
+        result = judge([".\\backend\\x.java", "./README.md", "README.md", "", "  "],
+                       [{"dir": "backend", "verify": ["t"]}])
+        self.assertEqual([f["path"] for f in result["files"]], ["backend/x.java", "README.md"])
+        self.assertEqual(result["files"][0]["area"], "backend")
+
+
+def run(argv, stdin=None):
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err), patch("sys.stdin", io.StringIO(stdin or "")):
+        code = harness.main(argv)
+    return code, out.getvalue(), err.getvalue()
+
+
+def git(cwd, *args):
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                   cwd=cwd, check=True, capture_output=True)
+
+
+class JudgeCliTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="harness-judge-"))
+        self.repo = self.tmp / "repo"
+        code, _, _ = run(["init", str(self.repo), "--platform", "github", "--tracker", "github",
+                          "--integration-branch", "main"])
+        self.assertEqual(code, 0)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def write(self, rel, text="x\n"):
+        path = self.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def commit_all(self, message="base"):
+        git(self.repo, "init", "-q", "-b", "main")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", message)
+
+    def judge_json(self, *extra, stdin=None):
+        code, out, err = run(["judge", str(self.repo), "--json", *extra], stdin=stdin)
+        self.assertEqual(code, 0, err)
+        return json.loads(out)
+
+    def test_git_base(self):
+        self.write("src/old.py")
+        self.write("src/keep.py")
+        self.commit_all()
+        git(self.repo, "checkout", "-q", "-b", "feature")
+        git(self.repo, "mv", "src/old.py", "src/new.py")
+        git(self.repo, "commit", "-q", "-m", "rename")
+        git(self.repo, "checkout", "-q", "main")
+        self.write("main-only.py")                      # 기준 브랜치에서만 생긴 변경은 빠져야 한다
+        git(self.repo, "add", "main-only.py")
+        git(self.repo, "commit", "-q", "-m", "main moves on")
+        git(self.repo, "checkout", "-q", "feature")
+        self.write("src/keep.py", "changed\n")          # 커밋하지 않은 수정
+        self.write("package-lock.json")                 # 추적 안 된 새 파일
+        result = self.judge_json("--base", "main")
+        self.assertEqual({f["path"] for f in result["files"]},
+                         {"src/old.py", "src/new.py", "src/keep.py", "package-lock.json"})
+        self.assertEqual(result["tier"], "strict")
+        self.assertRegex(result["base"], r"^[0-9a-f]{40}$")
+
+    def test_default_base_needs_origin(self):
+        self.commit_all()
+        code, _, err = run(["judge", str(self.repo)])
+        self.assertEqual(code, 2)
+        self.assertIn("origin/main", err)
+
+    def test_files_and_json(self):
+        self.write("list.txt", "README.md\nsrc/a.py\n\n")
+        result = self.judge_json("--files", str(self.repo / "list.txt"))
+        self.assertEqual(set(result), {"base", "tier", "files", "human_check"})
+        self.assertIsNone(result["base"])
+        self.assertEqual(result["tier"], "standard")
+        self.assertEqual(set(result["files"][0]), {"path", "area", "tier", "rule"})
+        self.assertEqual(self.judge_json("--files", "-", stdin="docs/x.md\n")["tier"], "lite")
+
+    def test_human_output(self):
+        run(["init", str(self.repo), "--area", "backend", "--verify-cmd", "make test"])
+        code, out, _ = run(["judge", str(self.repo), "--files", "-"], stdin="backend/a.py\nREADME.md\n")
+        self.assertEqual(code, 0)
+        self.assertIn("판정: standard (표준)", out)
+        self.assertIn("backend/a.py [backend]  default", out)
+        self.assertIn("사람 확인 필요", out)
+        self.assertIn(harness.DEFAULT_TRIGGERS[0], out)
+
+    def test_saved_area_defaults_apply(self):
+        run(["init", str(self.repo), "--area", "backend", "--verify-cmd", "make test"])
+        result = self.judge_json("--files", "-", stdin="backend/gradle.lockfile\nbackend/src/test/A.java\n")
+        self.assertEqual([f["tier"] for f in result["files"]], ["strict", "lite"])
+
+    def test_errors(self):
+        self.commit_all()
+        code, _, err = run(["judge", str(self.repo), "--base", "no-such-ref"])
+        self.assertEqual(code, 2)
+        self.assertIn("no-such-ref", err)
+        code, _, _ = run(["judge", str(self.repo), "--files", str(self.repo / "missing.txt")])
+        self.assertEqual(code, 2)
+        config = json.loads((self.repo / "harness.json").read_text(encoding="utf-8"))
+        config["areas"] = [{"dir": "backend", "verify": ["t"], "trigger_paths": {"lite": []}}]
+        (self.repo / "harness.json").write_text(json.dumps(config), encoding="utf-8")
+        code, _, err = run(["judge", str(self.repo), "--files", "-"], stdin="a\n")
+        self.assertEqual(code, 2)
+        self.assertIn("trigger_paths", err)
+
+    def test_base_and_files_exclusive(self):
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            harness.main(["judge", str(self.repo), "--base", "x", "--files", "-"])
+
+
+if __name__ == "__main__":
+    unittest.main()
