@@ -302,6 +302,8 @@ def load_includes() -> list[dict]:
         name = entry["name"]
         if not isinstance(name, str) or not PLACEHOLDER_NAME.fullmatch(name):
             raise HarnessError(f"매니페스트 include 이름은 소문자와 밑줄만 쓴다: {name!r}")
+        if name.startswith("area_"):  # 영역 자리표시자 이름공간. 영역 문서에서 조용히 가려지는 것을 막는다
+            raise HarnessError(f"매니페스트 include 이름은 area_로 시작할 수 없다: {name}")
         if name in seen:
             raise HarnessError(f"매니페스트 include 이름이 중복된다: {name}")
         seen.add(name)

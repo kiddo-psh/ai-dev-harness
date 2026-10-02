@@ -480,7 +480,7 @@ class AreaCheckTest(AreaTestBase):
 
 
 class AreaTemplateTest(unittest.TestCase):
-    LINE_BUDGET = 73  # M2-5: 리뷰 관점 원본의 공통 절(노이즈 제외·코드 대조)을 영역 문서에도 넣는다
+    LINE_BUDGET = 71  # M2-5: 리뷰 관점 원본의 공통 절(노이즈 제외·코드 대조)을 영역 문서에도 넣는다
 
     def rendered(self):
         ctx = harness.build_context({
@@ -547,6 +547,8 @@ class IncludeTest(unittest.TestCase):
             [{**good, "sections": []}],
             [{**good, "sections": [""]}],
             [{**good, "name": "project_name"}],
+            [{**good, "name": "area_review_focus"}],
+            [{**good, "name": "area_new"}],
             [{**good, "name": "Bad-Name"}],
             [{**good, "src": "../AGENTS.md"}],
             [{**good, "src": "/abs.md"}],
@@ -584,8 +586,8 @@ class IncludeTest(unittest.TestCase):
                 self.assertIn(self.first_bullet("로컬"), text)
                 self.assertNotIn(self.first_bullet("CI"), text)
                 self.assertNotIn("관점: 계약 정합성 · 정확성 · 보안(입력 검증, Secret 전체 1회)", text)
-            self.assertIn("이 영역에서 특히 볼 관점: 접근성.", area)
-            self.assertLess(area.index("이 영역에서 특히 볼 관점"), area.index(self.first_bullet("공통")))
+            self.assertIn("이 영역에서 특히 볼 관점(공통 관점에 덧붙임): 접근성. [사람]", area)
+            self.assertGreater(area.index("이 영역에서 특히 볼 관점"), area.index(self.first_bullet("로컬")))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
