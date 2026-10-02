@@ -10,10 +10,14 @@ core/ci/gitlab/
   sast.yml               semgrep
   image-scan.yml         trivy image
   mr-lint.yml            MR 본문 필수 절 검사 (M2-2)
-core/ci/claude-review/   도구 없는 Claude MR 리뷰 (M2-4, feelm 이관)
+  claude-review.yml      도구 없는 Claude MR 리뷰 (M2-4, feelm 이관, 보호 브랜치 파이프라인 전용)
+core/ci/claude-review/   리뷰 스크립트 원본. init이 대상 저장소 .harness/claude-review/에 복사한다
+  examples/              서버 설정·systemd 유닛 예시 (init이 설치하지 않는다)
 ```
 
-각 조각은 단독으로 동작하고 MR 파이프라인에서만 실행된다. 필요한 변수와 조건은 파일 머리 주석에 있다.
+각 조각은 단독으로 동작하고 MR 파이프라인에서만 실행된다. **예외는 `claude-review`다.** 리뷰 토큰이 MR 소스의
+CI·스크립트와 함께 실행되지 않도록 보호된 대상 브랜치의 파이프라인에서만 돈다(아래 "Claude MR 리뷰").
+필요한 변수와 조건은 파일 머리 주석에 있다.
 
 ## 사용법
 
@@ -136,6 +140,37 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 - 한 job: 같은 이름의 job을 로컬에 다시 적고 `rules: [{when: never}]`로 덮어쓴다.
 - 오탐 하나: 위 표의 예외 방식을 쓴다.
 
+## Claude MR 리뷰
+
+`claude-review.yml`은 열린 MR 하나를 도구 없는 Claude Code CLI로 리뷰해 댓글 하나로 남긴다. 설치(서버 계정·네트워크
+가드·systemd·runner·Secret)는 [`docs/install.md`](../docs/install.md) 14절을 따른다.
+
+| job | 실행 조건 | 하는 일 |
+| --- | --- | --- |
+| `harness-claude-auth-check` | 보호된 `HARNESS_REVIEW_BRANCH`의 push·web 파이프라인, 수동 | 고정 `OK` 요청 하나로 자격 증명 확인 |
+| `harness-claude-review` | 같은 브랜치의 web 파이프라인(수동) 또는 `CLAUDE_REVIEW_TRIGGER=comment`인 api 파이프라인 | 상태 댓글 → 수집 → 생성 → 게시, `after_script`에서 상태 갱신 |
+
+- **MR 파이프라인에서는 돌지 않는다.** 스크립트도 대상 브랜치(`claude_review.target_branch`), 보호 ref, 환경 이름,
+  파이프라인 출처를 다시 확인하고 debug trace가 켜져 있으면 거부한다. 판정 기준은 보호 브랜치 체크아웃의
+  `harness.json`이다.
+- **실행하는 코드는 보호 브랜치의 `.harness/claude-review/` 사본뿐이다.** MR 브랜치는 checkout하지 않고 GitLab API로
+  메타데이터와 diff만 받는다. fork MR, 대상 브랜치가 다른 MR, 입력한 SHA와 현재 HEAD가 다른 MR은 거부한다.
+- **도구 없는 실행.** `--tools ""`, slash command·설정 파일·MCP·hook·세션 저장을 끄고 빈 HOME에서 한 번만 응답받는다.
+  이 인자 목록은 `review_common.CLI_ARGS` 상수이며 테스트가 고정한다. 자식 프로세스에는 `credential`이 고른 자격 증명
+  하나와 고정 환경만 넘기고 GitLab 토큰·다른 자격 증명·proxy는 넘기지 않는다.
+- **MR 내용은 신뢰하지 않는다.** 시스템 프롬프트는 리뷰 관점 원본의 공통+CI 절(`review_perspectives_ci`)에서 렌더한
+  `.harness/claude-review/system-prompt.md`다. MR 설명은 근거로 쓰지 않는다. 신뢰된 규칙은 `claude_review.rules_docs`
+  allowlist만 읽고 MR 경로를 로컬 경로로 쓰지 않는다. 결과는 스키마·심각도·변경 파일·줄 번호를 검증한 뒤에만 게시한다.
+- **댓글.** 숨은 식별자(`comment_marker`, 프로젝트·MR·SHA)로 같은 토큰 사용자의 기존 리뷰가 있으면 다시 게시하지 않는다.
+  게시 전 두 번, 게시 후 한 번 HEAD를 확인하고 그사이 새 커밋이 오면 방금 만든 댓글만 지운다. 모델 문자열은 코드 블록에
+  가둬 멘션·링크·quick action으로 해석되지 않게 한다.
+- **크기 상한.** 파일 100개, 파일당 diff 128 KiB, 전체 512 KiB, GitLab이 접은 diff는 리뷰하지 않고 실패한다.
+  `claude_review.limits`로 낮출 수 있다.
+- **로그.** 분류 코드, 모델명과 토큰 수만 남긴다. 토큰, MR diff, 리뷰 원문은 출력하지 않는다.
+- **네트워크 가드.** 리뷰 계정 UID에만 nftables 규칙을 건다(DNS 53과 공개 IPv4 443만 허용). 공개 HTTPS 전체를 허용하므로
+  도메인 단위 차단은 아니다. 그래서 MR 소스를 실행하지 않고 도구도 허용하지 않는다.
+- 리뷰는 참고용이며 `allow_failure: true`다. 승인·병합 판단은 사람이 한다.
+
 ## 키트 자기 적용
 
 키트 저장소의 PR에서는 `.github/workflows/security.yml`이 `secret-detection`과 `sast` 조각을 GitHub Actions로 실행한다(M1-7).
@@ -146,6 +181,7 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 `script:` 아래 `- |` 블록 하나, 변수 값은 큰따옴표 또는 맨 값(`$` 없음)이다. 모르는 모양은 실패한다(스크립트 일부만 돌려 통과하지 않는다).
 PR이 workflow·러너·조각을 바꿨으면 job 로그에 경고가 나온다.
 키트에는 lockfile과 이미지가 없어 의존성 감사·이미지 스캔은 리허설(M1-8)에서 돌린다.
+`claude-review`는 자기 적용하지 않는다. 스크립트 단위 테스트(`tests/test_claude_review*.py`)만 돈다.
 
 `ci.yml`의 `rehearsal` job은 `.github/scripts/rehearse.py`로 `init` 대상에 fixture를 만들어 조각 4종을 모두 실행한다.
 검출 시나리오(지운 Secret, lodash 4.17.20 CVE-2021-23337, log4j-core 2.14.1 CVE-2021-44228, alpine 3.10 CVE-2021-36159,

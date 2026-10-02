@@ -1,0 +1,12 @@
+{
+  "claude_cli": "/home/claude-review/.local/bin/claude",
+  "claude_version": "X.Y.Z",
+  "workdir": "/tmp/claude-review",
+  "account": "claude-review",
+  "uid": 0,
+  "home": "/home/claude-review",
+  "nft_table": "claude_review_guard",
+  "deny_ips": [],
+  "dns_ips": [],
+  "gitlab_host": "gitlab.example.com"
+}
