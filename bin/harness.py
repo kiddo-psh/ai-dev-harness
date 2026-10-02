@@ -119,6 +119,11 @@ _CLASSIFY_SPEC = importlib.util.spec_from_file_location("harness_classify_ci", M
 classify_ci = importlib.util.module_from_spec(_CLASSIFY_SPEC)
 _CLASSIFY_SPEC.loader.exec_module(classify_ci)
 
+# `.gitignore`의 `/plans/` 판단은 CI의 MR 본문 lint(대상에 복사되는 모듈)와 같은 규칙을 쓴다
+_MR_LINT_SPEC = importlib.util.spec_from_file_location("harness_mr_lint", CI_DIR / "mr-lint" / "mr_lint.py")
+mr_lint = importlib.util.module_from_spec(_MR_LINT_SPEC)
+_MR_LINT_SPEC.loader.exec_module(mr_lint)
+
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 PLACEHOLDER_NAME = re.compile(r"[a-z_]+")
 
@@ -433,6 +438,20 @@ def write_text(path: Path, content: str) -> None:
         handle.write(content)
 
 
+def ensure_plans_ignored(target: Path) -> bool:
+    """`.gitignore`에 `/plans/` 줄이 없으면 끝에 추가한다(파일이 없으면 만든다). 기존 내용은 그대로 둔다."""
+    path = target / ".gitignore"
+    data = path.read_bytes() if path.is_file() else b""
+    if mr_lint.gitignore_has_plans(data.decode("utf-8", errors="replace")):
+        return False
+    newline = b"\r\n" if b"\r\n" in data else b"\n"
+    prefix = newline if data and not data.endswith(b"\n") else b""
+    comment = "# 플랜·리뷰 파일은 커밋하지 않는다(AGENTS.md, MR 본문 lint가 검사한다)".encode("utf-8")
+    with path.open("ab") as handle:
+        handle.write(prefix + comment + newline + mr_lint.PLANS_IGNORE.encode("ascii") + newline)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # 명령
 # ---------------------------------------------------------------------------
@@ -538,6 +557,7 @@ def cmd_init(args) -> int:
     target.mkdir(parents=True, exist_ok=True)
     for dest, content in outputs.items():
         write_text(target / dest, content)
+    plans_added = ensure_plans_ignored(target)
     if not self_mode:
         config_path = target / CONFIG_NAME
         if not config_path.exists() or args.force:
@@ -546,6 +566,8 @@ def cmd_init(args) -> int:
     print(f"{len(outputs)}개 파일을 {target} 에 생성했다.")
     for dest in outputs:
         print(f"  {dest}")
+    if plans_added:
+        print(f".gitignore 에 {mr_lint.PLANS_IGNORE} 를 추가했다.")
     return 0
 
 

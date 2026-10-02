@@ -152,6 +152,67 @@ class InitAndCheckTest(unittest.TestCase):
         self.assertEqual((target / "harness.json").read_bytes(), before)
 
 
+class GitignoreInitTest(unittest.TestCase):
+    """T20: 결정 D-13. init은 `.gitignore`에 `/plans/`가 없을 때만 줄을 추가하고 기존 내용을 보존한다."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="harness-gitignore-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def init(self, target, *extra):
+        return run(["init", str(target), "--platform", "github", "--tracker", "github", *extra])
+
+    def test_created_when_absent(self):
+        target = self.tmp / "new"
+        code, out = self.init(target)
+        self.assertEqual(code, 0)
+        self.assertIn("/plans/", (target / ".gitignore").read_text(encoding="utf-8").splitlines())
+        self.assertIn(".gitignore 에 /plans/ 를 추가했다.", out)
+
+    def test_appended_preserving_content(self):
+        target = self.tmp / "existing"
+        target.mkdir()
+        (target / ".gitignore").write_bytes(b"node_modules/\r\n.env")  # CRLF, 끝 개행 없음
+        self.assertEqual(self.init(target)[0], 0)
+        data = (target / ".gitignore").read_bytes()
+        self.assertTrue(data.startswith(b"node_modules/\r\n.env\r\n"))
+        self.assertTrue(data.endswith(b"\r\n/plans/\r\n"))
+
+    def test_untouched_when_present(self):
+        target = self.tmp / "present"
+        target.mkdir()
+        original = b"# mine\n  /plans/  \n"
+        (target / ".gitignore").write_bytes(original)
+        code, out = self.init(target)
+        self.assertEqual(code, 0)
+        self.assertEqual((target / ".gitignore").read_bytes(), original)
+        self.assertNotIn(".gitignore", out)
+
+    def test_not_written_when_init_aborts(self):
+        target = self.tmp / "collide"
+        target.mkdir()
+        (target / "AGENTS.md").write_text("mine", encoding="utf-8")
+        (target / ".gitignore").write_bytes(b"dist/\n")
+        self.assertEqual(self.init(target)[0], 2)
+        self.assertEqual((target / ".gitignore").read_bytes(), b"dist/\n")
+
+    def test_gitlab_consumer_gets_mr_lint_module(self):
+        """T21: GitLab 조각이 실행할 모듈은 gitlab 소비자에만 복사되고 check가 드리프트를 본다."""
+        gitlab = self.tmp / "gl"
+        self.assertEqual(run(["init", str(gitlab), "--platform", "gitlab", "--tracker", "jira",
+                              "--issue-prefix", "DEMO"])[0], 0)
+        copied = gitlab / ".harness" / "mr-lint" / "mr_lint.py"
+        self.assertEqual(copied.read_bytes(), (ROOT / "core" / "ci" / "mr-lint" / "mr_lint.py").read_bytes())
+        self.assertEqual(run(["check", str(gitlab)])[0], 0)
+        copied.write_text(copied.read_text(encoding="utf-8") + "\n# 변경\n", encoding="utf-8")
+        code, out = run(["check", str(gitlab)])
+        self.assertEqual(code, 1)
+        self.assertIn("불일치: .harness/mr-lint/mr_lint.py", out)
+        github = self.tmp / "gh"
+        self.assertEqual(self.init(github)[0], 0)
+        self.assertFalse((github / ".harness").exists())
+
+
 class AreaTestBase(unittest.TestCase):
     """루트 init을 마친 대상 저장소에서 영역 AGENTS.md를 다룬다."""
 

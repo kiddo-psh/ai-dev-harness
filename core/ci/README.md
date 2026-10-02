@@ -1,7 +1,7 @@
 # core/ci
 
-대상 저장소가 `include: remote:`로 끌어 쓰는 GitLab CI 조각(ADR-0003). 보안 검사 4종(M1-6)이 있고,
-MR 본문 lint(M2-2)와 Claude MR 리뷰(M2-4)가 뒤에 들어온다.
+대상 저장소가 `include: remote:`로 끌어 쓰는 GitLab CI 조각(ADR-0003). 보안 검사 4종(M1-6), MR 본문 lint(M2-2),
+Claude MR 리뷰(M2-4)가 있다.
 
 ```text
 core/ci/gitlab/
@@ -9,7 +9,8 @@ core/ci/gitlab/
   dependency-audit.yml   trivy fs (npm package-lock.json, gradle.lockfile)
   sast.yml               semgrep
   image-scan.yml         trivy image
-  mr-lint.yml            MR 본문 필수 절 검사 (M2-2)
+  mr-lint.yml            MR 본문 필수 절 검사 (M2-2, 보안 검사 아님)
+core/ci/mr-lint/         MR 본문 lint 모듈 원본. init이 GitLab 대상 저장소 .harness/mr-lint/에 복사한다
   claude-review.yml      도구 없는 Claude MR 리뷰 (M2-4, feelm 이관, 보호 브랜치 파이프라인 전용)
 core/ci/claude-review/   리뷰 스크립트 원본. init이 대상 저장소 .harness/claude-review/에 복사한다
   examples/              서버 설정·systemd 유닛 예시 (init이 설치하지 않는다)
@@ -30,6 +31,7 @@ include:
   - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/dependency-audit.yml
   - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/sast.yml
   - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/image-scan.yml
+  - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/mr-lint.yml
 
 variables:
   HARNESS_SCAN_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA   # image-scan을 쓸 때
@@ -140,6 +142,51 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 - 한 job: 같은 이름의 job을 로컬에 다시 적고 `rules: [{when: never}]`로 덮어쓴다.
 - 오탐 하나: 위 표의 예외 방식을 쓴다.
 
+## MR 본문 lint
+
+`mr-lint.yml`의 `harness-mr-lint` job은 MR 본문과 변경 파일을 검사하고 실패하면 job이 실패한다(`allow_failure` 없음).
+보안 검사가 아니라 절차 검사다. MR 작성자가 CI 정의나 검사 코드를 바꾸면 우회할 수 있고, 그 변경은 리뷰와 `harness check`로 본다.
+
+| 검사 | 실패 조건 |
+| --- | --- |
+| 업무 참조 | `Closes` 또는 `Refs` 뒤에 참조가 있는 줄이 없다(대소문자 무시) |
+| `## 검증` | 방법·결과·검증하지 못한 것(미검증) 줄이 없거나 값이 비었다. 값은 같은 줄 또는 들여쓴 다음 줄 |
+| `## 영향 범위` | 체크한 항목(`[x]`)이 없다. 영향이 없으면 "해당 없음"을 체크한다 |
+| `## 판정` | 첫 내용 줄의 첫 낱말이 `lite`·`standard`·`strict`(경량·표준·엄격)가 아니다 |
+| 엄격 | 적용 판정이 엄격인데 `## 플랜 요약`·`## 리뷰 결과`가 없거나 비었거나 "해당 없음"이다. `## 리뷰 결과` 측정 칸(리뷰 템플릿 6장 다섯 항목)이 빠졌거나 빈칸이 있다 |
+| `plans/` | MR이 루트 `plans/` 아래 파일을 추가·수정했다(삭제는 허용). `.gitignore`에 `/plans/` 줄이 없다 |
+
+- **판정은 높은 쪽.** 변경 파일(`CI_MERGE_REQUEST_DIFF_BASE_SHA`와 소스 커밋의 merge-base 이후)로 `harness judge`와 같은
+  판정을 다시 계산해 본문 판정과 높은 쪽을 적용한다. 다르면 불일치로 로그·`mr-lint.json`에 남긴다(측정 4번). 불일치만으로는
+  실패하지 않지만 엄격이 적용되면 엄격 검사가 붙는다. "사람 확인 필요" 트리거 문장도 로그에 나온다.
+- **본문 출처.** `CI_MERGE_REQUEST_DESCRIPTION`(GitLab 16.7 이상). API 토큰으로 본문을 읽지 않는다. HTML 주석(템플릿 안내문)은
+  지우고 코드 블록 안의 `##`는 제목으로 보지 않는다.
+- **본문만 고치면 다시 돌지 않는다.** 본문을 고친 뒤 MR의 Pipelines 탭에서 새 파이프라인을 실행한다.
+- **2700자 제한.** GitLab은 이 변수를 2700자에서 자른다. 잘렸으면(`CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED`) 잘린 본문으로
+  판정하지 않고 실패한다. 템플릿 안내 주석을 지우거나 긴 내용을 링크로 옮긴다.
+- **검사 코드.** `harness init`이 GitLab 대상 저장소에 넣은 `.harness/mr-lint/mr_lint.py`를 `python3 -I -B`로 실행하고, 판정에는
+  `.claude/hooks/harness_common.py`와 `harness.json`을 쓴다. 셋 중 하나라도 없으면 실패한다. 이미지는 git이 든
+  `python:3.12.15-bookworm`(digest 고정)이다.
+- **검사할 수 없으면 실패다.** MR 변수 없음, 기준·소스 커밋 없음(얕은 clone이면 `GIT_DEPTH: "0"` 확인), 설정 오류는 종료 코드 2.
+- **판정 댓글(선택).** CI 변수 `HARNESS_COMMENT_TOKEN`이 있으면 결과를 표식(`<!-- harness-mr-lint -->`) 댓글 하나로 남기고
+  다시 돌면 같은 댓글을 고친다(토큰 사용자의 댓글만). 댓글에는 판정·불일치·실패 항목만 싣고 본문이나 경로를 옮기지 않는다.
+  게시에 실패하면 경고만 내고 lint 결과는 그대로다. MR 파이프라인은 작성자 코드와 같이 돌아 이 토큰은 MR을 올릴 수 있는
+  사람이 읽을 수 있다. 쓰려면 Reporter 역할·`api` 범위의 전용 프로젝트 액세스 토큰을 Masked로 등록한다(MR 파이프라인에서
+  읽어야 하므로 Protected로 두면 보통 비어 있다). 이 노출을 받아들일 수 없으면 등록하지 않는다.
+- **통합 MR.** `Release.md` 템플릿에는 업무 참조·판정 절이 없어 통합 MR(`develop` → `main` 등)은 실패한다. 건너뛰려면 같은
+  이름의 job을 로컬에 다시 적어 rules를 덮어쓴다.
+
+  ```yaml
+  harness-mr-lint:
+    rules:
+      - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "develop" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+        when: never
+      - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  ```
+
+- 리포트: `mr-lint.json`(결과, 실패 항목, 본문·변경 파일·적용 판정과 불일치, 파일별 판정, 사람 확인 목록, 댓글 상태)을 30일 보관한다.
+  측정 수집기(M4-1)가 판정 불일치를 여기서 읽는다.
+
 ## Claude MR 리뷰
 
 `claude-review.yml`은 열린 MR 하나를 도구 없는 Claude Code CLI로 리뷰해 댓글 하나로 남긴다. 설치(서버 계정·네트워크
@@ -187,6 +234,12 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 PR이 workflow·러너·조각을 바꿨으면 job 로그에 경고가 나온다.
 키트에는 lockfile과 이미지가 없어 의존성 감사·이미지 스캔은 리허설(M1-8)에서 돌린다.
 `claude-review`는 자기 적용하지 않는다. 스크립트 단위 테스트(`tests/test_claude_review*.py`)만 돈다.
+
+MR 본문 lint는 `ci` workflow의 `mr-lint` job이 같은 모듈 원본(`core/ci/mr-lint/mr_lint.py`)을 실행한다. 본문은 이벤트 파일의
+`pull_request.body`, 변경 범위는 `pull_request.base.sha`·`head.sha`다. PR 본문만 고쳐도 다시 돌도록 `pull_request` 타입에
+`edited`를 넣었다(같은 workflow의 다른 job도 함께 돈다). `pull_request` 이벤트만 쓰고(`pull_request_target`은 거부),
+job 권한은 `contents: read`·`pull-requests: write`다. 판정 댓글은 `GITHUB_TOKEN`으로 남기며 fork PR처럼 쓰기 권한이 없으면
+경고만 낸다. `security` workflow와 `run_fragment.py`는 이 job과 관계없다.
 
 `ci.yml`의 `rehearsal` job은 `.github/scripts/rehearse.py`로 `init` 대상에 fixture를 만들어 조각 4종을 모두 실행한다.
 검출 시나리오(지운 Secret, lodash 4.17.20 CVE-2021-23337, log4j-core 2.14.1 CVE-2021-44228, alpine 3.10 CVE-2021-36159,
