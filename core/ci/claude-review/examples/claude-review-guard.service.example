@@ -1,0 +1,22 @@
+# ai-dev-harness Claude MR 리뷰 예시 유닛(init이 설치하지 않는다). 설치 절차는 키트 docs/install.md 14절.
+# claude-review(설정 이름·계정·경로)를 서버 값으로 바꿔 /etc/systemd/system/claude-review-guard.service에 root 소유 0644로 둔다.
+[Unit]
+Description=Claude 리뷰 계정 네트워크 보호
+After=ufw.service nftables.service
+Before=claude-review-runner.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/claude-review/network-guard.py --config /etc/claude-review/config.json ensure
+ExecReload=/usr/bin/python3 -I -B /usr/local/lib/claude-review/network-guard.py --config /etc/claude-review/config.json verify
+# 서비스를 중지해도 네트워크 제한을 제거하지 않도록 ExecStop을 두지 않는다.
+TimeoutStartSec=120
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

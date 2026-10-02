@@ -1,0 +1,106 @@
+# harness: Claude MR 리뷰 (도구 없는 Claude Code CLI, 보호 브랜치 파이프라인 전용)
+#
+# 열린 MR의 메타데이터와 diff를 GitLab API로만 받아(MR 브랜치를 checkout하거나 실행하지 않는다) 도구 없는
+# Claude Code CLI로 한국어 리뷰를 만들고 MR 댓글 하나로 게시한다. 승인·병합·라벨은 건드리지 않는다.
+# 다른 조각과 달리 MR 파이프라인에서는 돌지 않는다. MR 소스의 CI·스크립트가 리뷰 토큰과 함께 실행되지 않게
+# 보호된 대상 브랜치의 web 파이프라인(수동)과 표식 있는 api 파이프라인에서만 돈다. 실행하는 스크립트는
+# `harness init`이 대상 저장소 `.harness/claude-review/`에 넣은 보호 브랜치의 사본이다(`check`가 드리프트를 본다).
+# 같은 판정을 스크립트가 다시 한다(harness.json `claude_review`, 서버 설정 `/etc/<review_name>/config.json`).
+# 리뷰는 참고용이며 실패해도 파이프라인을 막지 않는다(allow_failure).
+#
+# 사용법: 조각은 숨은 job(`.harness-claude-*`)만 준다. 러너 태그·환경 이름·대상 브랜치는 소비자가 로컬
+# `.gitlab-ci.yml`에 값(리터럴)으로 적는다. 파이프라인 변수는 CI 변수를 덮어쓰므로 이 셋을 변수로 받으면 리뷰를
+# 시작할 수 있는 사람이 리뷰 Secret을 다른 runner·환경·브랜치로 보낼 수 있다. 실제 job을 적지 않으면 job이 없다.
+#   include:
+#     - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/claude-review.yml
+#
+#   harness-claude-auth-check:
+#     extends: .harness-claude-auth-check
+#     tags: [claude-review]                 # 리뷰 전용 runner 태그
+#     environment:
+#       name: claude-review                 # harness.json claude_review.environment와 같게
+#       action: prepare
+#     rules:
+#       - if: '$CI_COMMIT_BRANCH != "develop"'   # harness.json claude_review.target_branch와 같게
+#         when: never
+#       - !reference [.harness-claude-auth-check-rules, rules]
+#
+#   harness-claude-review:
+#     extends: .harness-claude-review
+#     tags: [claude-review]
+#     environment:
+#       name: claude-review
+#       action: prepare
+#     rules:
+#       - if: '$CI_COMMIT_BRANCH != "develop"'
+#         when: never
+#       - !reference [.harness-claude-review-rules, rules]
+#
+# 숨은 job의 자체 rules는 `when: never`라 rules를 적지 않고 extends만 하면 job이 돌지 않는다. 재사용 rules
+# (`.harness-claude-*-rules`)에는 브랜치 비교가 없고, 브랜치 파이프라인(`$CI_COMMIT_BRANCH` 있음)·보호 ref·
+# 파이프라인 출처만 본다. 그래서 태그·MR 파이프라인에서는 맞지 않는다.
+# 리뷰 실행: 대상 브랜치에서 Run pipeline으로 REVIEW_MR_IID(MR 번호)와 REVIEW_MR_SHA(그 MR의 현재 40자리
+# HEAD SHA)를 넣고 harness-claude-review를 수동 실행한다. 외부 트리거는 api 파이프라인에
+# CLAUDE_REVIEW_TRIGGER=comment를 함께 넘긴다(댓글 트리거 webhook은 키트에 없다).
+#
+# 변수:
+#   ANTHROPIC_API_KEY 또는 CLAUDE_CODE_OAUTH_TOKEN  claude_review.credential이 고른 하나만 등록한다
+#   GITLAB_REVIEW_TOKEN         MR 읽기·댓글 작성용 전용 토큰
+#   Secret 모두 Protected, Masked and hidden, Expand variable 끔, 환경 범위는 소비자 job의 environment.name으로 등록한다.
+#   runner는 리뷰 전용 shell executor(protected·프로젝트 잠금·untagged 비활성)다.
+# 필요 조건: 서버에 리뷰 전용 계정·Claude Code CLI·서버 설정·네트워크 가드(docs/install.md 14절), /usr/bin/python3 3.12 이상,
+#            GitLab API와 Anthropic API로의 HTTPS 접근.
+# 예외: 없음. 끄려면 로컬의 두 job을 지운다(include만 남으면 job이 없다).
+# 한계: 공개 HTTPS(443)와 DNS 전체를 허용하므로 도메인 단위 차단이 아니다. 강제 취소·runner 장애로 after_script가
+#       돌지 않으면 진행 중 상태 댓글이 남는다.
+# 리포트: 없음. 로그에는 분류 코드, 모델명과 토큰 수만 남긴다(리뷰 원문·토큰 미출력).
+
+.harness-claude-auth-check-rules:
+  rules:
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'
+      when: manual
+      allow_failure: true
+
+.harness-claude-review-rules:
+  rules:
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $CI_PIPELINE_SOURCE == "api" && $CLAUDE_REVIEW_TRIGGER == "comment"'
+      when: on_success
+      allow_failure: true
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $CI_PIPELINE_SOURCE == "web"'
+      when: manual
+      allow_failure: true
+
+.harness-claude-auth-check:
+  stage: test
+  needs: []
+  variables:
+    GIT_SUBMODULE_STRATEGY: none
+  resource_group: harness-claude-review
+  script:
+    - /usr/bin/python3 -I -B .harness/claude-review/auth-check.py
+  timeout: 5m
+  interruptible: true
+  rules:
+    - when: never
+
+.harness-claude-review:
+  stage: test
+  needs: []
+  variables:
+    GIT_DEPTH: "1"
+    GIT_SUBMODULE_STRATEGY: none
+    RUNNER_SCRIPT_TIMEOUT: "8m"
+    RUNNER_AFTER_SCRIPT_TIMEOUT: "1m"
+  resource_group: harness-claude-review
+  cache: []
+  script:
+    - /usr/bin/python3 -I -B .harness/claude-review/review-status.py running
+    - /usr/bin/python3 -I -B .harness/claude-review/collect-mr.py
+    - /usr/bin/python3 -I -B .harness/claude-review/generate-review.py
+    - /usr/bin/python3 -I -B .harness/claude-review/publish-review.py
+  after_script:
+    - /usr/bin/python3 -I -B .harness/claude-review/review-status.py "$CI_JOB_STATUS"
+  timeout: 10m
+  interruptible: true
+  rules:
+    - when: never

@@ -39,6 +39,7 @@ python bin/harness.py version
 | `.gitlab/merge_request_templates/` 또는 `.github/PULL_REQUEST_TEMPLATE.md` | 병합 요청 본문 |
 | `.claude/settings.json`, `.claude/hooks/` | Claude Code hooks ([설명](../core/hooks/README.md)) |
 | `harness.json` | 대상 저장소의 키트 설정. 이후 모든 명령이 이 파일을 읽는다 |
+| `.harness/claude-review/` | `harness.json`에 `claude_review` 블록이 있을 때만. Claude MR 리뷰 스크립트와 시스템 프롬프트(14절) |
 
 영역 `AGENTS.md`는 3절에서 따로 생성한다. GitLab CI 조각은 5절에서 연결한다.
 
@@ -148,6 +149,8 @@ python bin/harness.py init ../my-project --force --platform github --tracker git
 - **GitHub 저장소용 조각은 없다.** GitHub Actions에서는 같은 도구(gitleaks, trivy, semgrep)를 직접
   호출해야 한다. 키트 저장소 자신의 적용 예는 `.github/workflows/security.yml`이다
 - 설정 방법·필요 조건·끄는 법은 [`core/ci/README.md`](../core/ci/README.md)를 따른다
+- Claude MR 리뷰 조각(`claude-review.yml`)은 선택이며 서버 준비가 필요하다. MR 파이프라인이 아니라 보호 브랜치
+  파이프라인에서 돈다(14절)
 
 ## 6. hooks 설정
 
@@ -255,6 +258,7 @@ rm .claude/settings.json harness.json
 
 문서(`AGENTS.md`, `CLAUDE.md`, `docs/`)와 병합 요청 템플릿은 저장소의 내용이므로 지울지는 따로 판단한다.
 CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각의 job 참조도 지운다.
+Claude MR 리뷰를 켰다면 `.harness/claude-review/`도 지운다(14절).
 
 `.claude/settings.local.json`은 개인 설정이라 키트가 만들지 않았다. 지우지 않는다.
 
@@ -282,7 +286,7 @@ CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각�
 ## 13. 첫 소비자 계약 (0.2.0)
 
 `harness.json`의 루트 키는 `harness_version`, `project_name`, `platform`, `tracker`, `issue_prefix`,
-`default_branch`, `integration_branch`, `related_docs`, `areas`, `hooks`다. 알 수 없는 키나 타입이
+`default_branch`, `integration_branch`, `related_docs`, `areas`, `hooks`, `claude_review`(선택, 14절)다. 알 수 없는 키나 타입이
 틀린 값은 오류로 처리한다. `related_docs` 항목은 문자열 `label`·`path`만 가진다. `areas` 항목은
 `dir`·`verify`와 선택 항목 `triggers`·`review_focus`·`docs`를 가진다. 영역을 새로 만들면 기본
 `triggers`·`review_focus`를 설정 파일에 저장한다. 같은 영역을 `--force`로 다시 만들 때 생략한
@@ -296,4 +300,146 @@ CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각�
 `area_review_focus`가 추가된다. 알 수 없는 이름이나 잘못된 표기는 생성 오류다. 생성 파일 목록과 원본 경로는
 `core/templates/manifest.json`이 정의하며, 이는 소비자 설정이 아닌 키트 작성자용 계약이다.
 매니페스트의 `includes`는 원본 파일의 `##` 절을 골라 자리표시자 값으로 넣는다. 원본을 고치면 생성 파일이 바뀌므로
-`check`가 불일치로 보고한다.
+`check`가 불일치로 보고한다. 항목의 `base`는 `templates`(기본)·`hooks`·`ci`(`core/ci/`) 중 하나이고, `requires`를 주면
+`harness.json`에 그 블록(현재 `claude_review`만)이 있을 때만 생성한다.
+
+## 14. Claude MR 리뷰 (선택, GitLab)
+
+열린 MR의 diff를 도구 없는 Claude Code CLI로 리뷰해 MR 댓글 하나로 남긴다. feelm에서 운영하던 리뷰 러너를
+옮긴 것이다. 리뷰는 참고용이며 승인·병합을 대신하지 않는다. 동작과 정책은
+[`core/ci/README.md`](../core/ci/README.md) "Claude MR 리뷰"에 있다. 댓글 트리거(`/claude-review` webhook)는
+키트에 없다. 실제 GitLab에서의 게시는 첫 소비자 적용 때 확인한다.
+
+### 14.1 저장소 설정
+
+`harness.json`에 `claude_review` 블록을 넣고 `init --force`로 다시 생성한다. 블록이 있으면 `init`이 스크립트와
+시스템 프롬프트를 `.harness/claude-review/`에 넣고, `check`가 그 파일의 변조와 리뷰 관점 원본의 변경을 불일치로 본다.
+CI는 보호된 대상 브랜치에 커밋된 이 사본만 실행한다. 블록은 `platform`이 `gitlab`일 때만 쓸 수 있다.
+
+```json
+"claude_review": {
+  "target_branch": "develop",
+  "credential": "api_key",
+  "rules_docs": [
+    {"path": "AGENTS.md"},
+    {"path": "CLAUDE.md"},
+    {"path": "backend/AGENTS.md", "when_changed": ["backend/"]}
+  ]
+}
+```
+
+| 키 | 기본값 | 설명 |
+| --- | --- | --- |
+| `target_branch` | (필수) | 리뷰를 돌리는 보호 브랜치. MR의 대상 브랜치도 이 값이어야 한다 |
+| `environment` | `claude-review` | 리뷰 Secret의 GitLab 환경 범위. 스크립트가 `CI_ENVIRONMENT_NAME`과 대조한다 |
+| `review_name` | `claude-review` | 서버 설정 경로 `/etc/<review_name>/config.json`의 이름 |
+| `credential` | `api_key` | `api_key`(`ANTHROPIC_API_KEY`) 또는 `oauth`(`CLAUDE_CODE_OAUTH_TOKEN`). 고른 하나만 읽어 CLI에 넘긴다 |
+| `comment_marker` | `harness-claude-review` | 댓글의 숨은 식별자 이름. 같은 토큰 사용자의 같은 SHA 댓글이 있으면 다시 게시하지 않는다 |
+| `rules_docs` | `AGENTS.md`, `CLAUDE.md` | 모델에 신뢰된 규칙으로 주는 문서. `when_changed` 접두사로 바뀐 경로가 있을 때만 넣는다 |
+| `limits` | 원본 값 | `max_files`(100), `max_file_diff_bytes`(128 KiB), `max_total_diff_bytes`(512 KiB), `max_title_bytes`(1 KiB), `max_description_bytes`(16 KiB), `max_guidance_bytes`(256 KiB), `max_context_files`(24), `max_context_file_bytes`(48 KiB), `max_repository_context_bytes`(192 KiB). 낮추기만 할 수 있다 |
+| `timeouts` | 원본 값 | `claude_seconds`(240, 최대 300), `auth_check_seconds`(120, 최대 240), `gitlab_seconds`(20, 최대 60) |
+
+알 수 없는 키, 틀린 타입, 빈 `target_branch`는 `init`·`check`에서 오류(종료 코드 2)이고, 실행 시점에도
+`INVALID_REVIEW_POLICY`로 멈춘다.
+
+### 14.2 서버 준비
+
+리뷰 전용 서버 계정과 GitLab Runner가 필요하다. 아래 파일은 키트의 `core/ci/claude-review/examples/`에 있고
+`init`이 설치하지 않는다. 예시의 `claude-review`(설정 이름·계정·경로)는 서버 값으로 일관되게 바꾼다.
+
+1. 추가 그룹 없는 전용 계정을 만들고(예: `claude-review`) 그 홈에 Claude Code CLI를 설치한다. 기존 Runner와
+   계정·설정·서비스를 나눈다.
+2. 서버 설정 `/etc/<review_name>/config.json`을 `config.json.example`에서 만든다. 파일은 `root:<리뷰 계정 그룹>`
+   소유 0640(예: `install -o root -g claude-review -m 0640`), 상위 디렉터리는 root 소유이고 그룹·기타 사용자 쓰기
+   권한이 없어야 한다. 리뷰 계정은 기본 그룹으로 이 파일을 읽고, network-guard는 root로 읽는다. 소유자가 root가
+   아니거나 그룹·기타 쓰기 권한이 있거나 키가 빠지거나 남으면 토큰을 읽기 전에 실패한다. 이 파일에는 토큰·API 키
+   같은 비밀값을 절대 넣지 않는다(Secret은 GitLab 변수로만 받는다).
+
+   | 키 | 설명 |
+   | --- | --- |
+   | `claude_cli` | CLI 절대 경로 |
+   | `claude_version` | 설치한 CLI 버전(`X.Y.Z`). sandbox 검사가 대조한다 |
+   | `workdir` | MR 입력·리뷰·상태 파일을 0600으로 두는 디렉터리. runner 서비스는 `PrivateTmp`라 `/tmp/<이름>`이면 된다 |
+   | `account`·`uid`·`home` | 리뷰 계정 이름, UID(0 불가), 홈 |
+   | `nft_table` | network-guard가 만드는 nftables 테이블 이름 |
+   | `deny_ips` | **필수 입력.** 같은 망의 운영·배포 서버 공개 IPv4 전부. 기본값이 없고 비어 있으면 가드가 실패한다. NAT 뒤에 있으면 이 서버 자신의 공개 IP도 넣는다 |
+   | `dns_ips` | **필수 입력.** 서버가 쓰는 DNS IPv4(예: `resolvectl status`로 확인) |
+   | `gitlab_host` | GitLab 호스트 이름. sandbox 검사의 TLS 확인 대상 |
+
+3. `.harness/claude-review/network-guard.py`와 `sandbox-probe.py`를 보호 브랜치의 사본에서 root 소유
+   `/usr/local/lib/<review_name>/`(0755, 파일 0644)로 복사한다. network-guard는 자기 파일과 설정 파일의 root 소유를 확인한다.
+4. 네트워크 가드: `network-guard.py --config <설정> plan`으로 규칙을 보고, `check`로 임시 network namespace에서
+   검증한 뒤(`ISOLATED_NFT_CHECK: PASS`), guard 서비스로 설치한다. 규칙은 리뷰 계정 UID에만 걸리며 지정 DNS의 53,
+   공개 IPv4의 443만 허용하고 `deny_ips`, 사설망·loopback·link-local·metadata·로컬 주소와 IPv6를 거부한다.
+   기존 테이블이 기준과 다르면 덮어쓰지 않고 실패한다(`GUARD_MISMATCH`).
+5. systemd 유닛 3개(`claude-review-guard`·`-probe`·`-runner`)를 같은 이름이 없는지 확인한 뒤 root 소유 0644로
+   `/etc/systemd/system/`에 둔다. `systemd-analyze verify`를 통과하면 `systemctl daemon-reload`한다. runner와 probe는
+   같은 sandbox(CPU 1개, 메모리 2/3 GiB, swap 0, 프로세스 128개, 권한 상승 차단, 다른 홈 숨김, 시스템 읽기 전용,
+   제어 소켓 차단)를 쓰고 시작 전에 root가 가드를 다시 검증한다. 같은 서버의 다른 Runner 설정 디렉터리는
+   `InaccessiblePaths`에 덧붙인다.
+6. probe 서비스를 한 번 실행해 `SANDBOX_PROBE: PASS`를 확인한다(비밀값 없이 계정·격리·CLI 버전·TLS만 본다).
+7. 리뷰 계정으로 GitLab Runner(shell executor)를 등록한다. 태그를 붙이고 protected, 프로젝트 잠금, untagged job
+   비활성화를 켠다. `/etc/<review_name>/enable-runner`를 만들어야 runner 서비스가 시작된다. 보호된 CI 설정과
+   인증 검사 전에는 만들지 않는다.
+
+### 14.3 GitLab 설정
+
+1. 조각을 넣고, 로컬 `.gitlab-ci.yml`에 두 job을 직접 만든다. 조각에는 숨은 job(`.harness-claude-auth-check`·
+   `.harness-claude-review`)과 재사용 rules(`.harness-claude-auth-check-rules`·`.harness-claude-review-rules`)만 있어서
+   아래 job을 적지 않으면 리뷰 job이 생기지 않는다. 러너 태그(`<리뷰 runner 태그>`), `environment.name`
+   (`claude_review.environment`와 같게), 대상 브랜치(`claude_review.target_branch`와 같게, 예: `develop`)는 변수 없이
+   값으로 적는다.
+
+   ```yaml
+   include:
+     - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/claude-review.yml
+
+   harness-claude-auth-check:
+     extends: .harness-claude-auth-check
+     tags: [claude-review]
+     environment:
+       name: claude-review
+       action: prepare
+     rules:
+       - if: '$CI_COMMIT_BRANCH != "develop"'
+         when: never
+       - !reference [.harness-claude-auth-check-rules, rules]
+
+   harness-claude-review:
+     extends: .harness-claude-review
+     tags: [claude-review]
+     environment:
+       name: claude-review
+       action: prepare
+     rules:
+       - if: '$CI_COMMIT_BRANCH != "develop"'
+         when: never
+       - !reference [.harness-claude-review-rules, rules]
+   ```
+
+   값을 변수로 받지 않는 이유: 리뷰를 시작하려면 파이프라인 변수(`REVIEW_MR_*`)를 넣어야 하고, 파이프라인 변수는
+   `.gitlab-ci.yml`의 변수를 덮어쓴다. 태그·환경·브랜치를 변수로 두면 리뷰를 시작할 수 있는 사람이 리뷰 Secret을
+   다른 runner, 다른 환경 범위나 덜 보호된 브랜치로 보낼 수 있다. 첫 규칙을 빼면 모든 보호 브랜치에서 job이 나타나므로
+   반드시 둔다. 재사용 rules는 브랜치 파이프라인(`$CI_COMMIT_BRANCH`가 있음)·보호 ref·파이프라인 출처만 보며
+   MR·태그 파이프라인에서는 맞지 않는다. `rules` 없이 `extends`만 하면 숨은 job의 `when: never`가 남아 돌지 않는다.
+   스크립트도 실행 시점에 대상 브랜치·보호 ref·환경 이름·출처를 `harness.json`과 다시 대조한다.
+
+2. Secret을 등록한다([Secret 규칙](secret-environment-variables.md) 7장). 모두 Protected, Masked and hidden,
+   Expand variable 끔, 환경 범위는 위 `environment.name`이다.
+   - `credential`이 고른 하나: `ANTHROPIC_API_KEY`(기본) 또는 `CLAUDE_CODE_OAUTH_TOKEN`. 다른 하나는 등록하지 않는다.
+     팀 CI에 개인 구독(OAuth)을 쓰는 것은 정책 문제가 될 수 있어 키트 기본은 API 키다
+   - `GITLAB_REVIEW_TOKEN`: MR 읽기와 댓글 작성만 하는 전용 토큰(Project Access Token. 댓글 작성에 `api` scope가 필요하다. 역할은 MR 댓글을 쓸 수 있는 최소 역할)
+3. 대상 브랜치를 보호하고, 그 브랜치에 push·merge할 수 있는 사람만 리뷰 파이프라인을 만들 수 있게 한다.
+   `.gitlab-ci.yml`의 리뷰 job은 보호 브랜치 변경으로만 바뀌게 한다.
+
+### 14.4 확인
+
+1. 보호된 대상 브랜치의 web 파이프라인에서 `harness-claude-auth-check`를 수동 실행한다. 고정된 `OK` 요청 하나만
+   보내며 기대 출력은 `CLAUDE_AUTH_CHECK: PASS`다.
+2. Run pipeline에서 `REVIEW_MR_IID`(MR 번호)와 `REVIEW_MR_SHA`(그 MR의 현재 40자리 HEAD SHA)를 넣고
+   `harness-claude-review`를 수동 실행한다. 로그에는 `MR_COLLECTION`·`REVIEW_GENERATION`·`REVIEW_PUBLISH`의 분류 코드,
+   모델명과 토큰 수만 남는다.
+3. 같은 SHA로 다시 실행하면 `DUPLICATE_REVIEW_SKIPPED`, 실행 중 새 커밋을 올리면 `STALE_REVIEW_REMOVED`인지 본다.
+
+끄려면 로컬의 두 리뷰 job과 `include`를 빼고 `harness.json`의 `claude_review`를 지운 뒤 `.harness/claude-review/`를 지운다. 서버에서는
+`enable-runner`를 지우고 runner 서비스를 멈춘다. 네트워크 가드는 서비스를 멈춰도 규칙을 지우지 않는다.

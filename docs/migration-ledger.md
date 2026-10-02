@@ -29,12 +29,26 @@
 | --- | --- | --- |
 | `backend/AGENTS.md`, `pipeline/AGENTS.md` | `core/templates/AREA-AGENTS.md` (`init --area`로 생성) | 두 문서의 공통 뼈대(3단계 판정·트리거·플랜/구현/리뷰·W1/W2)만 스택 중립으로. 기준 문서·검증 명령·트리거·리뷰 관점은 `harness.json`의 `areas[]`에서 채움. 단계 이름을 경량·표준·엄격으로, "리뷰 게이트"를 "조건부 관점"으로. 경량 단계는 플랜 없이 시작 보고와 MR에 기록(pipeline 방식). 테스트 전용 변경은 트리거에서 제외. 완화·강화 규칙은 "검토 후보"로. 루트 `AGENTS.md`와 겹치는 규칙은 반복하지 않음. 규칙마다 강제 주체 `[hook]`·`[ci]`·`[사람]` 표시 |
 
+## 이관 완료 (M2-4, #32)
+
+원본 기준 커밋: feelm `origin/develop` `7d86dab5`.
+
+| 원본 (feelm) | 키트 위치 | 걷어낸 것 · 바꾼 것 |
+| --- | --- | --- |
+| `infra/claude-review/{collect-mr,generate-review,publish-review,review-status,auth-check}.py` | `core/ci/claude-review/` (init이 `.harness/claude-review/`로 복사) | 대상 브랜치 `develop`·환경 `claude-review`·댓글 표식·규칙 문서 allowlist·크기 상한·시간 제한을 `harness.json` `claude_review`로, CLI 경로·작업 디렉터리를 서버 설정 `/etc/<review_name>/config.json`으로. 공통 판정을 `review_common.py`로 모음. 자격 증명을 `api_key`(기본)·`oauth` 중 하나로 고름. 시스템 프롬프트를 `review_perspectives_ci` 렌더 파일로 |
+| `infra/claude-review/{network-guard,sandbox-probe}.py` | `core/ci/claude-review/` | 테이블 이름·계정·홈·CLI 버전·GitLab 호스트·차단 IP를 서버 설정으로. 차단 IP는 두 개 이상에서 하나 이상으로, 기본값 없음 |
+| `infra/claude-review/test_*.py` 7개 (`test_comment_trigger.py` 제외) | `tests/test_claude_review_*.py` | 정책·서버 설정 주입, 프로젝트 경로·IP fixture 교체, 입력 파일 0600. 기대값 변경 3건(network-guard 거절 입력 "공개 IP 1개" → "사설 IP 1개", 프롬프트 문구 2건은 M2-5 원본 문구). 단언 수 유지 |
+| `infra/claude-review/feelm-claude-review-{guard,probe,runner}.service` | `core/ci/claude-review/examples/*.service.example` + `docs/install.md` 14절 | 이름·계정·경로를 `claude-review`로, 다른 Runner 설정 경로 제거. sandbox 지시어는 그대로 |
+| `.gitlab/ci/common.yml`의 `claude-auth-check`·`claude-mr-review` | `core/ci/gitlab/claude-review.yml` | 숨은 job(`.harness-claude-auth-check`·`.harness-claude-review`)과 재사용 rules만 제공하고 러너 태그·환경 이름·대상 브랜치는 소비자 job에 리터럴로(변수 덮어쓰기 차단), 소비자 job 이름 `harness-` 접두사, stage `test` |
+| `infra/claude-review/README.md` | `core/ci/README.md` "Claude MR 리뷰", `docs/install.md` 14절 | 운영 기록·서버 수치·IP·호스트 제거 |
+
+이관하지 않은 것: `comment-trigger.py`와 그 테스트, webhook 서비스(D-33, 댓글 트리거는 범위 밖).
+
 ## 이관 예정
 
 | 원본 (feelm) | 키트 위치(예정) | 마일스톤 | 비고 |
 | --- | --- | --- | --- |
 | `frontend/AGENTS.md` | `profiles/react-ts/` 검증 명령 | M3-3 | Prettier 검사 규칙은 프로필의 verify 정의로 |
-| `infra/claude-review/*.py` | `core/ci/claude-review/` | M2-4 | 서버 경로·UID·계정명을 설정으로 분리. systemd·nftables 문서는 설치 가이드로 |
 | `infra/claude-review/generate-review.py`의 SYSTEM_PROMPT | `core/templates/review-perspectives.md` | M2-5 | 로컬 리뷰 관점과 단일화 |
 | `.gitlab/ci/*.yml`의 MR 검사 job 패턴 | `core/ci/gitlab/` | M1-6, M2-2 | 경로 필터·resource_group·interruptible 패턴만 참고. 배포 job은 이관하지 않음 |
 | `scripts/jira/notify_mattermost.py` | `core/metrics/notify.py` | M4-2 | 발송 부분만. Jira 조회는 백로그 |
