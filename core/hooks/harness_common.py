@@ -337,7 +337,7 @@ def validate_judge_root(block, source) -> None:
 def judge_path(path: str, area: dict | None, root: dict | None = None) -> tuple[str, str]:
     """(tier, 근거 규칙). 영역 규칙은 영역 디렉터리 기준, 최상위 judge 규칙은 저장소 루트 기준 상대 경로에 맞춘다."""
     owner = area if area else (root or {})
-    rel = path[len(area["dir"]) + 1:] if area else path
+    rel = path[len(area["dir"]) + 1:] if area else path  # 영역 경로 자체(하위 모듈)는 빈 문자열
     rules = owner.get("trigger_paths", DEFAULT_TRIGGER_PATHS)
     for tier in TRIGGER_TIERS:
         hit = _first_match(rules.get(tier, []), rel)
@@ -361,7 +361,8 @@ def judge(paths: list[str], config: dict) -> dict:
     for path in dict.fromkeys(normalize_change_path(p) for p in paths):
         if not path:
             continue
-        area = next((a for a in areas if path.startswith(a["dir"] + "/")), None)
+        # 하위 모듈 커밋 변경은 영역 이름 그대로(`backend`) 나온다. stop-verify와 같이 영역 소유로 본다
+        area = next((a for a in areas if path == a["dir"] or path.startswith(a["dir"] + "/")), None)
         tier, rule = judge_path(path, area, root)
         files.append({"path": path, "area": area["dir"] if area else None, "tier": tier, "rule": rule})
         owner = area["dir"] if area else None
@@ -384,7 +385,10 @@ def changed_files(project: Path, base: str) -> tuple[str, list[str]]:
     if merge_base is None:
         raise ConfigError(f"기준 {base}와 HEAD의 merge-base를 구할 수 없다: {err}")
     merge_base = merge_base.strip()
-    diff, err = git_result(project, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", "-z", merge_base)
+    # 대상이 git 최상위의 하위 디렉터리일 수 있다. --relative는 대상 밖 변경을 빼고 대상 기준 경로를 낸다.
+    # ls-files는 기본으로 현재 디렉터리 아래만 대상 기준으로 낸다
+    diff, err = git_result(project, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames",
+                           "--relative", "-z", merge_base)
     if diff is None:
         raise ConfigError(f"git diff 실패: {err}")
     untracked, err = git_result(project, "ls-files", "--others", "--exclude-standard", "-z")

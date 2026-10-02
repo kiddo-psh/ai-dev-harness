@@ -79,6 +79,14 @@ class JudgeTest(unittest.TestCase):
                                          "a/x": ("strict", "trigger_paths.strict:x")})
         self.assertEqual(result["files"][0]["area"], "a/b")
 
+    def test_exact_area_path_is_area_owned(self):
+        """Codex P2(PR #34): 하위 모듈 커밋 변경은 영역 이름 그대로 나온다. 영역 트리거가 빠지면 안 된다."""
+        area = {"dir": "backend", "verify": ["t"], "triggers": ["인가 변경"]}
+        result = judge(["backend"], [area])
+        self.assertEqual(result["files"][0]["area"], "backend")
+        self.assertEqual(result["files"][0]["tier"], "standard")
+        self.assertEqual(result["human_check"], [{"area": "backend", "trigger": "인가 변경"}])
+
     def test_area_prefix_is_directory_boundary(self):
         area = {"dir": "app", "verify": ["t"], "trigger_paths": {"strict": ["*.py"]}}
         self.assertIsNone(judge(["apple/x.py"], [area])["files"][0]["area"])
@@ -175,6 +183,9 @@ class KitSelfJudgeTest(unittest.TestCase):
         "core/ci/gitlab/secret-detection.yml": "strict", "core/ci/gitlab/sast.yml": "strict",
         "core/ci/gitlab/dependency-audit.yml": "strict", "core/ci/gitlab/image-scan.yml": "strict",
         ".github/workflows/security.yml": "strict", ".github/scripts/run_fragment.py": "strict",
+        # M2-4 Claude 리뷰: 토큰·신뢰 경계(결정표 1장 엄격). 판정표 문구 추가는 사람 확인
+        "core/ci/gitlab/claude-review.yml": "strict", "core/ci/claude-review/review_common.py": "strict",
+        "core/templates/claude-review/system-prompt.md": "standard",
         # 표준: CLI, 템플릿, 보안이 아닌 CI 조각·워크플로, 생성 파일
         "bin/harness.py": "standard", "core/templates/AGENTS.md": "standard",
         "core/hooks/harness_common.py": "standard", ".claude/hooks/harness_common.py": "standard",
@@ -293,6 +304,34 @@ class JudgeCliTest(unittest.TestCase):
                          {"src/old.py", "src/new.py", "src/keep.py", "package-lock.json"})
         self.assertEqual(result["tier"], "strict")
         self.assertRegex(result["base"], r"^[0-9a-f]{40}$")
+
+    def test_target_below_git_top_level(self):
+        """Codex P2(PR #34): 대상이 git 최상위의 하위 디렉터리면 대상 기준 경로만, 대상 밖 변경은 빼고 본다."""
+        top = self.tmp / "mono"
+        service = top / "service"
+        code, _, _ = run(["init", str(service), "--platform", "github", "--tracker", "github",
+                          "--integration-branch", "main"])
+        self.assertEqual(code, 0)
+        run(["init", str(service), "--area", "backend", "--verify-cmd", "make test"])
+        config = json.loads((service / "harness.json").read_text(encoding="utf-8"))
+        config["areas"][0]["trigger_paths"] = {"strict": ["/src/auth/"]}
+        (service / "harness.json").write_text(json.dumps(config), encoding="utf-8")
+        (top / "sibling").mkdir()
+        (top / "sibling" / "a.py").write_text("x\n", encoding="utf-8")
+        git(top, "init", "-q", "-b", "main")
+        git(top, "add", "-A")
+        git(top, "commit", "-q", "-m", "base")
+        (service / "backend" / "src" / "auth").mkdir(parents=True)
+        (service / "backend" / "src" / "auth" / "x.py").write_text("x\n", encoding="utf-8")
+        git(top, "add", "-A")
+        git(top, "commit", "-q", "-m", "auth")
+        (top / "sibling" / "a.py").write_text("changed\n", encoding="utf-8")  # 대상 밖 수정
+        (top / "sibling" / "new.py").write_text("x\n", encoding="utf-8")      # 대상 밖 새 파일
+        code, out, err = run(["judge", str(service), "--json", "--base", "HEAD~1"])
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)
+        self.assertEqual({f["path"] for f in result["files"]}, {"backend/src/auth/x.py"})
+        self.assertEqual(result["tier"], "strict")
 
     def test_default_base_needs_origin(self):
         self.commit_all()

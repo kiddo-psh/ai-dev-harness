@@ -22,7 +22,8 @@
         "/.claude/settings.json", "/.claude/hooks/protect-paths.py", "/.claude/hooks/stop-verify.py",
         "/core/ci/gitlab/secret-detection.yml", "/core/ci/gitlab/sast.yml",
         "/core/ci/gitlab/dependency-audit.yml", "/core/ci/gitlab/image-scan.yml",
-        "/.github/workflows/security.yml", "/.github/scripts/run_fragment.py"
+        "/.github/workflows/security.yml", "/.github/scripts/run_fragment.py",
+        "/core/ci/gitlab/claude-review.yml", "/core/ci/claude-review/"
       ],
       "standard": [
         "/core/", "/bin/", "/.github/", "/profiles/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/harness.json",
