@@ -408,6 +408,8 @@ def context_from_env(env: dict) -> dict:
             "same_repo": bool(source_project) and source_project == mr_project,
             "mr_project": mr_project or env.get("CI_PROJECT_ID", ""),
             "base": env.get("CI_MERGE_REQUEST_DIFF_BASE_SHA", ""),
+            # 통합 MR 판단용 대상 브랜치 최신 커밋. merged results 파이프라인에서만 있고, 없으면 diff 기준 커밋을 쓴다
+            "target_sha": env.get("CI_MERGE_REQUEST_TARGET_BRANCH_SHA") or env.get("CI_MERGE_REQUEST_DIFF_BASE_SHA", ""),
             # merged results면 CI_COMMIT_SHA는 병합 결과다. MR 변경만 보도록 소스 커밋을 쓴다
             "head": env.get("CI_MERGE_REQUEST_SOURCE_BRANCH_SHA") or env.get("CI_COMMIT_SHA", ""),
             "api": env.get("CI_API_V4_URL", ""),
@@ -688,7 +690,7 @@ def run(args, env: dict) -> tuple[int, dict]:
     config = read_config(project)
     # 통합 MR 판단은 MR이 고친 harness.json이 아니라 대상 쪽 기준 커밋의 값으로 한다.
     # MR 쪽 값을 쓰면 같은 MR에서 integration_branch를 자기 브랜치로 바꿔 lint를 끌 수 있다
-    if is_integration_mr(ctx, base_config(project, base) if ctx is not None else None):
+    if is_integration_mr(ctx, base_config(project, ctx.get("target_sha") or base) if ctx is not None else None):
         # 통합 MR(Release.md)에는 업무 참조·판정 절이 없다. 본문·git을 보지 않고 통과로 끝낸다
         print(f"harness: 통합 MR({ctx['source_branch']} → {ctx['target_branch']})이라 MR 본문 lint를 건너뛴다(통과).")
         return EXIT_PASS, {

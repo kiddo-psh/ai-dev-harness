@@ -600,6 +600,25 @@ class IntegrationSkipTest(CiRunCase):
         """T7"""
         self.assert_skipped(self.github_env(None, head_ref="develop", base_ref="main"))
 
+    def test_target_tip_settings_used_when_available(self):
+        """Codex P2(PR #42): 대상 브랜치 최신 커밋의 harness.json으로 판단한다(diff 기준 커밋의 옛 값이 아니라)."""
+        (self.repo / "harness.json").write_text(json.dumps({**self.config, "integration_branch": "release"}),
+                                                encoding="utf-8")
+        tip = self.commit("rename integration branch on target")
+        renamed = {**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME": "release",
+                   "CI_MERGE_REQUEST_TARGET_BRANCH_SHA": tip}
+        self.assert_skipped_from("release", self.gitlab_env("", **renamed))
+        # 옛 통합 브랜치(develop)는 대상 최신 값으로 보면 더 이상 통합 MR이 아니다
+        old = {**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_TARGET_BRANCH_SHA": tip}
+        code, out, report, _ = self.run_ci(self.gitlab_env("", **old))
+        self.assertEqual((code, report["result"]), (1, "fail"), out)
+
+    def assert_skipped_from(self, source, env):
+        with mock.patch.object(lint, "changed", side_effect=AssertionError("git diff를 보지 않는다")):
+            code, out, report, _ = self.run_ci(env)
+        self.assertEqual((code, report["result"]), (0, "skipped"), out)
+        self.assertIn(f"통합 MR({source} → main)", out)
+
     def test_mr_cannot_redefine_integration_branch(self):
         """리뷰 F1: MR이 같은 MR에서 harness.json의 브랜치 값을 바꿔 자기 lint를 끌 수 없다(기준 커밋 값으로 판단)."""
         (self.repo / "harness.json").write_text(
