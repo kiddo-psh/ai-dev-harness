@@ -95,6 +95,7 @@ hooks는 실수를 막는 장치이지 보안 경계가 아니다. 최종 방어
 
 ## 다음 단계
 
-- `judge.py`: diff에서 경량·표준·엄격(`lite`·`standard`·`strict`)을 산출(M2-1). CLI `harness judge`와 같은 코드
+- 판정을 hook에 연결(#22). 판정 함수 `judge`·`changed_files`는 이미 `harness_common.py`에 있고 CLI
+  `harness judge`가 같은 코드를 쓴다(M2-1). 지금은 어떤 hook도 판정 결과로 막거나 묻지 않는다
 - 플랜·리뷰 파일 lint, 엄격 판정 플랜 승인에 따른 `block` 해제(M2-3)
 - 세션 시작 시점 기준선(SessionStart)으로 기존 변경을 종료 검증에서 빼기

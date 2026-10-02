@@ -87,7 +87,8 @@ python bin/harness.py init ../my-project --area backend \
 - 같은 `--area`를 다시 실행하면 `harness.json`의 해당 항목을 제자리에서 바꾼다. 다만 이미 있는
   `<영역>/AGENTS.md` 파일은 `--force` 없이 덮어쓰지 않는다. 생략한 trigger·review focus·문서는 이전 값을 유지한다
 
-결과로 `<영역>/AGENTS.md`가 생기고 `harness.json`의 `areas`에 설정이 기록된다.
+결과로 `<영역>/AGENTS.md`가 생기고 `harness.json`의 `areas`에 설정이 기록된다. 판정용 경로 규칙
+`trigger_paths`·`test_paths`(아래 3.4)도 키트 기본값으로 함께 기록된다. 바꾸려면 `harness.json`을 직접 고친다.
 
 ### 3.3 첫 커밋
 
@@ -99,6 +100,30 @@ git commit -m "chore: ai-dev-harness 적용"
 
 `.claude/settings.json`과 `.claude/hooks/`는 **커밋한다**. 팀 전체가 같은 가드레일을 쓰기 위해서다.
 개인 설정은 `.claude/settings.local.json`에 두고 이 파일은 커밋하지 않는다.
+
+### 3.4 판정 확인 (`harness judge`)
+
+작업 브랜치의 변경 파일로 경량·표준·엄격(`lite`·`standard`·`strict`)을 산출한다. 기계 판정은 하한이다.
+사람이 판정을 올릴 수는 있어도 내리지 않는다.
+
+```bash
+python bin/harness.py judge ../my-project                       # origin/<default_branch>와의 merge-base 이후
+python bin/harness.py judge ../my-project --base origin/develop --json
+git diff --name-only origin/main | python bin/harness.py judge ../my-project --files -
+```
+
+- 변경 파일은 merge-base 이후 커밋, 커밋하지 않은 수정, 추적 안 된 파일이다. 이름을 바꾼 파일은 옛 경로와 새 경로를 모두 본다
+- 파일마다 `trigger_paths.strict` → `trigger_paths.standard` → 문서(`*.md`, 루트 `docs/`) → `test_paths` 순으로 맞춰
+  보고, 어디에도 안 맞으면 표준이다. 전체 판정은 가장 높은 값이다. 문서·테스트만 바뀌었으면 경량이다
+- 패턴은 gitignore 방식이고 영역 디렉터리 기준이다(`/src/auth/`는 `<영역>/src/auth/` 아래). 영역 밖 파일은
+  최상위 `judge`의 `trigger_paths`·`test_paths`(저장소 루트 기준)를 쓴다. 기본값은 키 단위로 대체된다. `trigger_paths`를
+  지정하지 않은 곳에는 공통 기본(lock 파일·CI 정의·DB 마이그레이션 → 엄격)을, `test_paths`를 지정하지 않은 곳에는 기본
+  테스트 경로를 쓴다
+- 최상위 `judge.triggers`는 영역 밖 파일이 하나라도 바뀌면 출력된다. 문서만 바꿔도 나오므로 문장은 조건을 담아 쓴다
+- 영역의 `triggers`와 최상위 `judge.triggers` 문장(계약 불일치, 인가 등)은 경로로 판정할 수 없어 "사람 확인 필요"로만
+  출력한다
+- `--files` 목록은 UTF-8(BOM 허용) 한 줄에 경로 하나다. `git diff --name-only`가 따옴표로 감싼 비ASCII 경로도 풀어 읽는다
+- 판정과 무관하게 종료 코드 0이다. 설정·git 오류는 2
 
 ## 4. 기존 저장소에 붙이기
 
@@ -286,11 +311,13 @@ Claude MR 리뷰를 켰다면 `.harness/claude-review/`도 지운다(14절).
 ## 13. 첫 소비자 계약 (0.2.0)
 
 `harness.json`의 루트 키는 `harness_version`, `project_name`, `platform`, `tracker`, `issue_prefix`,
-`default_branch`, `integration_branch`, `related_docs`, `areas`, `hooks`, `claude_review`(선택, 14절)다. 알 수 없는 키나 타입이
+`default_branch`, `integration_branch`, `related_docs`, `areas`, `hooks`, `judge`(선택, 3.4절), `claude_review`(선택, 14절)다. 알 수 없는 키나 타입이
 틀린 값은 오류로 처리한다. `related_docs` 항목은 문자열 `label`·`path`만 가진다. `areas` 항목은
-`dir`·`verify`와 선택 항목 `triggers`·`review_focus`·`docs`를 가진다. 영역을 새로 만들면 기본
-`triggers`·`review_focus`를 설정 파일에 저장한다. 같은 영역을 `--force`로 다시 만들 때 생략한
+`dir`·`verify`와 선택 항목 `triggers`·`review_focus`·`docs`·`trigger_paths`·`test_paths`를 가진다.
+`trigger_paths`는 `strict`·`standard` 키만 가진 객체이고 값은 패턴 목록이다(빈 목록 허용). `test_paths`는 패턴
+목록이다. 영역을 새로 만들면 기본 `triggers`·`review_focus`·`trigger_paths`·`test_paths`를 설정 파일에 저장한다. 같은 영역을 `--force`로 다시 만들 때 생략한
 선택 항목은 이전 값을 유지한다.
+최상위 `judge`(선택)는 영역 밖 파일의 판정 규칙으로 `trigger_paths`·`test_paths`·`triggers`(사람 확인 문장)만 가진다.
 
 템플릿의 `{{name}}`은 키트가 가진 값으로 치환한다. 이름은 소문자와 밑줄만 사용한다. 지원 이름은 `project_name`, `platform`,
 `pr_noun`, `pr_long`, `ci_variables`, `tracker_name`, `issue_noun`, `issue_key`,

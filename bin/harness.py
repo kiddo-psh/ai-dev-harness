@@ -9,6 +9,8 @@
                                              # 영역 디렉터리에 AGENTS.md 생성(루트 init 이후)
     python bin/harness.py check <target>     # 렌더링 결과와 실제 파일의 차이(드리프트) 검사
     python bin/harness.py check --self
+    python bin/harness.py judge [<target>|--self] [--base <ref> | --files <목록 파일|->] [--json]
+                                             # 변경 파일로 경량·표준·엄격(lite·standard·strict) 판정
     python bin/harness.py classify-ci --jobs <jobs.json> [--trace-dir <dir>] [--out <file.jsonl>]
                                              # 실패한 CI job의 원인 범주를 JSONL로 산출(trace는 <job_id>.log)
     python bin/harness.py version
@@ -17,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import json
 import re
@@ -35,9 +38,9 @@ SOURCE_DIRS = {"templates": TEMPLATES_DIR, "hooks": HOOKS_DIR, "ci": CI_DIR}
 OPTIONAL_BLOCKS = {"claude_review"}
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
 AREA_TEMPLATE = "AREA-AGENTS.md"
-AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs"}
+AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs", "trigger_paths", "test_paths"}
 CONFIG_KEYS = {"harness_version", "project_name", "platform", "tracker", "issue_prefix",
-               "default_branch", "integration_branch", "related_docs", "areas", "hooks", "claude_review"}
+               "default_branch", "integration_branch", "related_docs", "areas", "hooks", "judge", "claude_review"}
 RELATED_DOC_KEYS = {"label", "path"}
 CONFIG_NAME = "harness.json"
 
@@ -86,15 +89,6 @@ CONSUMER_RELATED_DOCS = [
     {"label": "Secret 및 환경변수 관리 규칙", "path": "docs/secret-environment-variables.md"},
 ]
 
-# 영역 AGENTS.md의 기본 트리거. 스택 중립 항목만 두고 스택 고유 항목은 프로필이 채운다.
-DEFAULT_TRIGGERS = [
-    "계약 문서(API·스키마·영역 간 교환 계약)의 변경, 또는 계약과 다른 구현",
-    "DB 마이그레이션",
-    "인증·인가, 토큰·세션·쿠키 처리",
-    "트랜잭션 경계의 신설·변경, 여러 저장소에 걸친 쓰기, 외부 시스템(메시지·캐시) 쓰기와 그 재시도·멱등성·부분 실패 처리",
-    "공용 모듈 또는 다른 담당자 소유 영역의 생산 코드",
-    "의존성·lock 파일, 운영 설정, 환경 변수 계약, CI 정의",
-]
 
 DEFAULT_REVIEW_FOCUS = [
     "계약 정합성",
@@ -110,6 +104,9 @@ NO_AREA_DOCS = "- 아직 지정한 기준 문서가 없다. 계약·스키마·�
 _HOOKS_SPEC = importlib.util.spec_from_file_location("harness_hooks_common", HOOKS_DIR / "harness_common.py")
 hooks_common = importlib.util.module_from_spec(_HOOKS_SPEC)
 _HOOKS_SPEC.loader.exec_module(hooks_common)
+
+# 영역 AGENTS.md의 기본 트리거. 판정의 사람 확인 목록과 같은 값이라 hook 공통 코드에 둔다
+DEFAULT_TRIGGERS = list(hooks_common.DEFAULT_AREA_TRIGGERS)
 
 # claude_review 검증은 대상에 복사되는 리뷰 공통 코드와 같은 규칙을 쓴다
 _REVIEW_SPEC = importlib.util.spec_from_file_location("harness_review_common",
@@ -176,6 +173,8 @@ def validate_config(config: dict, source: Path | str) -> None:
     try:
         if "hooks" in config:  # 키를 생략하면 기본값, 명시한 null은 객체 계약 위반이다
             hooks_common.validate_hooks(config["hooks"], source)
+        if "judge" in config:
+            hooks_common.validate_judge_root(config["judge"], source)
     except hooks_common.ConfigError as exc:
         raise HarnessError(str(exc)) from exc
     if "claude_review" in config:  # 생략하면 리뷰 파일을 만들지 않는다. 명시한 null은 객체 계약 위반이다
@@ -223,6 +222,10 @@ def validate_areas(areas, source: Path | str) -> None:
                 not isinstance(item, str) or not item.strip() for item in items
             ):
                 raise HarnessError(f"{source}: 영역 {dir_}의 {key}는 비어 있지 않은 문자열 목록이어야 한다")
+        try:
+            hooks_common.validate_judge_rules(area, source)
+        except hooks_common.ConfigError as exc:
+            raise HarnessError(str(exc)) from exc
 
 
 def build_context(config: dict) -> dict:
@@ -486,6 +489,9 @@ def cmd_init_area(args, target: Path) -> int:
     previous = areas[same[0]] if same else {}
     area["triggers"] = args.trigger or previous.get("triggers") or list(DEFAULT_TRIGGERS)
     area["review_focus"] = args.review_focus or previous.get("review_focus") or list(DEFAULT_REVIEW_FOCUS)
+    # 경로 판정 규칙도 생성 시점의 기본값을 설정에 굳힌다. 키트 기본값이 바뀌어도 기존 영역 판정은 그대로다
+    area["trigger_paths"] = previous.get("trigger_paths", copy.deepcopy(hooks_common.DEFAULT_TRIGGER_PATHS))
+    area["test_paths"] = previous.get("test_paths", list(hooks_common.DEFAULT_TEST_PATHS))
     if args.area_doc or previous.get("docs"):
         area["docs"] = args.area_doc or previous["docs"]
     if same:
@@ -578,6 +584,78 @@ def cmd_check(args) -> int:
     return 1
 
 
+TIER_LABELS = {"lite": "경량", "standard": "표준", "strict": "엄격"}
+
+
+GIT_QUOTE_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def unquote_git_path(line: str) -> str:
+    """`git diff --name-only`가 비ASCII·특수 문자 경로에 쓰는 C 방식 따옴표를 푼다(`"a/\\354\\240\\225.md"`)."""
+    if len(line) < 2 or not (line.startswith('"') and line.endswith('"')):
+        return line
+    body, out, i = line[1:-1], bytearray(), 0
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\":
+            out += ch.encode("utf-8")
+            i += 1
+        elif re.match(r"[0-7]{3}", body[i + 1:i + 4]):
+            out.append(int(body[i + 1:i + 4], 8))
+            i += 4
+        elif body[i + 1:i + 2] in GIT_QUOTE_ESCAPES:
+            out.append(GIT_QUOTE_ESCAPES[body[i + 1]])
+            i += 2
+        else:
+            return line  # git이 만든 형식이 아니면 그대로 둔다
+    return out.decode("utf-8", errors="replace")
+
+
+def read_file_list(source: str) -> list[str]:
+    try:
+        if source == "-":
+            stream = getattr(sys.stdin, "buffer", None)
+            data = stream.read() if stream is not None else sys.stdin.read().encode("utf-8")
+        else:
+            data = Path(source).read_bytes()
+        text = data.decode("utf-8-sig")  # 메모장 등이 붙인 BOM이 첫 경로에 섞이지 않게 한다
+    except OSError as exc:
+        raise HarnessError(f"파일 목록을 읽을 수 없다: {source}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise HarnessError(f"파일 목록은 UTF-8이어야 한다: {source}: {exc}") from exc
+    return [unquote_git_path(line.strip()) for line in text.splitlines() if line.strip()]
+
+
+def cmd_judge(args) -> int:
+    target, _self_mode = resolve_target(args) if args.self or args.target else (Path.cwd(), False)
+    config = load_config(target / CONFIG_NAME)
+    if args.files is not None:
+        base, paths = None, read_file_list(args.files)
+    else:
+        ref = args.base or f"origin/{config['default_branch']}"
+        try:
+            base, paths = hooks_common.changed_files(target, ref)
+        except hooks_common.ConfigError as exc:
+            raise HarnessError(str(exc)) from exc
+    result = {"base": base, **hooks_common.judge(paths, config)}
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    print(f"판정: {result['tier']} ({TIER_LABELS[result['tier']]})")
+    if base:
+        print(f"기준: {base}")
+    if not result["files"]:
+        print("변경 파일 없음")
+    for item in sorted(result["files"], key=lambda f: (-hooks_common.TIERS.index(f["tier"]), f["path"])):
+        area = f" [{item['area']}]" if item["area"] else ""
+        print(f"  {item['tier']:<8} {item['path']}{area}  {item['rule']}")
+    if result["human_check"]:
+        print("사람 확인 필요(경로로 판정하지 않는 트리거. 해당하면 판정을 올린다):")
+        for item in result["human_check"]:
+            print(f"  [{item['area'] or '영역 밖'}] {item['trigger']}")
+    return 0
+
+
 def cmd_classify_ci(args) -> int:
     jobs_path = Path(args.jobs)
     if not jobs_path.is_file():
@@ -626,6 +704,15 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("target", nargs="?")
     check.add_argument("--self", action="store_true")
     check.set_defaults(func=cmd_check)
+
+    judge = sub.add_parser("judge", help="변경 파일로 경량·표준·엄격을 판정한다")
+    judge.add_argument("target", nargs="?", help="대상 저장소(기본 현재 디렉터리)")
+    judge.add_argument("--self", action="store_true")
+    source = judge.add_mutually_exclusive_group()
+    source.add_argument("--base", help="비교 기준 ref(기본 origin/<default_branch>). merge-base 이후 변경과 작업 트리를 본다")
+    source.add_argument("--files", help="변경 파일 목록(줄 단위). - 이면 표준 입력")
+    judge.add_argument("--json", action="store_true", help="JSON으로 출력")
+    judge.set_defaults(func=cmd_judge)
 
     classify = sub.add_parser("classify-ci", help="실패한 CI job의 원인을 분류해 JSONL로 쓴다")
     classify.add_argument("--jobs", required=True, help="job 메타데이터 JSON(GitLab job API 형태, 목록 또는 객체)")
