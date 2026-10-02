@@ -328,8 +328,17 @@ class ContextTest(unittest.TestCase):
         del missing["CI_MERGE_REQUEST_DESCRIPTION"]
         with self.assertRaisesRegex(lint.LintError, "16.7"):
             lint.context_from_env(missing)
-        with self.assertRaisesRegex(lint.LintError, "잘렸다"):
-            lint.context_from_env({**env, "CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED": "true"})
+        # #41 T10: 잘림은 예외 대신 표시로 넘긴다(run이 통합 MR 판단 뒤 토큰으로 읽거나 종료 2)
+        self.assertFalse(ctx["truncated"])
+        self.assertTrue(lint.context_from_env({**env, "CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED": "true"})["truncated"])
+        self.assertEqual(ctx["mr_project"], "7")  # CI_MERGE_REQUEST_PROJECT_ID가 없으면 CI_PROJECT_ID
+        branches = {**env, "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME": "develop", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "main",
+                    "CI_MERGE_REQUEST_SOURCE_PROJECT_ID": "8", "CI_MERGE_REQUEST_PROJECT_ID": "8"}
+        ctx = lint.context_from_env(branches)
+        self.assertEqual((ctx["source_branch"], ctx["target_branch"], ctx["same_repo"], ctx["mr_project"]),
+                         ("develop", "main", True, "8"))
+        self.assertFalse(lint.context_from_env({**branches, "CI_MERGE_REQUEST_SOURCE_PROJECT_ID": "9"})["same_repo"])
+        self.assertFalse(lint.context_from_env(env)["same_repo"])  # 프로젝트 ID가 없으면 같은 프로젝트로 보지 않는다
         with self.assertRaises(lint.LintError):
             lint.context_from_env({})
 
@@ -345,6 +354,7 @@ class ContextTest(unittest.TestCase):
         ctx = lint.context_from_env(env)
         self.assertEqual((ctx["platform"], ctx["body"], ctx["base"], ctx["head"], ctx["number"]),
                          ("github", "", "b", "h", "9"))
+        self.assertEqual((ctx["truncated"], ctx["same_repo"]), (False, False))
         with self.assertRaisesRegex(lint.LintError, "pull_request_target"):
             lint.context_from_env({**env, "GITHUB_EVENT_NAME": "pull_request_target"})
         event.write_text("{}", encoding="utf-8")
@@ -428,6 +438,221 @@ class MainTest(RepoCase):
             code = lint.main(["--project", str(self.repo), "--body-file", "x", "--out", str(self.repo / "o.json")],
                              env={})
         self.assertEqual(code, 2)
+
+
+class FakeUrlopen:
+    """urllib.request.urlopen 대역(전체 본문 읽기). 요청을 기록하고 payload 바이트나 error를 준다."""
+
+    def __init__(self, payload=b"", error=None):
+        self.requests, self.payload, self.error = [], payload, error
+
+    def __call__(self, request, timeout=None):
+        self.requests.append(request)
+        if self.error:
+            raise self.error
+        return io.BytesIO(self.payload)
+
+
+class CiRunCase(RepoCase):
+    """CI 환경 변수로 main을 실행한다(--body-file 없음)."""
+
+    def setUp(self):
+        super().setUp()
+        (self.repo / "src.py").write_text("x\n", encoding="utf-8")
+        self.head = self.commit()
+
+    def gitlab_env(self, body, **extra):
+        return {"GITLAB_CI": "true", "CI_MERGE_REQUEST_DESCRIPTION": body, "CI_MERGE_REQUEST_DIFF_BASE_SHA": self.base,
+                "CI_COMMIT_SHA": self.head, "CI_API_V4_URL": "https://g/api/v4", "CI_PROJECT_ID": "7",
+                "CI_MERGE_REQUEST_IID": "3", **extra}
+
+    def github_env(self, body, head_ref="feature", base_ref="main", head_repo="o/r", base_repo="o/r"):
+        event = self.repo / "event.json"
+        event.write_text(json.dumps({"pull_request": {
+            "number": 9, "body": body,
+            "base": {"sha": self.base, "ref": base_ref, "repo": {"full_name": base_repo}},
+            "head": {"sha": self.head, "ref": head_ref, "repo": {"full_name": head_repo} if head_repo else None}}}),
+            encoding="utf-8")
+        return {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event),
+                "GITHUB_API_URL": "https://api.github.com", "GITHUB_REPOSITORY": "o/r"}
+
+    def run_ci(self, env, opener=None):
+        """(종료 코드, 출력, 리포트, urlopen 대역). 댓글 HTTP는 FakeApi로 막고 호출을 self.comment_api에 남긴다."""
+        opener = opener or FakeUrlopen()
+        self.comment_api = FakeApi(pages=[], me=1)
+        out_file = self.repo / "out.json"
+        out = io.StringIO()
+        with mock.patch.object(lint.urllib.request, "urlopen", opener), \
+                mock.patch.object(lint, "http_json", self.comment_api), redirect_stdout(out):
+            code = lint.main(["--project", str(self.repo), "--out", str(out_file)], env=env)
+        text = out_file.read_text(encoding="utf-8")
+        self.assertNotIn("tok-secret", out.getvalue())
+        self.assertNotIn("tok-secret", text)
+        return code, out.getvalue(), json.loads(text), opener
+
+
+class FullBodyTest(CiRunCase):
+    """#41 Q5(a): 잘린 GitLab 본문은 토큰이 있을 때만 API로 전체 본문을 읽는다. 실패는 종료 2."""
+
+    def payload(self, **fields):
+        return json.dumps({"iid": 3, "description": filled(), **fields}).encode("utf-8")
+
+    def test_truncated_with_token_reads_api(self):
+        """T1"""
+        env = self.gitlab_env("잘린 본문", CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED="true",
+                              HARNESS_COMMENT_TOKEN="tok-secret")
+        code, out, report, opener = self.run_ci(env, FakeUrlopen(self.payload()))
+        self.assertEqual((code, report["result"]), (0, "pass"), out)
+        self.assertIn("API로 전체 본문", out)
+        self.assertEqual(len(opener.requests), 1)
+        request = opener.requests[0]
+        self.assertEqual((request.get_method(), request.full_url), ("GET", "https://g/api/v4/projects/7/merge_requests/3"))
+        # 토큰은 리다이렉트로 옮겨지지 않는 헤더에만 있다
+        self.assertEqual(request.unredirected_hdrs.get("Private-token"), "tok-secret")
+        self.assertNotIn("Private-token", request.headers)
+        # 소스 프로젝트가 아니라 MR 프로젝트로 읽는다(fork MR 파이프라인은 fork에서 돈다)
+        env["CI_MERGE_REQUEST_PROJECT_ID"] = "group/p"
+        _code, _out, _report, opener = self.run_ci(env, FakeUrlopen(self.payload()))
+        self.assertEqual(opener.requests[0].full_url, "https://g/api/v4/projects/group%2Fp/merge_requests/3")
+        # API 본문도 lint한다(본문이 비면 실패)
+        code, _out, report, _ = self.run_ci(env, FakeUrlopen(self.payload(description=None)))
+        self.assertEqual((code, report["result"]), (1, "fail"))
+
+    def test_api_failure_is_error(self):
+        """T2: 잘린 본문으로 판정하지 않는다. 토큰·응답 본문은 출력하지 않는다"""
+        env = self.gitlab_env(filled(), CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED="true",
+                              HARNESS_COMMENT_TOKEN="tok-secret")
+        unauthorized = urllib.error.HTTPError("https://g/api/v4/x", 401, "Unauthorized", {},
+                                              io.BytesIO(b"SECRET-DETAIL"))
+        cases = {
+            "401": FakeUrlopen(error=unauthorized),
+            "down": FakeUrlopen(error=urllib.error.URLError("down")),
+            "too big": FakeUrlopen(self.payload(pad="x" * 300)),
+            "not json": FakeUrlopen(b"SECRET-DETAIL not json"),
+            "list": FakeUrlopen(b"[]"),
+            "no description": FakeUrlopen(b'{"iid": 3}'),
+            "bad description": FakeUrlopen(b'{"iid": 3, "description": 5}'),
+            "other mr": FakeUrlopen(self.payload(iid=4)),
+        }
+        for name, opener in cases.items():
+            with self.subTest(name), mock.patch.object(lint, "MR_RESPONSE_MAX_BYTES", 2000 if name == "too big" else 10**6):
+                code, out, report, _ = self.run_ci(env, opener)
+                self.assertEqual((code, report["result"]), (2, "error"), out)
+                self.assertIn("API로 전체 본문을 읽지 못했다", out)
+                self.assertNotIn("SECRET-DETAIL", out + json.dumps(report))
+                self.assertEqual(len(opener.requests), 1)
+        _code, out, _report, _ = self.run_ci(env, cases["401"])
+        self.assertIn("HTTP 401", out)
+        self.assertIn("read_api", out)
+
+    def test_truncated_without_token_is_error(self):
+        """T3"""
+        env = self.gitlab_env(filled(), CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED="true")
+        code, out, report, opener = self.run_ci(env)
+        self.assertEqual((code, report["result"]), (2, "error"))
+        self.assertIn("잘렸다", out)
+        self.assertEqual(opener.requests, [])
+
+    def test_not_truncated_makes_no_api_call(self):
+        """T4: 잘리지 않았으면 토큰이 있어도 본문을 API로 읽지 않는다"""
+        code, out, report, opener = self.run_ci(self.gitlab_env(filled(), HARNESS_COMMENT_TOKEN="tok-secret"))
+        self.assertEqual((code, report["result"]), (0, "pass"), out)
+        self.assertEqual(opener.requests, [])
+        self.assertNotIn("API로 전체 본문", out)
+
+    def test_http_api_url_rejected(self):
+        """T5"""
+        base = self.gitlab_env(filled(), CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED="true",
+                               HARNESS_COMMENT_TOKEN="tok-secret")
+        for extra in ({"CI_API_V4_URL": "http://g/api/v4"}, {"CI_MERGE_REQUEST_IID": "3/../../user"},
+                      {"CI_MERGE_REQUEST_IID": ""}, {"CI_PROJECT_ID": ""}):
+            with self.subTest(extra=extra):
+                code, out, report, opener = self.run_ci({**base, **extra}, FakeUrlopen(self.payload()))
+                self.assertEqual((code, report["result"]), (2, "error"), out)
+                self.assertEqual(opener.requests, [])
+
+
+class IntegrationSkipTest(CiRunCase):
+    """#41 Q6(a): 같은 저장소의 integration → default MR은 건너뜀(통과)."""
+
+    GITLAB_INTEGRATION = {"CI_MERGE_REQUEST_SOURCE_BRANCH_NAME": "develop", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "main",
+                          "CI_MERGE_REQUEST_SOURCE_PROJECT_ID": "7", "CI_MERGE_REQUEST_PROJECT_ID": "7"}
+
+    def assert_skipped(self, env):
+        with mock.patch.object(lint, "changed", side_effect=AssertionError("git을 보지 않는다")):
+            code, out, report, opener = self.run_ci(env)
+        self.assertEqual(code, 0, out)
+        self.assertEqual((report["result"], report["reason"], report["comment"], report["failures"]),
+                         ("skipped", "integration", "skipped", []))
+        self.assertIn("통합 MR(develop → main)이라 MR 본문 lint를 건너뛴다(통과)", out)
+        self.assertNotIn("MR 본문 lint 통과", out)
+        self.assertEqual(opener.requests, [])
+        self.assertEqual(self.comment_api.calls, [])  # 건너뜀은 댓글을 남기지 않는다
+
+    def test_gitlab_integration_mr_skipped(self):
+        """T6: Release 본문이 잘렸고 토큰이 없어도 건너뜀이 먼저다"""
+        self.assert_skipped(self.gitlab_env("", **self.GITLAB_INTEGRATION))
+        self.assert_skipped(self.gitlab_env("", CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED="true",
+                                            **self.GITLAB_INTEGRATION))
+        self.assert_skipped(self.gitlab_env("", HARNESS_COMMENT_TOKEN="tok-secret", **self.GITLAB_INTEGRATION))
+
+    def test_github_integration_pr_skipped(self):
+        """T7"""
+        self.assert_skipped(self.github_env(None, head_ref="develop", base_ref="main"))
+
+    def test_target_tip_settings_used_when_available(self):
+        """Codex P2(PR #42): 대상 브랜치 최신 커밋의 harness.json으로 판단한다(diff 기준 커밋의 옛 값이 아니라)."""
+        (self.repo / "harness.json").write_text(json.dumps({**self.config, "integration_branch": "release"}),
+                                                encoding="utf-8")
+        tip = self.commit("rename integration branch on target")
+        renamed = {**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME": "release",
+                   "CI_MERGE_REQUEST_TARGET_BRANCH_SHA": tip}
+        self.assert_skipped_from("release", self.gitlab_env("", **renamed))
+        # 옛 통합 브랜치(develop)는 대상 최신 값으로 보면 더 이상 통합 MR이 아니다
+        old = {**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_TARGET_BRANCH_SHA": tip}
+        code, out, report, _ = self.run_ci(self.gitlab_env("", **old))
+        self.assertEqual((code, report["result"]), (1, "fail"), out)
+
+    def assert_skipped_from(self, source, env):
+        with mock.patch.object(lint, "changed", side_effect=AssertionError("git diff를 보지 않는다")):
+            code, out, report, _ = self.run_ci(env)
+        self.assertEqual((code, report["result"]), (0, "skipped"), out)
+        self.assertIn(f"통합 MR({source} → main)", out)
+
+    def test_mr_cannot_redefine_integration_branch(self):
+        """리뷰 F1: MR이 같은 MR에서 harness.json의 브랜치 값을 바꿔 자기 lint를 끌 수 없다(기준 커밋 값으로 판단)."""
+        (self.repo / "harness.json").write_text(
+            json.dumps({**self.config, "integration_branch": "feature", "default_branch": "main"}), encoding="utf-8")
+        self.head = self.commit()
+        env = self.gitlab_env("", **{**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME": "feature"})
+        code, out, report, _ = self.run_ci(env)
+        self.assertEqual((code, report["result"]), (1, "fail"), out)
+        # 기준 커밋에 harness.json이 없거나 읽을 수 없으면 건너뛰지 않는다
+        self.assertIsNone(lint.base_config(self.repo, "no-such-rev"))
+        self.assertIsNone(lint.base_config(self.repo, "--output=x"))
+
+    def test_fork_or_other_branches_not_skipped(self):
+        """T8: fork의 같은 이름 브랜치, 다른 브랜치 조합, integration=default는 검사한다(빈 본문이라 실패)"""
+        envs = {
+            "github fork": self.github_env("", head_ref="develop", head_repo="evil/r"),
+            "github deleted fork": self.github_env("", head_ref="develop", head_repo=None),
+            "gitlab fork": self.gitlab_env("", **{**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_SOURCE_PROJECT_ID": "9"}),
+            "gitlab no project ids": self.gitlab_env("", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME="develop",
+                                                     CI_MERGE_REQUEST_TARGET_BRANCH_NAME="main"),
+            "feature": self.gitlab_env("", **{**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME": "feature"}),
+            "to develop": self.gitlab_env("", **{**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "develop"}),
+        }
+        for name, env in envs.items():
+            with self.subTest(name):
+                code, out, report, _ = self.run_ci(env)
+                self.assertEqual((code, report["result"]), (1, "fail"), out)
+        # 통합 브랜치를 쓰지 않으면(integration == default) 건너뛰지 않는다
+        (self.repo / "harness.json").write_text(json.dumps({**self.config, "integration_branch": "main"}),
+                                                encoding="utf-8")
+        env = self.gitlab_env("", **{**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME": "main"})
+        self.assertEqual(self.run_ci(env)[0], 1)
+        self.assertFalse(lint.is_integration_mr({"same_repo": True, "source_branch": "develop", "target_branch": "main"},
+                                                {"integration_branch": "develop", "default_branch": 5}))
 
 
 class FakeApi:
@@ -560,6 +785,19 @@ class SanitizeTest(unittest.TestCase):
         self.assertIn("- `## 판정` 절이 없다.", text)
         self.assertIn("사람 확인이 필요한 트리거 1개", text)
 
+    def test_skipped_result_accepted(self):
+        """#41 T9: 건너뜀 결과는 허용 값이고 댓글은 남기지 않는다(실패 항목도 옮기지 않는다)."""
+        raw = {"result": "skipped", "reason": "integration", "failures": ["SECRET"], "tier": {}}
+        clean = lint.sanitize_report(raw)
+        self.assertEqual((clean["result"], clean["failures"]), ("skipped", []))
+        text = lint.comment_text(raw)
+        self.assertIn("harness MR 본문 lint: 건너뜀", text)
+        self.assertNotIn("SECRET", text)
+        api = FakeApi()
+        with mock.patch.object(lint, "http_json", api):
+            self.assertEqual(lint.try_comment(GITLAB_CTX, raw, "tok-secret"), "skipped")
+        self.assertEqual(api.calls, [])
+
     def test_error_report_has_no_message(self):
         """오류 메시지는 경로를 담을 수 있어 댓글에 옮기지 않는다."""
         text = lint.comment_text({"result": "error", "error": "/home/runner/secret/harness_common.py 이 없다."})
@@ -628,6 +866,13 @@ class PostReportTest(unittest.TestCase):
         self.assertIn("harness 경고", out)
         self.assertEqual(api.calls, [])
 
+    def test_skipped_report_posts_nothing(self):
+        """#41 T9: 기준 커밋 댓글 job은 건너뜀 리포트를 받아도 경고 없이 댓글을 남기지 않는다"""
+        api, out = self.post(json.dumps({"result": "skipped", "reason": "integration", "failures": [], "tier": {}}))
+        self.assertEqual(api.calls, [])
+        self.assertIn("판정 댓글 skipped (결과 skipped)", out)
+        self.assertNotIn("harness 경고", out)
+
     def test_api_failure_is_warning(self):
         error = urllib.error.HTTPError("https://api.github.com/x", 403, "Forbidden", {}, None)
         self.report.write_text(json.dumps(REPORT), encoding="utf-8")
@@ -644,7 +889,7 @@ class FragmentTest(unittest.TestCase):
         text = FRAGMENT.read_text(encoding="utf-8")
         head = "\n".join(line for line in text.splitlines() if line.startswith("#"))
         for needle in ("include:", "- remote: https://", "core/ci/gitlab/mr-lint.yml", "필요 조건:", "예외:",
-                       "HARNESS_COMMENT_TOKEN", "16.7", "2700자"):
+                       "HARNESS_COMMENT_TOKEN", "16.7", "2700자", "read_api", "통합 MR"):
             self.assertIn(needle, head)
         self.assertEqual(re.findall(r"^([^\s#][^:]*):\s*$", text, re.M), ["harness-mr-lint"])
         self.assertRegex(text, r"name: python:[\w.-]+@sha256:[0-9a-f]{64}\n")
@@ -770,6 +1015,16 @@ class TemplateTest(unittest.TestCase):
     def test_non_strict_template_defaults_are_not_failures(self):
         """비엄격 본문은 플랜 요약·리뷰 결과를 그대로 둬도 통과한다."""
         self.assertEqual(lint.lint_body(filled("lite"), "lite")["failures"], [])
+
+
+class RoadmapTest(unittest.TestCase):
+    def test_m2_completion_note(self):
+        """#41 T11(O-5): M2 완료 기준 바로 뒤에 댓글(토큰 있을 때만)·CI 플랜 검사(MR 본문 측정 칸) 해석이 있다"""
+        roadmap = (ROOT / "docs" / "roadmap.md").read_text(encoding="utf-8")
+        m2 = roadmap.split("### M2.", 1)[1].split("\n- [", 1)[0]
+        criteria = m2.split("완료 기준:", 1)[1]
+        for needle in ("HARNESS_COMMENT_TOKEN", "mr-lint.json", "plans/", "측정 칸"):
+            self.assertIn(needle, criteria)
 
 
 if __name__ == "__main__":

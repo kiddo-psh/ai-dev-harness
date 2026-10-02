@@ -4,7 +4,8 @@
 # 체크 1개 이상, `## 판정`(lite·standard·strict, 경량·표준·엄격). 변경 파일로 판정(harness judge)을 다시 계산해
 # 본문 판정과 높은 쪽을 적용하고, 다르면 불일치로 기록한다. 적용 판정이 엄격이면 `## 플랜 요약`·`## 리뷰 결과`가
 # "해당 없음"이 아니고 측정 칸에 빈칸이 없어야 한다. MR이 `plans/` 파일을 넣거나 `.gitignore`에 `/plans/`가 없어도
-# 실패한다. 검사할 수 없으면(MR 변수·필요 파일 없음, 본문 잘림, 얕은 clone) 통과로 넘기지 않고 실패한다.
+# 실패한다. 검사할 수 없으면(MR 변수·필요 파일 없음, 토큰 없이 본문 잘림, 얕은 clone) 통과로 넘기지 않고 실패한다.
+# 통합 MR(같은 프로젝트, 대상 쪽 기준 커밋 `harness.json`의 integration_branch → default_branch)은 건너뛴다(통과).
 #
 # 검사 코드는 `harness init`이 대상 저장소에 넣은 `.harness/mr-lint/mr_lint.py`이고 판정은
 # `.claude/hooks/harness_common.py`와 `harness.json`을 쓴다(`harness check`가 드리프트를 본다).
@@ -15,13 +16,16 @@
 #
 # 변수:
 #   HARNESS_COMMENT_TOKEN  (선택) 판정 결과를 MR 댓글 하나로 남기고 다시 돌 때 갱신한다. 없으면 job 로그와
-#                          아티팩트만 남긴다. MR 파이프라인은 MR 작성자의 코드와 같이 돌므로 이 토큰은 MR을 올릴 수
-#                          있는 사람이 읽을 수 있다. Reporter 역할·`api` 범위의 전용 프로젝트 액세스 토큰만 쓴다.
+#                          아티팩트만 남긴다. 본문이 2700자에서 잘렸으면 이 토큰으로 같은 CI의 API에서 전체 본문을
+#                          읽는다(`read_api`면 읽기만 되고 댓글은 경고로 끝난다. 댓글까지 쓰려면 `api`). MR 파이프라인은
+#                          MR 작성자의 코드와 같이 돌므로 이 토큰은 MR을 올릴 수 있는 사람이 읽을 수 있다. Reporter
+#                          역할의 전용 프로젝트 액세스 토큰만 쓴다.
 #   `stage`·`image` 등은 같은 이름의 job을 로컬에 다시 적어 덮어쓴다. `GIT_DEPTH`는 0이어야 한다.
 # 필요 조건: Docker executor runner, Docker Hub 접근, GitLab 16.7 이상(CI_MERGE_REQUEST_DESCRIPTION).
 # 예외: 없음. 끄려면 include에서 빼거나 같은 이름의 job을 `rules: [{when: never}]`로 덮어쓴다.
 # 한계: 본문만 고치면 파이프라인이 다시 돌지 않는다(새 파이프라인을 실행한다). CI 변수의 본문은 2700자에서
-#       잘리며, 잘렸으면 실패한다. MR이 검사 코드나 CI 정의를 바꾸면 우회할 수 있다(보안 검사가 아니다).
+#       잘리며, 잘렸는데 토큰이 없거나 API로 읽지 못하면 실패한다. MR이 검사 코드나 CI 정의를 바꾸면 우회할 수
+#       있다(보안 검사가 아니다).
 # 리포트: mr-lint.json (판정·실패 항목·변경 파일 판정, 30일 보관)
 
 harness-mr-lint:

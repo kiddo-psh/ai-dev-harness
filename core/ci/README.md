@@ -159,12 +159,16 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 - **판정은 높은 쪽.** 변경 파일(`CI_MERGE_REQUEST_DIFF_BASE_SHA`와 소스 커밋의 merge-base 이후)로 `harness judge`와 같은
   판정을 다시 계산해 본문 판정과 높은 쪽을 적용한다. 다르면 불일치로 로그·`mr-lint.json`에 남긴다(측정 4번). 불일치만으로는
   실패하지 않지만 엄격이 적용되면 엄격 검사가 붙는다. "사람 확인 필요" 트리거 문장도 로그에 나온다.
-- **본문 출처.** `CI_MERGE_REQUEST_DESCRIPTION`(GitLab 16.7 이상). API 토큰으로 본문을 읽지 않는다. HTML 주석(템플릿 안내문)은
+- **본문 출처.** `CI_MERGE_REQUEST_DESCRIPTION`(GitLab 16.7 이상). 잘렸을 때만 API로 읽는다(아래). HTML 주석(템플릿 안내문)은
   지우고 펜스 코드 블록(```·~~~) 안의 줄은 검사에 쓰지 않는다. 4칸 들여쓴 코드 블록은 목록 항목의 이어 쓰기와 가르지 않고
   본문으로 읽는다(검증 절의 들여쓴 값을 살리기 위해서다).
 - **본문만 고치면 다시 돌지 않는다.** 본문을 고친 뒤 MR의 Pipelines 탭에서 새 파이프라인을 실행한다.
 - **2700자 제한.** GitLab은 이 변수를 2700자에서 자른다. 잘렸으면(`CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED`) 잘린 본문으로
-  판정하지 않고 실패한다. 템플릿 안내 주석을 지우거나 긴 내용을 링크로 옮긴다.
+  판정하지 않는다. `HARNESS_COMMENT_TOKEN`이 있으면 같은 CI의 API(`CI_API_V4_URL`, https만)에서
+  `GET /projects/:id/merge_requests/:iid`로 실행 시점의 전체 본문을 읽어 검사한다(잘리지 않았으면 호출하지 않는다).
+  토큰은 리다이렉트로 넘기지 않고 출력하지 않으며, 응답은 5 MB까지만 읽는다. 토큰이 없거나 읽지 못하면(HTTP 오류, 형식 오류,
+  다른 MR의 응답) 실패(종료 2)하고 로그에는 HTTP 코드나 오류 종류만 남는다. 토큰을 쓰지 않으면 템플릿 안내 주석을 지우거나
+  긴 내용을 링크로 옮긴다.
 - **검사 코드.** `harness init`이 GitLab 대상 저장소에 넣은 `.harness/mr-lint/mr_lint.py`를 `python3 -I -B`로 실행하고, 판정에는
   `.claude/hooks/harness_common.py`와 `harness.json`을 쓴다. 셋 중 하나라도 없으면 실패한다. 이미지는 git이 든
   `python:3.12.15-bookworm`(digest 고정)이다.
@@ -172,21 +176,20 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 - **판정 댓글(선택).** CI 변수 `HARNESS_COMMENT_TOKEN`이 있으면 결과를 표식(`<!-- harness-mr-lint -->`) 댓글 하나로 남기고
   다시 돌면 같은 댓글을 고친다(토큰 사용자의 댓글만). 댓글에는 판정·불일치·실패 항목만 싣고 본문이나 경로를 옮기지 않는다.
   게시에 실패하면 경고만 내고 lint 결과는 그대로다. MR 파이프라인은 작성자 코드와 같이 돌아 이 토큰은 MR을 올릴 수 있는
-  사람이 읽을 수 있다. 쓰려면 Reporter 역할·`api` 범위의 전용 프로젝트 액세스 토큰을 Masked로 등록한다(MR 파이프라인에서
-  읽어야 하므로 Protected로 두면 보통 비어 있다). 이 노출을 받아들일 수 없으면 등록하지 않는다.
+  사람이 읽을 수 있다. 쓰려면 Reporter 역할의 전용 프로젝트 액세스 토큰을 Masked로 등록한다(MR 파이프라인에서
+  읽어야 하므로 Protected로 두면 보통 비어 있다). 범위는 댓글까지 쓰면 `api`, 잘린 본문 읽기만 쓰면 `read_api`다(`read_api`면
+  댓글은 경고로 끝난다). 이 노출을 받아들일 수 없으면 등록하지 않는다.
   키트 자기 적용(GitHub)은 같은 이유로 검사 job(토큰 없음)과 댓글 job(기준 커밋 코드만 토큰 사용)을 나눴다(아래 "키트 자기 적용").
-- **통합 MR.** `Release.md` 템플릿에는 업무 참조·판정 절이 없어 통합 MR(`develop` → `main` 등)은 실패한다. 건너뛰려면 같은
-  이름의 job을 로컬에 다시 적어 rules를 덮어쓴다.
+- **통합 MR은 건너뛴다.** `Release.md` 템플릿에는 업무 참조·판정 절이 없다. 소스 브랜치가 `harness.json`의
+  `integration_branch`, 대상이 `default_branch`이고(둘이 다를 때만) 같은 프로젝트의 MR이면(`CI_MERGE_REQUEST_SOURCE_PROJECT_ID`
+  = `CI_MERGE_REQUEST_PROJECT_ID`) 본문·변경 파일을 보지 않고 "건너뜀(통과)"으로 끝낸다(종료 0, 로그 한 줄,
+  `mr-lint.json`의 `"result": "skipped"`). fork에서 같은 이름의 브랜치로 올린 MR은 검사한다. 브랜치 값은 MR이 고친
+  `harness.json`이 아니라 대상 브랜치 최신 커밋(`CI_MERGE_REQUEST_TARGET_BRANCH_SHA`, merged results 파이프라인에서만 있고
+  없으면 diff 기준 커밋 `CI_MERGE_REQUEST_DIFF_BASE_SHA`)의 값으로 본다. 같은 MR에서 값을 바꿔 자기 검사를
+  끄지 못하게 하려는 것이고, 기준 커밋의 값을 읽지 못하면 건너뛰지 않는다. 판정 댓글은 남기지 않으므로 대상을 바꾸기 전에 달린
+  이전 판정 댓글은 그대로 남는다. rules를 로컬에서 덮어쓸 필요가 없다.
 
-  ```yaml
-  harness-mr-lint:
-    rules:
-      - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "develop" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
-        when: never
-      - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-  ```
-
-- 리포트: `mr-lint.json`(결과, 실패 항목, 본문·변경 파일·적용 판정과 불일치, 파일별 판정, 사람 확인 목록, 댓글 상태)을 30일 보관한다.
+- 리포트: `mr-lint.json`(결과 `pass`·`fail`·`error`·`skipped`, 실패 항목, 본문·변경 파일·적용 판정과 불일치, 파일별 판정, 사람 확인 목록, 댓글 상태)을 30일 보관한다.
   측정 수집기(M4-1)가 판정 불일치를 여기서 읽는다.
 
 ## Claude MR 리뷰
@@ -244,7 +247,9 @@ PR이 바꾼 검사 코드(`mr_lint.py`, `harness_common.py`)가 쓰기 토큰�
 `contents: read` 권한·토큰 없이 `--no-comment`로 검사하고(이 job의 종료 코드가 PR 체크다) `mr-lint.json`을 아티팩트로 올린다.
 `mr-lint-comment`는 `pull-requests: write` 권한으로 기준 커밋(`pull_request.base.sha`)을 checkout해 그 원본의
 `--post-report`로 아티팩트를 읽고, 결과·판정 값·불일치 여부·실패 항목(한 줄 300자, 30개까지, 줄바꿈·HTML·멘션·코드 울타리
-무력화)만 검증해 `GITHUB_TOKEN`으로 판정 댓글을 남긴다. 이 job은 실패하지 않는다. fork PR처럼 쓰기 권한이 없거나 기준 커밋에
+무력화)만 검증해 `GITHUB_TOKEN`으로 판정 댓글을 남긴다(결과가 `skipped`이면 남기지 않는다). 이 job은 실패하지 않는다.
+통합 PR 건너뜀은 `pull_request.head.ref`·`base.ref`와 `head.repo.full_name` = `base.repo.full_name`으로 판단한다(키트는
+`integration_branch`와 `default_branch`가 모두 `main`이라 건너뛰지 않는다). fork PR처럼 쓰기 권한이 없거나 기준 커밋에
 모듈이 없으면(이 job을 처음 들이는 PR) 경고만 낸다. `security` workflow와 `run_fragment.py`는 이 job과 관계없다.
 
 `ci.yml`의 `rehearsal` job은 `.github/scripts/rehearse.py`로 `init` 대상에 fixture를 만들어 조각 4종을 모두 실행한다.

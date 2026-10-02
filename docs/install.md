@@ -206,8 +206,9 @@ python bin/harness.py init ../my-project --force --platform github --tracker git
 - MR 본문 lint 조각(`mr-lint.yml`)은 MR 본문의 필수 절(업무 참조, 판정, 검증, 영향 범위, 엄격이면 플랜 요약·리뷰 결과)과
   `plans/` 규칙을 검사하고 실패하면 MR 파이프라인이 실패한다. `init`이 넣은 `.harness/mr-lint/mr_lint.py`,
   `.claude/hooks/harness_common.py`, `harness.json`을 커밋해 두어야 한다. GitLab 16.7 이상이 필요하고, 본문만 고치면
-  다시 돌지 않으므로 새 파이프라인을 실행한다. 판정 댓글은 선택(`HARNESS_COMMENT_TOKEN`)이다. 통합 MR(`Release.md`)은
-  업무 참조·판정 절이 없어 실패하므로 필요하면 rules를 덮어쓴다([`core/ci/README.md`](../core/ci/README.md) "MR 본문 lint")
+  다시 돌지 않으므로 새 파이프라인을 실행한다. 판정 댓글은 선택(`HARNESS_COMMENT_TOKEN`)이고, 같은 토큰이 있으면 2700자에서
+  잘린 본문을 API로 다시 읽는다(없으면 잘린 MR은 실패). 통합 MR(`integration_branch` → `default_branch`, 같은 프로젝트)은
+  건너뛴다(통과)([`core/ci/README.md`](../core/ci/README.md) "MR 본문 lint")
 
 ## 6. hooks 설정
 
