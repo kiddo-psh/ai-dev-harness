@@ -221,7 +221,7 @@ def main() -> int:
         project_id = positive_int(os.environ.get("CI_PROJECT_ID", ""), "INVALID_PROJECT_ID")
         iid = positive_int(os.environ.get("REVIEW_MR_IID", ""), "INVALID_MR_IID")
         expected_sha = os.environ.get("REVIEW_MR_SHA", "")
-        client = GitLabClient(os.environ.get("CI_API_V4_URL", ""), project_id, token,
+        client = GitLabClient(common.gitlab_api_base(os.environ, server), project_id, token,
                               target_branch=policy["target_branch"], limits=policy["limits"],
                               timeout=policy["timeouts"]["gitlab_seconds"])
         output_path = common.workdir_path(server, "input.json")

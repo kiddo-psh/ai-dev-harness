@@ -145,10 +145,15 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 `claude-review.yml`은 열린 MR 하나를 도구 없는 Claude Code CLI로 리뷰해 댓글 하나로 남긴다. 설치(서버 계정·네트워크
 가드·systemd·runner·Secret)는 [`docs/install.md`](../docs/install.md) 14절을 따른다.
 
-| job | 실행 조건 | 하는 일 |
+| 숨은 job (재사용 rules) | 실행 조건 | 하는 일 |
 | --- | --- | --- |
-| `harness-claude-auth-check` | 보호된 `HARNESS_REVIEW_BRANCH`의 push·web 파이프라인, 수동 | 고정 `OK` 요청 하나로 자격 증명 확인 |
-| `harness-claude-review` | 같은 브랜치의 web 파이프라인(수동) 또는 `CLAUDE_REVIEW_TRIGGER=comment`인 api 파이프라인 | 상태 댓글 → 수집 → 생성 → 게시, `after_script`에서 상태 갱신 |
+| `.harness-claude-auth-check` (`.harness-claude-auth-check-rules`) | 보호된 브랜치의 push·web 파이프라인, 수동 | 고정 `OK` 요청 하나로 자격 증명 확인 |
+| `.harness-claude-review` (`.harness-claude-review-rules`) | 보호된 브랜치의 web 파이프라인(수동) 또는 `CLAUDE_REVIEW_TRIGGER=comment`인 api 파이프라인 | 상태 댓글 → 수집 → 생성 → 게시, `after_script`에서 상태 갱신 |
+
+- **조각은 숨은 job만 준다.** 소비자가 로컬 `.gitlab-ci.yml`에서 `extends`로 `harness-claude-auth-check`·
+  `harness-claude-review`를 만들고 러너 태그·`environment.name`·대상 브랜치 규칙(`$CI_COMMIT_BRANCH != "<대상>"`이면
+  `when: never`)을 값으로 적은 뒤 재사용 rules를 `!reference`로 잇는다(`docs/install.md` 14.3). 파이프라인 변수가 CI
+  변수를 덮어쓸 수 있어 이 셋을 변수로 받지 않는다. job을 적지 않거나 rules 없이 `extends`만 하면 job은 돌지 않는다.
 
 - **MR 파이프라인에서는 돌지 않는다.** 스크립트도 대상 브랜치(`claude_review.target_branch`), 보호 ref, 환경 이름,
   파이프라인 출처를 다시 확인하고 debug trace가 켜져 있으면 거부한다. 판정 기준은 보호 브랜치 체크아웃의

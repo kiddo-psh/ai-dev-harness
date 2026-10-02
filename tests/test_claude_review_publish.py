@@ -148,7 +148,7 @@ class PublishReviewTests(unittest.TestCase):
             output = io.StringIO()
             with patch.dict(os.environ, environment, clear=True), \
                     patch.object(publisher.common, "load_policy", return_value=POLICY), \
-                    patch.object(publisher.common, "load_server_config", return_value={"workdir": directory}), \
+                    patch.object(publisher.common, "load_server_config", return_value={"workdir": directory, "gitlab_host": "gitlab.example"}), \
                     patch.object(publisher, "publish", return_value="PASS"), \
                     contextlib.redirect_stdout(output):
                 self.assertEqual(publisher.main(), 0)

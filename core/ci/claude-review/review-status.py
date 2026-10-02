@@ -252,7 +252,7 @@ def main(arguments: list[str] | None = None) -> int:
         pipeline_url = validate_pipeline_url(
             os.environ.get("CI_PROJECT_URL", ""),
             os.environ.get("CI_PIPELINE_URL", ""), pipeline_id)
-        client = GitLabClient(os.environ.get("CI_API_V4_URL", ""), project_id, token,
+        client = GitLabClient(common.gitlab_api_base(os.environ, server), project_id, token,
                               target_branch=policy["target_branch"],
                               timeout=policy["timeouts"]["gitlab_seconds"])
         result = publish(

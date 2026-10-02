@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import stat
+from urllib.parse import urlsplit
 
 # 도구 없는 실행. 도구·slash command·설정 파일·MCP·hook·세션 저장을 끈다. 테스트가 이 목록을 고정한다.
 CLI_ARGS = (
@@ -237,6 +238,26 @@ def load_server_config(path: Path) -> dict:
     except (UnicodeError, ValueError):
         raise ReviewError("INVALID_SERVER_CONFIG") from None
     return validate_server_config(config)
+
+
+def gitlab_api_base(env, server: dict) -> str:
+    """CI가 준 API 주소는 서버 설정(root 소유)의 gitlab_host와 같은 https 주소일 때만 쓴다.
+
+    `CI_API_V4_URL`은 파이프라인 변수로 덮어쓸 수 있다. 대조하지 않으면 리뷰를 시작할 수 있는 사람이 주소를
+    바꿔 `GITLAB_REVIEW_TOKEN`이 붙은 요청을 다른 HTTPS 서버로 보낼 수 있다(네트워크 가드는 공개 443을 허용한다).
+    """
+    raw = env.get("CI_API_V4_URL", "")
+    try:
+        parts = urlsplit(raw)
+        port = parts.port
+    except ValueError:
+        raise ReviewError("UNTRUSTED_GITLAB_API") from None
+    if (parts.scheme != "https" or parts.username is not None or parts.password is not None
+            or port not in (None, 443) or (parts.hostname or "") != server["gitlab_host"]
+            or parts.query or parts.fragment or not parts.path.rstrip("/").endswith("/api/v4")
+            or any(ord(char) < 33 for char in raw)):
+        raise ReviewError("UNTRUSTED_GITLAB_API")
+    return raw.rstrip("/")
 
 
 def trusted_context(env, policy: dict, allow_api_trigger: bool = True) -> bool:

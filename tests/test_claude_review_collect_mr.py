@@ -73,7 +73,7 @@ class Response:
 @contextlib.contextmanager
 def configured(workdir):
     with patch.object(collector.common, "load_policy", return_value=POLICY), \
-            patch.object(collector.common, "load_server_config", return_value={"workdir": str(workdir)}):
+            patch.object(collector.common, "load_server_config", return_value={"workdir": str(workdir), "gitlab_host": "gitlab.example"}):
         yield
 
 

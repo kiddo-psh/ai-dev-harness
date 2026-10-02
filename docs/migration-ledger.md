@@ -39,7 +39,7 @@
 | `infra/claude-review/{network-guard,sandbox-probe}.py` | `core/ci/claude-review/` | 테이블 이름·계정·홈·CLI 버전·GitLab 호스트·차단 IP를 서버 설정으로. 차단 IP는 두 개 이상에서 하나 이상으로, 기본값 없음 |
 | `infra/claude-review/test_*.py` 7개 (`test_comment_trigger.py` 제외) | `tests/test_claude_review_*.py` | 정책·서버 설정 주입, 프로젝트 경로·IP fixture 교체, 입력 파일 0600. 기대값 변경 3건(network-guard 거절 입력 "공개 IP 1개" → "사설 IP 1개", 프롬프트 문구 2건은 M2-5 원본 문구). 단언 수 유지 |
 | `infra/claude-review/feelm-claude-review-{guard,probe,runner}.service` | `core/ci/claude-review/examples/*.service.example` + `docs/install.md` 14절 | 이름·계정·경로를 `claude-review`로, 다른 Runner 설정 경로 제거. sandbox 지시어는 그대로 |
-| `.gitlab/ci/common.yml`의 `claude-auth-check`·`claude-mr-review` | `core/ci/gitlab/claude-review.yml` | 러너 태그·환경 이름·대상 브랜치를 `HARNESS_REVIEW_*` 변수로, job 이름에 `harness-` 접두사, stage `test` |
+| `.gitlab/ci/common.yml`의 `claude-auth-check`·`claude-mr-review` | `core/ci/gitlab/claude-review.yml` | 숨은 job(`.harness-claude-auth-check`·`.harness-claude-review`)과 재사용 rules만 제공하고 러너 태그·환경 이름·대상 브랜치는 소비자 job에 리터럴로(변수 덮어쓰기 차단), 소비자 job 이름 `harness-` 접두사, stage `test` |
 | `infra/claude-review/README.md` | `core/ci/README.md` "Claude MR 리뷰", `docs/install.md` 14절 | 운영 기록·서버 수치·IP·호스트 제거 |
 
 이관하지 않은 것: `comment-trigger.py`와 그 테스트, webhook 서비스(D-33, 댓글 트리거는 범위 밖).

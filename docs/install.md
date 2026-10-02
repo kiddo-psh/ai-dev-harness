@@ -349,9 +349,11 @@ CI는 보호된 대상 브랜치에 커밋된 이 사본만 실행한다. 블록
 
 1. 추가 그룹 없는 전용 계정을 만들고(예: `claude-review`) 그 홈에 Claude Code CLI를 설치한다. 기존 Runner와
    계정·설정·서비스를 나눈다.
-2. 서버 설정 `/etc/<review_name>/config.json`을 `config.json.example`에서 만든다. 파일과 상위 디렉터리는 root 소유이고
-   그룹·기타 사용자 쓰기 권한이 없어야 한다(0644). 리뷰 스크립트와 network-guard가 같은 파일을 읽으며, 소유자·권한이
-   다르거나 키가 빠지거나 남으면 토큰을 읽기 전에 실패한다.
+2. 서버 설정 `/etc/<review_name>/config.json`을 `config.json.example`에서 만든다. 파일은 `root:<리뷰 계정 그룹>`
+   소유 0640(예: `install -o root -g claude-review -m 0640`), 상위 디렉터리는 root 소유이고 그룹·기타 사용자 쓰기
+   권한이 없어야 한다. 리뷰 계정은 기본 그룹으로 이 파일을 읽고, network-guard는 root로 읽는다. 소유자가 root가
+   아니거나 그룹·기타 쓰기 권한이 있거나 키가 빠지거나 남으면 토큰을 읽기 전에 실패한다. 이 파일에는 토큰·API 키
+   같은 비밀값을 절대 넣지 않는다(Secret은 GitLab 변수로만 받는다).
 
    | 키 | 설명 |
    | --- | --- |
@@ -360,7 +362,7 @@ CI는 보호된 대상 브랜치에 커밋된 이 사본만 실행한다. 블록
    | `workdir` | MR 입력·리뷰·상태 파일을 0600으로 두는 디렉터리. runner 서비스는 `PrivateTmp`라 `/tmp/<이름>`이면 된다 |
    | `account`·`uid`·`home` | 리뷰 계정 이름, UID(0 불가), 홈 |
    | `nft_table` | network-guard가 만드는 nftables 테이블 이름 |
-   | `deny_ips` | **필수 입력.** 같은 망의 운영·배포 서버 공개 IPv4 전부. 기본값이 없고 비어 있으면 가드가 실패한다 |
+   | `deny_ips` | **필수 입력.** 같은 망의 운영·배포 서버 공개 IPv4 전부. 기본값이 없고 비어 있으면 가드가 실패한다. NAT 뒤에 있으면 이 서버 자신의 공개 IP도 넣는다 |
    | `dns_ips` | **필수 입력.** 서버가 쓰는 DNS IPv4(예: `resolvectl status`로 확인) |
    | `gitlab_host` | GitLab 호스트 이름. sandbox 검사의 TLS 확인 대상 |
 
@@ -382,27 +384,53 @@ CI는 보호된 대상 브랜치에 커밋된 이 사본만 실행한다. 블록
 
 ### 14.3 GitLab 설정
 
-1. 조각을 넣고 변수를 준다.
+1. 조각을 넣고, 로컬 `.gitlab-ci.yml`에 두 job을 직접 만든다. 조각에는 숨은 job(`.harness-claude-auth-check`·
+   `.harness-claude-review`)과 재사용 rules(`.harness-claude-auth-check-rules`·`.harness-claude-review-rules`)만 있어서
+   아래 job을 적지 않으면 리뷰 job이 생기지 않는다. 러너 태그(`<리뷰 runner 태그>`), `environment.name`
+   (`claude_review.environment`와 같게), 대상 브랜치(`claude_review.target_branch`와 같게, 예: `develop`)는 변수 없이
+   값으로 적는다.
 
    ```yaml
    include:
      - remote: https://raw.githubusercontent.com/kiddo-psh/ai-dev-harness/<full-commit-sha>/core/ci/gitlab/claude-review.yml
 
-   variables:
-     HARNESS_REVIEW_RUNNER_TAG: <리뷰 runner 태그>
-     HARNESS_REVIEW_ENVIRONMENT: claude-review   # claude_review.environment
-     HARNESS_REVIEW_BRANCH: develop               # claude_review.target_branch
+   harness-claude-auth-check:
+     extends: .harness-claude-auth-check
+     tags: [claude-review]
+     environment:
+       name: claude-review
+       action: prepare
+     rules:
+       - if: '$CI_COMMIT_BRANCH != "develop"'
+         when: never
+       - !reference [.harness-claude-auth-check-rules, rules]
+
+   harness-claude-review:
+     extends: .harness-claude-review
+     tags: [claude-review]
+     environment:
+       name: claude-review
+       action: prepare
+     rules:
+       - if: '$CI_COMMIT_BRANCH != "develop"'
+         when: never
+       - !reference [.harness-claude-review-rules, rules]
    ```
 
+   값을 변수로 받지 않는 이유: 리뷰를 시작하려면 파이프라인 변수(`REVIEW_MR_*`)를 넣어야 하고, 파이프라인 변수는
+   `.gitlab-ci.yml`의 변수를 덮어쓴다. 태그·환경·브랜치를 변수로 두면 리뷰를 시작할 수 있는 사람이 리뷰 Secret을
+   다른 runner, 다른 환경 범위나 덜 보호된 브랜치로 보낼 수 있다. 첫 규칙을 빼면 모든 보호 브랜치에서 job이 나타나므로
+   반드시 둔다. 재사용 rules는 브랜치 파이프라인(`$CI_COMMIT_BRANCH`가 있음)·보호 ref·파이프라인 출처만 보며
+   MR·태그 파이프라인에서는 맞지 않는다. `rules` 없이 `extends`만 하면 숨은 job의 `when: never`가 남아 돌지 않는다.
+   스크립트도 실행 시점에 대상 브랜치·보호 ref·환경 이름·출처를 `harness.json`과 다시 대조한다.
+
 2. Secret을 등록한다([Secret 규칙](secret-environment-variables.md) 7장). 모두 Protected, Masked and hidden,
-   Expand variable 끔, 환경 범위는 `HARNESS_REVIEW_ENVIRONMENT`다.
+   Expand variable 끔, 환경 범위는 위 `environment.name`이다.
    - `credential`이 고른 하나: `ANTHROPIC_API_KEY`(기본) 또는 `CLAUDE_CODE_OAUTH_TOKEN`. 다른 하나는 등록하지 않는다.
      팀 CI에 개인 구독(OAuth)을 쓰는 것은 정책 문제가 될 수 있어 키트 기본은 API 키다
    - `GITLAB_REVIEW_TOKEN`: MR 읽기와 댓글 작성만 하는 전용 토큰(Project Access Token. 댓글 작성에 `api` scope가 필요하다. 역할은 MR 댓글을 쓸 수 있는 최소 역할)
 3. 대상 브랜치를 보호하고, 그 브랜치에 push·merge할 수 있는 사람만 리뷰 파이프라인을 만들 수 있게 한다.
-   `HARNESS_REVIEW_*` 변수와 `REVIEW_MR_*` 입력은 파이프라인 변수로 넣을 수 있다. runner 태그나 환경을 바꿔
-   리뷰 Secret을 다른 runner로 보내지 못하게 하려면 프로젝트의 파이프라인 변수 사용 최소 역할을 올리거나,
-   로컬 `.gitlab-ci.yml`에서 두 job의 `tags`·`environment`를 값으로 직접 적어 덮어쓴다.
+   `.gitlab-ci.yml`의 리뷰 job은 보호 브랜치 변경으로만 바뀌게 한다.
 
 ### 14.4 확인
 
@@ -413,5 +441,5 @@ CI는 보호된 대상 브랜치에 커밋된 이 사본만 실행한다. 블록
    모델명과 토큰 수만 남는다.
 3. 같은 SHA로 다시 실행하면 `DUPLICATE_REVIEW_SKIPPED`, 실행 중 새 커밋을 올리면 `STALE_REVIEW_REMOVED`인지 본다.
 
-끄려면 `include`를 빼고 `harness.json`의 `claude_review`를 지운 뒤 `.harness/claude-review/`를 지운다. 서버에서는
+끄려면 로컬의 두 리뷰 job과 `include`를 빼고 `harness.json`의 `claude_review`를 지운 뒤 `.harness/claude-review/`를 지운다. 서버에서는
 `enable-runner`를 지우고 runner 서비스를 멈춘다. 네트워크 가드는 서비스를 멈춰도 규칙을 지우지 않는다.

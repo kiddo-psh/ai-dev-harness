@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
@@ -547,6 +548,42 @@ class InitCheckTest(unittest.TestCase):
 class ReviewFindingTest(unittest.TestCase):
     """분리 리뷰 A·B(plans/32-review.md) 반영 회귀."""
 
+    def test_gitlab_api_origin_must_match_server_config(self):
+        # Codex P1(PR #33): CI_API_V4_URL을 바꿔 GITLAB_REVIEW_TOKEN을 다른 서버로 보내는 경로
+        server = dict(SERVER)
+        ok = "https://gitlab.example.com/api/v4"
+        self.assertEqual(common.gitlab_api_base({"CI_API_V4_URL": ok + "/"}, server), ok)
+        self.assertEqual(common.gitlab_api_base({"CI_API_V4_URL": "https://gitlab.example.com:443/sub/api/v4"},
+                                                server), "https://gitlab.example.com:443/sub/api/v4")
+        for url in ("", "http://gitlab.example.com/api/v4", "https://evil.example/api/v4",
+                    "https://gitlab.example.com.evil.example/api/v4", "https://gitlab.example.com@evil.example/api/v4",
+                    "https://user:pw@gitlab.example.com/api/v4", "https://gitlab.example.com:8443/api/v4",
+                    "https://gitlab.example.com/api/v4?x=1", "https://gitlab.example.com/other",
+                    "https://gitlab.example.com:bad/api/v4", "https://gitlab.example.com/api/v4 "):
+            with self.subTest(url=url), self.assertRaises(common.ReviewError) as raised:
+                common.gitlab_api_base({"CI_API_V4_URL": url}, server)
+            self.assertEqual(raised.exception.code, "UNTRUSTED_GITLAB_API")
+
+    def test_scripts_refuse_foreign_api_before_request(self):
+        env = {**TRUSTED_ENV, "CI_API_V4_URL": "https://evil.example/api/v4"}
+        # publish는 입력 파일 검사 뒤에 클라이언트를 만든다. 그 앞 단계는 대체해 주소 검사까지 가게 한다
+        publish_steps = [patch.object(publisher, "load_private_json", return_value={"files": []}),
+                         patch.object(publisher, "validate_files"),
+                         patch.object(publisher, "format_comment", return_value="body")]
+        for module, extra in ((collector, []), (publisher, publish_steps), (status, [])):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as directory, \
+                    contextlib.ExitStack() as stack, patch.dict(os.environ, env, clear=True), \
+                    patch.object(module.common, "load_policy", return_value=POLICY), \
+                    patch.object(module.common, "load_server_config",
+                                 return_value={**SERVER, "workdir": directory}), \
+                    patch.object(module, "urlopen", side_effect=AssertionError("요청하면 안 된다")), \
+                    redirect_stdout(io.StringIO()) as out:
+                for step in extra:
+                    stack.enter_context(step)
+                code = module.main(["running"]) if module is status else module.main()
+                self.assertNotEqual(code, 0)
+            self.assertIn("UNTRUSTED_GITLAB_API", out.getvalue())
+
     def test_timeouts_cannot_be_raised(self):
         # A-F2: 원본 값이 조각의 job 제한 안에 드는 최악의 경우다. 올리면 게시 도중 job이 끊길 수 있다
         for key, value in common.DEFAULT_TIMEOUTS.items():
@@ -604,18 +641,19 @@ class ReviewFindingTest(unittest.TestCase):
             spec.loader.exec_module(module)
             self.assertFalse(hasattr(module.common, "FORGED"))
 
-    def _fake_stat(self, mode, uid):
-        return os.stat_result((mode, 0, 0, 1, uid, 0, 10, 0, 0, 0))
+    def _fake_stat(self, mode, uid, gid=0):
+        return os.stat_result((mode, 0, 0, 1, uid, gid, 10, 0, 0, 0))
 
     def test_server_config_file_owner_and_mode(self):
         # A-F1: 파일 단위 root 소유·그룹/기타 쓰기 금지 검사가 실제로 거절한다
         import stat as st
         cases = [(st.S_IFREG | 0o644, 0, True), (st.S_IFREG | 0o640, 0, True),
+                 (st.S_IFREG | 0o640, 0, True, 1001),  # 설치 문서의 0640 root:<리뷰 그룹>(그룹은 보지 않는다)
                  (st.S_IFREG | 0o664, 0, False), (st.S_IFREG | 0o646, 0, False),
                  (st.S_IFREG | 0o644, 1000, False), (st.S_IFDIR | 0o755, 0, False)]
-        for mode, uid, ok in cases:
-            with self.subTest(mode=oct(mode), uid=uid), patch.object(common.os, "name", "posix"), \
-                    patch.object(Path, "lstat", return_value=self._fake_stat(mode, uid)):
+        for mode, uid, ok, *gid in cases:
+            with self.subTest(mode=oct(mode), uid=uid, gid=gid), patch.object(common.os, "name", "posix"), \
+                    patch.object(Path, "lstat", return_value=self._fake_stat(mode, uid, *gid)):
                 if ok:
                     common._require_root_owned(Path("/etc/review/config.json"), regular=True)
                 else:
@@ -649,8 +687,10 @@ class ReviewFindingTest(unittest.TestCase):
             return lstat
 
         good = self._fake_stat(st.S_IFREG | 0o644, 0)
-        with patch.object(Path, "lstat", autospec=True, side_effect=fake(good)):
-            guard.trusted_file("/etc/review/config.json")
+        for accepted in (good, self._fake_stat(st.S_IFREG | 0o640, 0, 1001)):  # 0640 root:<리뷰 그룹>
+            with self.subTest(accepted=oct(accepted.st_mode)), \
+                    patch.object(Path, "lstat", autospec=True, side_effect=fake(accepted)):
+                guard.trusted_file("/etc/review/config.json")
         for file_stat, parent in ((self._fake_stat(st.S_IFREG | 0o664, 0), root_dir),
                                   (self._fake_stat(st.S_IFREG | 0o644, 1000), root_dir),
                                   (good, self._fake_stat(st.S_IFDIR | 0o777, 0)),
@@ -712,33 +752,99 @@ class ServerExampleTest(unittest.TestCase):
 
 
 class FragmentTest(unittest.TestCase):
-    """GitLab 조각: 보호 대상 브랜치 파이프라인 전용(MR 파이프라인 없음), 원본 job 흐름 유지."""
+    """GitLab 조각: 숨은 job과 재사용 rules만(러너·환경·브랜치는 소비자가 리터럴로), MR 파이프라인 없음, 원본 흐름 유지."""
 
-    def test_rules_and_flow(self):
+    REUSABLE = (".harness-claude-auth-check-rules", ".harness-claude-review-rules")
+    JOBS = (".harness-claude-auth-check", ".harness-claude-review")
+
+    def _blocks(self, text):
+        """최상위 키별 본문(주석·빈 줄 제외). PyYAML 없이 들여쓰기로 나눈다."""
+        blocks, current = {}, None
+        for line in text.splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if not line.startswith(" "):
+                self.assertTrue(line.endswith(":"), line)
+                current = line[:-1]
+                blocks[current] = []
+            else:
+                blocks[current].append(line)
+        return {key: "\n".join(lines) + "\n" for key, lines in blocks.items()}
+
+    def test_hidden_jobs_only(self):
         text = FRAGMENT.read_text(encoding="utf-8")
         self.assertIn("<full-commit-sha>/core/ci/gitlab/claude-review.yml", text)
+        blocks = self._blocks(text)
+        self.assertEqual(sorted(blocks), sorted(self.REUSABLE + self.JOBS))  # 숨지 않은 job 없음
+        body = "".join(blocks.values())
+        self.assertNotIn("HARNESS_" + "REVIEW_", text)  # 덮어쓸 수 있는 리뷰 변수 없음(문자열을 나눠 저장소 grep 0건 유지)
         self.assertNotIn("merge_request_event", text)
-        body = text[text.index("\nharness-claude-auth-check:"):]
-        rules = re.findall(r"- if: '(.+)'", body)
-        self.assertEqual(len(rules), 3)
-        for rule in rules:
-            for needle in ('$CI_COMMIT_REF_PROTECTED == "true"', "$CI_COMMIT_BRANCH == $HARNESS_REVIEW_BRANCH",
-                           "$HARNESS_REVIEW_RUNNER_TAG && $HARNESS_REVIEW_ENVIRONMENT"):
-                self.assertIn(needle, rule)
-        self.assertIn('$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web"', rules[0])
-        self.assertIn('$CI_PIPELINE_SOURCE == "api" && $CLAUDE_REVIEW_TRIGGER == "comment"', rules[1])
-        self.assertTrue(rules[2].endswith('$CI_PIPELINE_SOURCE == "web"'))
-        self.assertEqual(body.count("allow_failure: true"), 3)
-        self.assertEqual(body.count("- $HARNESS_REVIEW_RUNNER_TAG"), 2)
-        self.assertEqual(body.count("name: $HARNESS_REVIEW_ENVIRONMENT"), 2)
+        self.assertIsNone(re.search(r"^\s*(tags|environment|extends|include)\s*:", body, re.M))
+        self.assertNotIn("tags:", body)
+        self.assertNotIn("environment:", body)
+        for job in self.JOBS:  # rules 없이 extends만 하면 돌지 않는다
+            self.assertTrue(blocks[job].endswith("  rules:\n    - when: never\n"), job)
+        for key in self.REUSABLE:  # 재사용 키에는 rules만
+            self.assertEqual(re.findall(r"^  (\w+):", blocks[key], re.M), ["rules"])
+
+    def test_reusable_rules(self):
+        blocks = self._blocks(FRAGMENT.read_text(encoding="utf-8"))
+        auth = re.findall(r"- if: '(.+)'", blocks[self.REUSABLE[0]])
+        review = re.findall(r"- if: '(.+)'", blocks[self.REUSABLE[1]])
+        self.assertEqual((len(auth), len(review)), (1, 2))
+        for rule in auth + review:
+            # 브랜치 파이프라인만(태그·MR 파이프라인에는 $CI_COMMIT_BRANCH가 없다)·보호 ref, 브랜치 비교는 소비자 몫
+            self.assertTrue(rule.startswith('$CI_COMMIT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && '), rule)
+            self.assertNotRegex(rule, r"\$CI_COMMIT_BRANCH\s*(==|!=|=~|!~)")
+            self.assertNotIn("$CI_COMMIT_TAG", rule)
+            sources = set(re.findall(r'\$CI_PIPELINE_SOURCE == "(\w+)"', rule))
+            self.assertTrue(sources and sources <= {"push", "web", "api"}, rule)
+        self.assertTrue(auth[0].endswith('($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'))
+        self.assertTrue(review[0].endswith('$CI_PIPELINE_SOURCE == "api" && $CLAUDE_REVIEW_TRIGGER == "comment"'))
+        self.assertTrue(review[1].endswith('$CI_PIPELINE_SOURCE == "web"'))
+        self.assertEqual(re.findall(r"when: (\w+)", blocks[self.REUSABLE[0]]), ["manual"])
+        self.assertEqual(re.findall(r"when: (\w+)", blocks[self.REUSABLE[1]]), ["on_success", "manual"])
+        for key in self.REUSABLE:
+            self.assertEqual(blocks[key].count("allow_failure: true"), blocks[key].count("- if:"))
+
+    def test_flow(self):
+        blocks = self._blocks(FRAGMENT.read_text(encoding="utf-8"))
+        body = blocks[self.JOBS[0]] + blocks[self.JOBS[1]]
         scripts = re.findall(r"/usr/bin/python3 -I -B (\.harness/claude-review/[\w-]+\.py)", body)
         self.assertEqual([Path(s).name for s in scripts],
                          ["auth-check.py", "review-status.py", "collect-mr.py", "generate-review.py",
                           "publish-review.py", "review-status.py"])
+        self.assertIn('review-status.py "$CI_JOB_STATUS"', blocks[self.JOBS[1]].split("after_script:")[1])
+        self.assertEqual(body.count("resource_group: harness-claude-review"), 2)
         dests = {entry["dest"] for entry in harness.load_manifest()}
         for script in scripts:
             self.assertIn(script, dests)
-        self.assertNotIn("CI_DEBUG_TRACE: ", body)
+        self.assertNotIn("CI_DEBUG_TRACE", body)
+
+    def test_consumer_examples(self):
+        # 조각 머리말과 설치 문서 14.3의 소비자 예시: 리터럴 태그·환경·브랜치, 브랜치 never 규칙이 재사용 rules보다 먼저
+        install = (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
+        section = install[install.index("### 14.3 GitLab 설정"):install.index("### 14.4")]
+        snippet = textwrap.dedent(re.search(r"```yaml\n(.+?)```", section, re.S).group(1))
+        lines = FRAGMENT.read_text(encoding="utf-8").splitlines()
+        start = next(i for i, line in enumerate(lines) if line.startswith("#   include:"))
+        end = next(i for i in range(start, len(lines)) if not lines[i].startswith("#  ") and lines[i] != "#")
+        header = "\n".join(line[4:] for line in lines[start:end]) + "\n"
+        for name, example in (("install.md", snippet), ("fragment header", header)):
+            with self.subTest(example=name):
+                self.assertNotIn("$HARNESS_", example)
+                self.assertNotIn("\t", example)
+                self.assertIn("/<full-commit-sha>/core/ci/gitlab/claude-review.yml", example)
+                tops = re.findall(r"^(\S[^:]*):", example, re.M)
+                self.assertEqual(tops, ["include", "harness-claude-auth-check", "harness-claude-review"])
+                for job in ("harness-claude-auth-check", "harness-claude-review"):
+                    block = re.search(rf"^{job}:\n((?:[ ].*\n|\n)+?)(?=^\S|\Z)", example, re.M).group(1)
+                    self.assertIn(f"  extends: .{job}\n", block)
+                    self.assertRegex(block, r"(?m)^  tags: \[[\w-]+\]")
+                    self.assertRegex(block, r"(?m)^  environment:\n    name: [\w-]+(\s+#.*)?\n    action: prepare")
+                    never = block.index("""    - if: '$CI_COMMIT_BRANCH != "develop"'""")
+                    self.assertIn("when: never", block[never:block.index("!reference")])
+                    self.assertLess(never, block.index(f"    - !reference [.{job}-rules, rules]"))
 
 
 if __name__ == "__main__":

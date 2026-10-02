@@ -327,7 +327,7 @@ def main() -> int:
         validate_files(payload, review, iid, sha, policy["target_branch"])
         marker_name = policy["comment_marker"]
         body = format_comment(review, project_id, iid, sha, len(payload["files"]), marker_name)
-        client = GitLabClient(os.environ.get("CI_API_V4_URL", ""), project_id, token,
+        client = GitLabClient(common.gitlab_api_base(os.environ, server), project_id, token,
                               target_branch=policy["target_branch"],
                               timeout=policy["timeouts"]["gitlab_seconds"])
         result = publish(client, iid, sha, body, marker_name)
