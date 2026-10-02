@@ -67,6 +67,20 @@ def content_lines(body: str) -> list[str]:
     return strip_comments(body.replace("\r\n", "\n").replace("\r", "\n")).split("\n")
 
 
+def unfenced(lines: list[str]) -> list[str]:
+    """코드 블록 안 줄을 빈 줄로 바꾼다. 예시로 적은 `Closes`·체크 상자가 검사를 통과시키지 않게 한다."""
+    out, fence = [], None
+    for line in lines:
+        mark = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if mark:
+            token = mark.group(1)[0]
+            fence = None if fence == token else (token if fence is None else fence)
+            out.append("")
+            continue
+        out.append("" if fence is not None else line)
+    return out
+
+
 def split_sections(lines: list[str]) -> dict[str, list[str]]:
     """`## 제목` 단위 줄 목록. 코드 블록 안의 `##`는 제목으로 보지 않는다. 같은 제목이 또 나오면 이어 붙인다."""
     sections: dict[str, list[str]] = {}
@@ -95,8 +109,13 @@ def bullet_text(line: str) -> str:
     return text.strip().strip("*_`").strip()
 
 
+NOT_APPLICABLE_WORDS = ("해당없음", "없음", "n/a", "na", "none", "-")
+
+
 def is_not_applicable(line: str) -> bool:
-    return bullet_text(line).rstrip(".。").strip() == NOT_APPLICABLE
+    """'해당 없음'과 그 변형(`해당없음`, `해당 없음 (표준이라)`, `N/A`, `-`)."""
+    text = re.sub(r"\s+", "", bullet_text(line)).rstrip(".。").lower()
+    return text.startswith("해당없음") or text in NOT_APPLICABLE_WORDS or not re.search(r"[0-9A-Za-z가-힣]", text)
 
 
 def parse_tier(lines: list[str]) -> str | None:
@@ -110,8 +129,26 @@ def parse_tier(lines: list[str]) -> str | None:
     return None
 
 
-def has_reference(lines: list[str]) -> bool:
-    return any(re.match(r"^\s*(?:[-*+]\s+)?(?:closes|refs)\b[:\s]+\S", line, re.I) for line in lines)
+def has_reference(lines: list[str], examples: tuple[str, ...] = ()) -> bool:
+    """`Closes`/`Refs` 줄에 실제 업무 참조가 있는가. 템플릿 예시 키나 '없음'은 참조로 보지 않는다."""
+    blocked = {e.lower() for e in examples} | {w.lower() for w in NOT_APPLICABLE_WORDS} | {"해당"}
+    for line in lines:
+        match = re.match(r"^\s*(?:[-*+]\s+)?(?:closes|refs)\b[:\s]+(.+)$", line, re.I)
+        if not match:
+            continue
+        tokens = [tok.strip(".,;`*_()") for tok in re.split(r"[\s,]+", match.group(1)) if tok.strip(".,;`*_()")]
+        if any(tok.lower() not in blocked for tok in tokens):
+            return True
+    return False
+
+
+def example_references(config: dict | None) -> tuple[str, ...]:
+    """MR 템플릿 `Closes` 줄의 예시 업무 키(자리표시자 issue_key_example, bin/harness.py build_context와 같은 규칙)."""
+    if not config:
+        return ()
+    if config.get("tracker") == "jira":
+        return (f"{config.get('issue_prefix', '')}-52",)
+    return ("#52",)
 
 
 def verify_values(lines: list[str]) -> dict[str, str | None]:
@@ -154,13 +191,13 @@ def table_rows(lines: list[str]) -> list[list[str]]:
     return rows
 
 
-def lint_body(body: str, judged: str | None) -> dict:
-    """본문 검사 결과. judged는 CI가 다시 낸 판정(없으면 본문만)."""
-    lines = content_lines(body)
+def lint_body(body: str, judged: str | None, examples: tuple[str, ...] = ()) -> dict:
+    """본문 검사 결과. judged는 CI가 다시 낸 판정(없으면 본문만), examples는 템플릿 예시 업무 키."""
+    lines = unfenced(content_lines(body))
     sections = split_sections(lines)
     failures: list[str] = []
 
-    if not has_reference(lines):
+    if not has_reference(lines, examples):
         failures.append("`Closes` 또는 `Refs` 업무 참조 줄이 없다.")
 
     if "검증" not in sections:
@@ -206,11 +243,12 @@ def strict_failures(sections: dict[str, list[str]]) -> list[str]:
         if title not in sections:
             failures.append(f"엄격 판정인데 `## {title}` 절이 없다.")
             continue
-        lines = meaningful(sections[title])
-        if not lines:
-            failures.append(f"엄격 판정인데 `## {title}`가 비어 있다.")
-        elif any(is_not_applicable(line) for line in lines):
+        # 표(측정 칸)는 내용으로 치지 않는다. 표 밖에 실제 요약이 있어야 한다
+        lines = [line for line in meaningful(sections[title]) if not line.startswith("|")]
+        if any(is_not_applicable(line) for line in lines):
             failures.append(f"엄격 판정인데 `## {title}`가 '{NOT_APPLICABLE}'이다.")
+        elif not lines:
+            failures.append(f"엄격 판정인데 `## {title}`가 비어 있다.")
     if "리뷰 결과" in sections:
         rows = table_rows(sections["리뷰 결과"])
         labels = [row[0] for row in rows if row]
@@ -477,7 +515,12 @@ def run(args, env: dict) -> tuple[int, dict]:
     gitignore_path = project / ".gitignore"
     gitignore = gitignore_path.read_text(encoding="utf-8", errors="replace") if gitignore_path.is_file() else None
 
-    result = lint_body(body, judged["tier"])
+    config_path = project / "harness.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.is_file() else None
+    except (OSError, ValueError) as exc:
+        raise LintError(f"harness.json을 읽을 수 없다: {exc}") from exc
+    result = lint_body(body, judged["tier"], example_references(config))
     failures = plans_failures(changes, gitignore) + result["failures"]
     report = {
         "result": "fail" if failures else "pass",

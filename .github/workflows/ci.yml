@@ -67,6 +67,10 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # 같은 PR의 synchronize·edited 실행이 겹치면 판정 댓글이 두 개 생기지 않게 앞 실행을 취소한다
+    concurrency:
+      group: mr-lint-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     permissions:
       contents: read
       pull-requests: write

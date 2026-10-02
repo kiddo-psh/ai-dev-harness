@@ -38,6 +38,8 @@ def template(platform="gitlab"):
 def filled(tier="standard", strict_parts=False):
     """새 템플릿을 채운 본문. strict_parts면 플랜 요약·리뷰 결과와 측정 칸도 채운다."""
     body = template()
+    # 템플릿의 예시 업무 키(#52, DEMO-52)는 참조로 인정하지 않으므로 실제 키로 바꾼다
+    body = body.replace("Closes #52", "Closes #7").replace("Closes DEMO-52", "Closes DEMO-7")
     body = body.replace("## 판정\n", "## 판정\n").replace(
         "-->\n\n-\n\n## 배경과 목적", f"-->\n\n- {tier} — 근거 한 줄\n\n## 배경과 목적")
     body = body.replace("- 방법:", "- 방법: unittest").replace("- 결과:", "- 결과: 통과").replace(
@@ -71,14 +73,46 @@ class BodyLintTest(unittest.TestCase):
 
     def test_closes_or_refs_required(self):
         """T3"""
-        body = filled().replace("- Closes DEMO-52", "-")
+        body = filled().replace("- Closes DEMO-7", "-")
         self.assertIn("`Closes` 또는 `Refs`", " ".join(lint.lint_body(body, None)["failures"]))
-        hidden = filled().replace("- Closes DEMO-52", "<!-- Closes DEMO-52 -->")
+        hidden = filled().replace("- Closes DEMO-7", "<!-- Closes DEMO-7 -->")
         self.assertIn("`Closes` 또는 `Refs`", " ".join(lint.lint_body(hidden, None)["failures"]))
-        empty = filled().replace("- Closes DEMO-52", "- Closes")
+        empty = filled().replace("- Closes DEMO-7", "- Closes")
         self.assertIn("`Closes` 또는 `Refs`", " ".join(lint.lint_body(empty, None)["failures"]))
-        refs = filled().replace("- Closes DEMO-52", "- refs DEMO-1")
+        refs = filled().replace("- Closes DEMO-7", "- refs DEMO-1")
         self.assertEqual(lint.lint_body(refs, None)["failures"], [])
+
+    def test_example_or_empty_reference_rejected(self):
+        """리뷰 F1·F3: 템플릿 예시 키, '없음', 코드 블록 안의 참조는 참조로 보지 않는다."""
+        examples = lint.example_references({"tracker": "jira", "issue_prefix": "DEMO"})
+        self.assertEqual(examples, ("DEMO-52",))
+        self.assertEqual(lint.example_references({"tracker": "github"}), ("#52",))
+        for line in ("- Closes DEMO-52", "- Closes 없음", "- Refs 해당 없음", "- Closes N/A"):
+            with self.subTest(line=line):
+                body = filled().replace("- Closes DEMO-7", line)
+                self.assertIn("`Closes` 또는 `Refs`", " ".join(lint.lint_body(body, None, examples)["failures"]))
+        fenced = filled().replace("- Closes DEMO-7", "```\nCloses DEMO-9\n```")
+        self.assertIn("`Closes` 또는 `Refs`", " ".join(lint.lint_body(fenced, None, examples)["failures"]))
+        self.assertEqual(lint.lint_body(filled().replace("- Closes DEMO-7", "- Closes DEMO-52, DEMO-8"),
+                                        None, examples)["failures"], [])
+
+    def test_fenced_checkbox_not_counted(self):
+        """리뷰 F3: 코드 블록 안의 체크 상자는 영향 범위 체크로 보지 않는다."""
+        body = filled().replace("- [x] 해당 없음", "- [ ] 해당 없음\n```\n- [x] 해당 없음\n```")
+        self.assertIn("영향 범위", " ".join(lint.lint_body(body, None)["failures"]))
+
+    def test_strict_not_applicable_variants(self):
+        """리뷰 F2: 엄격으로 올라갔는데 '해당 없음' 변형이나 측정 표만 있으면 실패한다."""
+        base = filled("standard", strict_parts=True)
+        summary = "- 설계 결정 두 개, 인수 테스트 T1~T5"
+        for variant in ("해당 없음 (표준이라)", "해당없음", "N/A", "-"):
+            with self.subTest(variant=variant):
+                failures = lint.lint_body(base.replace(summary, variant), "strict")["failures"]
+                self.assertTrue(any("플랜 요약" in f for f in failures), failures)
+        review_line = "- W2 리뷰 A·B, 발견 2건 모두 반영"
+        failures = lint.lint_body(base.replace(review_line, ""), "strict")["failures"]
+        self.assertTrue(any("리뷰 결과" in f and "비어" in f for f in failures), failures)
+        self.assertEqual(lint.lint_body(base, "strict")["failures"], [])
 
     def test_verification_lines(self):
         """T4"""
@@ -476,6 +510,9 @@ class WorkflowTest(unittest.TestCase):
             "    if: github.event_name == 'pull_request'",
             "    runs-on: ubuntu-latest",
             "    timeout-minutes: 5",
+            "    concurrency:",
+            "      group: mr-lint-${{ github.event.pull_request.number }}",
+            "      cancel-in-progress: true",
             "    permissions:",
             "      contents: read",
             "      pull-requests: write",
