@@ -114,9 +114,11 @@ git diff --name-only origin/main | python bin/harness.py judge ../my-project --f
 - 변경 파일은 merge-base 이후 커밋, 커밋하지 않은 수정, 추적 안 된 파일이다. 이름을 바꾼 파일은 옛 경로와 새 경로를 모두 본다
 - 파일마다 `trigger_paths.strict` → `trigger_paths.standard` → 문서(`*.md`, 루트 `docs/`) → `test_paths` 순으로 맞춰
   보고, 어디에도 안 맞으면 표준이다. 전체 판정은 가장 높은 값이다. 문서·테스트만 바뀌었으면 경량이다
-- 패턴은 gitignore 방식이고 영역 디렉터리 기준이다(`/src/auth/`는 `<영역>/src/auth/` 아래). 영역 밖 파일과
-  `trigger_paths`가 없는 영역에는 공통 기본(lock 파일·CI 정의·DB 마이그레이션 → 엄격)을 쓴다
-- 영역의 `triggers` 문장(계약 불일치, 인가 등)은 경로로 판정할 수 없어 "사람 확인 필요"로만 출력한다
+- 패턴은 gitignore 방식이고 영역 디렉터리 기준이다(`/src/auth/`는 `<영역>/src/auth/` 아래). 영역 밖 파일은
+  최상위 `judge`의 `trigger_paths`·`test_paths`(저장소 루트 기준)를 쓴다. `judge`나 영역의 `trigger_paths`가 없으면
+  공통 기본(lock 파일·CI 정의·DB 마이그레이션 → 엄격)을 쓴다. 지정하면 기본을 대체한다
+- 영역의 `triggers`와 최상위 `judge.triggers` 문장(계약 불일치, 인가 등)은 경로로 판정할 수 없어 "사람 확인 필요"로만
+  출력한다
 - `--files` 목록은 UTF-8(BOM 허용) 한 줄에 경로 하나다. `git diff --name-only`가 따옴표로 감싼 비ASCII 경로도 풀어 읽는다
 - 판정과 무관하게 종료 코드 0이다. 설정·git 오류는 2
 
@@ -303,12 +305,13 @@ CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각�
 ## 13. 첫 소비자 계약 (0.2.0)
 
 `harness.json`의 루트 키는 `harness_version`, `project_name`, `platform`, `tracker`, `issue_prefix`,
-`default_branch`, `integration_branch`, `related_docs`, `areas`, `hooks`다. 알 수 없는 키나 타입이
+`default_branch`, `integration_branch`, `related_docs`, `areas`, `hooks`, `judge`다. 알 수 없는 키나 타입이
 틀린 값은 오류로 처리한다. `related_docs` 항목은 문자열 `label`·`path`만 가진다. `areas` 항목은
 `dir`·`verify`와 선택 항목 `triggers`·`review_focus`·`docs`·`trigger_paths`·`test_paths`를 가진다.
 `trigger_paths`는 `strict`·`standard` 키만 가진 객체이고 값은 패턴 목록이다(빈 목록 허용). `test_paths`는 패턴
 목록이다. 영역을 새로 만들면 기본 `triggers`·`review_focus`·`trigger_paths`·`test_paths`를 설정 파일에 저장한다. 같은 영역을 `--force`로 다시 만들 때 생략한
 선택 항목은 이전 값을 유지한다.
+최상위 `judge`(선택)는 영역 밖 파일의 판정 규칙으로 `trigger_paths`·`test_paths`·`triggers`(사람 확인 문장)만 가진다.
 
 템플릿의 `{{name}}`은 키트가 가진 값으로 치환한다. 이름은 소문자와 밑줄만 사용한다. 지원 이름은 `project_name`, `platform`,
 `pr_noun`, `pr_long`, `ci_variables`, `tracker_name`, `issue_noun`, `issue_key`,

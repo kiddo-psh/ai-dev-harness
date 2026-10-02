@@ -136,6 +136,78 @@ class JudgeTest(unittest.TestCase):
         self.assertEqual(result["files"][0]["area"], "backend")
 
 
+class RootJudgeTest(unittest.TestCase):
+    """최상위 judge(결정표 9장 Q1 b): 영역 밖 파일에 적용하는 규칙."""
+
+    def test_root_rules_replace_default_for_files_outside_areas(self):
+        config = {"judge": {"trigger_paths": {"strict": ["/infra/"]}, "test_paths": ["/it/"],
+                            "triggers": ["인가 변경"]},
+                  "areas": [{"dir": "backend", "verify": ["t"]}]}
+        result = common.judge(["infra/a.tf", "package-lock.json", "it/x.sh", "backend/package-lock.json"], config)
+        self.assertEqual(tiers(result), {"infra/a.tf": ("strict", "trigger_paths.strict:/infra/"),
+                                         "package-lock.json": ("standard", "default"),
+                                         "it/x.sh": ("lite", "test_paths:/it/"),
+                                         "backend/package-lock.json": ("strict", "trigger_paths.strict:package-lock.json")})
+        self.assertEqual(result["human_check"], [{"area": None, "trigger": "인가 변경"}])
+
+    def test_root_triggers_only_when_outside_file_changed(self):
+        config = {"judge": {"triggers": ["인가 변경"]}, "areas": [{"dir": "backend", "verify": ["t"]}]}
+        self.assertEqual(common.judge(["backend/a.py"], config)["human_check"], [])
+
+    def test_invalid_root_judge_rejected(self):
+        base = {"project_name": "d", "platform": "github", "tracker": "github",
+                "default_branch": "main", "integration_branch": "main"}
+        for block in ([], {"trigger_path": {}}, {"trigger_paths": {"lite": []}}, {"test_paths": [""]},
+                      {"triggers": []}, {"triggers": [1]}, {"dir": "x"}):
+            with self.subTest(block=block), self.assertRaises(harness.HarnessError):
+                harness.validate_config({**base, "judge": block}, "test")
+        harness.validate_config({**base, "judge": {"trigger_paths": {"strict": []}, "test_paths": [],
+                                                   "triggers": ["x"]}}, "test")
+
+
+class KitSelfJudgeTest(unittest.TestCase):
+    """결정 D-7: 키트 harness.json의 judge가 docs/contributing.md 판정표와 맞는지. 문서표가 원본이다."""
+
+    EXPECTED = {
+        # 엄격: hooks 차단·수정 로직, 보안 검사 조각·단계·러너
+        "core/hooks/protect-paths.py": "strict", "core/hooks/stop-verify.py": "strict",
+        ".claude/hooks/stop-verify.py": "strict", ".claude/settings.json": "strict",
+        "core/ci/gitlab/secret-detection.yml": "strict", "core/ci/gitlab/sast.yml": "strict",
+        "core/ci/gitlab/dependency-audit.yml": "strict", "core/ci/gitlab/image-scan.yml": "strict",
+        ".github/workflows/security.yml": "strict", ".github/scripts/run_fragment.py": "strict",
+        # 표준: CLI, 템플릿, 보안이 아닌 CI 조각·워크플로, 생성 파일
+        "bin/harness.py": "standard", "core/templates/AGENTS.md": "standard",
+        "core/hooks/harness_common.py": "standard", ".claude/hooks/harness_common.py": "standard",
+        ".github/workflows/ci.yml": "standard", ".github/scripts/rehearse.py": "standard",
+        "core/metrics/classify_ci.py": "standard", "AGENTS.md": "standard",
+        "docs/templates/plan.md": "standard", "docs/secret-environment-variables.md": "standard",
+        "core/ci/README.md": "standard", "harness.json": "standard",
+        # 경량: docs/ 아래 손으로 관리하는 문서, 테스트
+        "docs/roadmap.md": "lite", "docs/contributing.md": "lite", "docs/install.md": "lite",
+        "tests/test_judge.py": "lite", "tests/fixtures/classify_ci/jest.log": "lite",
+    }
+
+    def test_kit_paths_match_contributing_table(self):
+        config = harness.load_config(ROOT / "harness.json")
+        result = common.judge(list(self.EXPECTED), config)
+        self.assertEqual({f["path"]: f["tier"] for f in result["files"]}, self.EXPECTED)
+        self.assertTrue(result["human_check"])  # harness_common 차단 로직 여부는 사람이 본다
+
+    def test_contributing_strict_row_names_the_rule_targets(self):
+        """판정표 엄격 행이 바뀌면 이 테스트로 harness.json judge도 같이 고친다."""
+        text = (ROOT / "docs" / "contributing.md").read_text(encoding="utf-8")
+        strict_row = next(line for line in text.splitlines() if line.startswith("| 엄격 |"))
+        for name in ("core/hooks/", "core/ci/", ".github/workflows/", ".github/scripts/run_fragment.py"):
+            self.assertIn(name, strict_row)
+
+    def test_generated_self_files_are_not_lite(self):
+        """자기 적용 생성 파일을 고치는 일은 템플릿 변경이라 경량이 아니다."""
+        config = harness.load_config(ROOT / "harness.json")
+        generated = [entry["dest"] for entry in harness.load_manifest() if entry.get("self")]
+        result = common.judge(generated, config)
+        self.assertNotIn("lite", {f["tier"] for f in result["files"]}, result["files"])
+
+
 def run(argv, stdin=None):
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err), patch("sys.stdin", io.StringIO(stdin or "")):

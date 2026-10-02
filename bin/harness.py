@@ -37,7 +37,7 @@ MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
 AREA_TEMPLATE = "AREA-AGENTS.md"
 AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs", "trigger_paths", "test_paths"}
 CONFIG_KEYS = {"harness_version", "project_name", "platform", "tracker", "issue_prefix",
-               "default_branch", "integration_branch", "related_docs", "areas", "hooks"}
+               "default_branch", "integration_branch", "related_docs", "areas", "hooks", "judge"}
 RELATED_DOC_KEYS = {"label", "path"}
 CONFIG_NAME = "harness.json"
 
@@ -170,6 +170,8 @@ def validate_config(config: dict, source: Path | str) -> None:
     try:
         if "hooks" in config:  # 키를 생략하면 기본값, 명시한 null은 객체 계약 위반이다
             hooks_common.validate_hooks(config["hooks"], source)
+        if "judge" in config:
+            hooks_common.validate_judge_root(config["judge"], source)
     except hooks_common.ConfigError as exc:
         raise HarnessError(str(exc)) from exc
 
@@ -637,7 +639,7 @@ def cmd_judge(args) -> int:
     if result["human_check"]:
         print("사람 확인 필요(경로로 판정하지 않는 트리거. 해당하면 판정을 올린다):")
         for item in result["human_check"]:
-            print(f"  [{item['area']}] {item['trigger']}")
+            print(f"  [{item['area'] or '영역 밖'}] {item['trigger']}")
     return 0
 
 

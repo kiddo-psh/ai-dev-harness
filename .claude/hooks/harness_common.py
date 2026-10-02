@@ -319,10 +319,26 @@ def _first_match(patterns: list[str], path: str) -> str | None:
     return next((p for p in patterns if compile_glob(p).fullmatch(path)), None)
 
 
-def judge_path(path: str, area: dict | None) -> tuple[str, str]:
-    """(tier, 근거 규칙). 영역 규칙은 영역 디렉터리 기준 상대 경로에 맞춘다."""
+JUDGE_KEYS = {"trigger_paths", "test_paths", "triggers"}
+
+
+def validate_judge_root(block, source) -> None:
+    """최상위 judge: 영역 밖 파일에 적용하는 trigger_paths·test_paths와 사람 확인 문장 triggers."""
+    if not isinstance(block, dict):
+        raise ConfigError(f"{source}: judge는 객체여야 한다")
+    unknown = sorted(set(block) - JUDGE_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: judge에 알 수 없는 키가 있다: {', '.join(unknown)}")
+    validate_judge_rules({"dir": "(judge)", **block}, source)
+    if "triggers" in block and not _str_list(block["triggers"]):
+        raise ConfigError(f"{source}: judge.triggers는 비어 있지 않은 문자열 목록이어야 한다")
+
+
+def judge_path(path: str, area: dict | None, root: dict | None = None) -> tuple[str, str]:
+    """(tier, 근거 규칙). 영역 규칙은 영역 디렉터리 기준, 최상위 judge 규칙은 저장소 루트 기준 상대 경로에 맞춘다."""
+    owner = area if area else (root or {})
     rel = path[len(area["dir"]) + 1:] if area else path
-    rules = area.get("trigger_paths", DEFAULT_TRIGGER_PATHS) if area else DEFAULT_TRIGGER_PATHS
+    rules = owner.get("trigger_paths", DEFAULT_TRIGGER_PATHS)
     for tier in TRIGGER_TIERS:
         hit = _first_match(rules.get(tier, []), rel)
         if hit:
@@ -330,7 +346,7 @@ def judge_path(path: str, area: dict | None) -> tuple[str, str]:
     hit = _first_match(DOC_PATHS, path)
     if hit:
         return "lite", f"docs:{hit}"
-    tests = area.get("test_paths", DEFAULT_TEST_PATHS) if area else DEFAULT_TEST_PATHS
+    tests = owner.get("test_paths", DEFAULT_TEST_PATHS)
     hit = _first_match(tests, rel)
     if hit:
         return "lite", f"test_paths:{hit}"
@@ -340,16 +356,19 @@ def judge_path(path: str, area: dict | None) -> tuple[str, str]:
 def judge(paths: list[str], config: dict) -> dict:
     """변경 경로 목록의 판정. 경로로 판정할 수 없는 영역 트리거는 human_check로 돌려준다(판정값은 하한)."""
     areas = sorted(config.get("areas", []), key=lambda a: len(a["dir"]), reverse=True)
+    root = config.get("judge") or {}
     files, human_check, seen = [], [], set()
     for path in dict.fromkeys(normalize_change_path(p) for p in paths):
         if not path:
             continue
         area = next((a for a in areas if path.startswith(a["dir"] + "/")), None)
-        tier, rule = judge_path(path, area)
+        tier, rule = judge_path(path, area, root)
         files.append({"path": path, "area": area["dir"] if area else None, "tier": tier, "rule": rule})
-        if area and area["dir"] not in seen:
-            seen.add(area["dir"])
-            human_check.extend({"area": area["dir"], "trigger": t} for t in area.get("triggers", []))
+        owner = area["dir"] if area else None
+        if owner not in seen:
+            seen.add(owner)
+            triggers = area.get("triggers", []) if area else root.get("triggers", [])
+            human_check.extend({"area": owner, "trigger": t} for t in triggers)
     overall = max((f["tier"] for f in files), key=TIERS.index, default="lite")
     return {"tier": overall, "files": files, "human_check": human_check}
 

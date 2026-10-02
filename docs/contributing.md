@@ -66,6 +66,10 @@ Conventional Commits를 쓴다. Scope는 변경 영역이다.
 (`lite`·`standard`·`strict`)를 깨는 변경도 엄격이다. 그 전에는 로드맵 M1-10의 적용 전 계약 리뷰에서
 한 번에 본다.
 
+이 표를 경로 규칙으로 옮긴 것이 `harness.json`의 `judge`다(`harness judge --self`). 표를 고치면 `judge`도 고치고,
+`tests/test_judge.py`의 `KitSelfJudgeTest`가 둘이 어긋나면 실패한다. 경로로 판정할 수 없는 조건(hooks 공통 코드의 차단 로직 여부,
+소비자 계약 파괴)은 사람 확인 목록으로 나온다.
+
 엄격 단계는 플랜 승인과 분리 리뷰를 거친다. 플랜과 리뷰 파일은 루트 `plans/`에 두며 커밋하지 않는다.
 양식은 `docs/templates/`를 따른다. 측정 칸을 비워 두지 않는다.
 

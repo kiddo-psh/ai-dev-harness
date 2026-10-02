@@ -14,5 +14,26 @@
   "hooks": {
     "stop_verify": ["python -m unittest discover tests -q", "python bin/harness.py check --self"],
     "python": "python"
+  },
+  "judge": {
+    "trigger_paths": {
+      "strict": [
+        "/core/hooks/protect-paths.py", "/core/hooks/stop-verify.py", "/core/hooks/settings.template.json",
+        "/.claude/settings.json", "/.claude/hooks/protect-paths.py", "/.claude/hooks/stop-verify.py",
+        "/core/ci/gitlab/secret-detection.yml", "/core/ci/gitlab/sast.yml",
+        "/core/ci/gitlab/dependency-audit.yml", "/core/ci/gitlab/image-scan.yml",
+        "/.github/workflows/security.yml", "/.github/scripts/run_fragment.py"
+      ],
+      "standard": [
+        "/core/", "/bin/", "/.github/", "/AGENTS.md", "/CLAUDE.md", "/harness.json",
+        "/docs/templates/", "/docs/adr/0000-template.md", "/docs/ai-collaboration.md",
+        "/docs/secret-environment-variables.md"
+      ]
+    },
+    "test_paths": ["/tests/"],
+    "triggers": [
+      "core/hooks/harness_common.py의 차단·수정 로직 변경이면 엄격",
+      "harness.json 스키마·CLI 인자·자리표시자 이름·판정 식별자를 깨는 변경이면 첫 소비자 적용 뒤 엄격"
+    ]
   }
 }
