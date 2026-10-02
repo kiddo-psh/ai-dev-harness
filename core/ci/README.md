@@ -183,8 +183,10 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 - **통합 MR은 건너뛴다.** `Release.md` 템플릿에는 업무 참조·판정 절이 없다. 소스 브랜치가 `harness.json`의
   `integration_branch`, 대상이 `default_branch`이고(둘이 다를 때만) 같은 프로젝트의 MR이면(`CI_MERGE_REQUEST_SOURCE_PROJECT_ID`
   = `CI_MERGE_REQUEST_PROJECT_ID`) 본문·변경 파일을 보지 않고 "건너뜀(통과)"으로 끝낸다(종료 0, 로그 한 줄,
-  `mr-lint.json`의 `"result": "skipped"`). 판정 댓글은 남기지 않는다. fork에서 같은 이름의 브랜치로 올린 MR은 검사한다.
-  rules를 로컬에서 덮어쓸 필요가 없다.
+  `mr-lint.json`의 `"result": "skipped"`). fork에서 같은 이름의 브랜치로 올린 MR은 검사한다. 브랜치 값은 MR이 고친
+  `harness.json`이 아니라 대상 쪽 기준 커밋(`CI_MERGE_REQUEST_DIFF_BASE_SHA`)의 값으로 본다. 같은 MR에서 값을 바꿔 자기 검사를
+  끄지 못하게 하려는 것이고, 기준 커밋의 값을 읽지 못하면 건너뛰지 않는다. 판정 댓글은 남기지 않으므로 대상을 바꾸기 전에 달린
+  이전 판정 댓글은 그대로 남는다. rules를 로컬에서 덮어쓸 필요가 없다.
 
 - 리포트: `mr-lint.json`(결과 `pass`·`fail`·`error`·`skipped`, 실패 항목, 본문·변경 파일·적용 판정과 불일치, 파일별 판정, 사람 확인 목록, 댓글 상태)을 30일 보관한다.
   측정 수집기(M4-1)가 판정 불일치를 여기서 읽는다.

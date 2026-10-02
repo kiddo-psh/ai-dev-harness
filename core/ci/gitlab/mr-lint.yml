@@ -5,7 +5,7 @@
 # 본문 판정과 높은 쪽을 적용하고, 다르면 불일치로 기록한다. 적용 판정이 엄격이면 `## 플랜 요약`·`## 리뷰 결과`가
 # "해당 없음"이 아니고 측정 칸에 빈칸이 없어야 한다. MR이 `plans/` 파일을 넣거나 `.gitignore`에 `/plans/`가 없어도
 # 실패한다. 검사할 수 없으면(MR 변수·필요 파일 없음, 토큰 없이 본문 잘림, 얕은 clone) 통과로 넘기지 않고 실패한다.
-# 통합 MR(같은 프로젝트의 `harness.json` integration_branch → default_branch)은 건너뛴다(통과).
+# 통합 MR(같은 프로젝트, 대상 쪽 기준 커밋 `harness.json`의 integration_branch → default_branch)은 건너뛴다(통과).
 #
 # 검사 코드는 `harness init`이 대상 저장소에 넣은 `.harness/mr-lint/mr_lint.py`이고 판정은
 # `.claude/hooks/harness_common.py`와 `harness.json`을 쓴다(`harness check`가 드리프트를 본다).

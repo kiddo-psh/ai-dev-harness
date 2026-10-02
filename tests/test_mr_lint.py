@@ -600,6 +600,18 @@ class IntegrationSkipTest(CiRunCase):
         """T7"""
         self.assert_skipped(self.github_env(None, head_ref="develop", base_ref="main"))
 
+    def test_mr_cannot_redefine_integration_branch(self):
+        """리뷰 F1: MR이 같은 MR에서 harness.json의 브랜치 값을 바꿔 자기 lint를 끌 수 없다(기준 커밋 값으로 판단)."""
+        (self.repo / "harness.json").write_text(
+            json.dumps({**self.config, "integration_branch": "feature", "default_branch": "main"}), encoding="utf-8")
+        self.head = self.commit()
+        env = self.gitlab_env("", **{**self.GITLAB_INTEGRATION, "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME": "feature"})
+        code, out, report, _ = self.run_ci(env)
+        self.assertEqual((code, report["result"]), (1, "fail"), out)
+        # 기준 커밋에 harness.json이 없거나 읽을 수 없으면 건너뛰지 않는다
+        self.assertIsNone(lint.base_config(self.repo, "no-such-rev"))
+        self.assertIsNone(lint.base_config(self.repo, "--output=x"))
+
     def test_fork_or_other_branches_not_skipped(self):
         """T8: fork의 같은 이름 브랜치, 다른 브랜치 조합, integration=default는 검사한다(빈 본문이라 실패)"""
         envs = {

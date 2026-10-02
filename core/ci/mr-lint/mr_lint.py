@@ -659,6 +659,17 @@ def read_config(project: Path) -> dict | None:
     return config if isinstance(config, dict) else None
 
 
+def base_config(project: Path, base: str) -> dict | None:
+    """대상 쪽 기준 커밋의 harness.json. MR이 바꿀 수 없는 값이라 통합 MR 판단에 쓴다. 읽지 못하면 None(건너뛰지 않는다)."""
+    if not base or base.startswith("-"):
+        return None
+    try:
+        config = json.loads(git(project, "show", f"{base}:harness.json"))
+    except (LintError, ValueError):
+        return None
+    return config if isinstance(config, dict) else None
+
+
 def run(args, env: dict) -> tuple[int, dict]:
     project = Path(args.project).resolve()
     local = args.body_file is not None
@@ -675,7 +686,9 @@ def run(args, env: dict) -> tuple[int, dict]:
         ctx = context_from_env(env)
         body, base, head = ctx["body"], ctx["base"], ctx["head"]
     config = read_config(project)
-    if is_integration_mr(ctx, config):
+    # 통합 MR 판단은 MR이 고친 harness.json이 아니라 대상 쪽 기준 커밋의 값으로 한다.
+    # MR 쪽 값을 쓰면 같은 MR에서 integration_branch를 자기 브랜치로 바꿔 lint를 끌 수 있다
+    if is_integration_mr(ctx, base_config(project, base) if ctx is not None else None):
         # 통합 MR(Release.md)에는 업무 참조·판정 절이 없다. 본문·git을 보지 않고 통과로 끝낸다
         print(f"harness: 통합 MR({ctx['source_branch']} → {ctx['target_branch']})이라 MR 본문 lint를 건너뛴다(통과).")
         return EXIT_PASS, {
