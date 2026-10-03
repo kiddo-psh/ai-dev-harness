@@ -186,8 +186,6 @@ class PrepareTest(unittest.TestCase):
         """Q2 답 (a): 렌더된 영역 검증 명령은 저장소 루트에서 실행할 수 있어야 한다(stop-verify와 같은 위치)."""
         for name, expected in ROOT_COMMANDS.items():
             with self.subTest(name):
-                if name != "android-kotlin" and not hasattr(harness, "COMMAND_NAMES"):
-                    self.skipTest("#55(프로필 verify의 area_dir) 병합 전")
                 repo = self.prepare(name)
                 commands = rp.area_verify(repo, rp.scenarios()[name])
                 self.assertEqual(len(commands), len(expected), commands)
@@ -218,6 +216,9 @@ class ProfilesJobTest(unittest.TestCase):
         self.assertEqual(lines, [
             "    runs-on: ubuntu-latest",
             "    timeout-minutes: 45",
+            "    concurrency:",
+            "      group: profiles-${{ github.event.pull_request.number || github.ref }}",
+            "      cancel-in-progress: true",
             "    permissions:",
             "      contents: read",
             "    steps:",

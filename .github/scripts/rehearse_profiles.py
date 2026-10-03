@@ -30,6 +30,8 @@ HARNESS = ROOT / "bin" / "harness.py"
 FIXTURES = ROOT / "tests" / "fixtures" / "profiles"
 # CI(setup-gradle의 gradle-version)와 같은 값이다. wrapper를 이 버전으로 만든다
 GRADLE_VERSION = "8.14.3"
+# wrapper가 내려받는 배포본 검증용(https://services.gradle.org/distributions/gradle-8.14.3-bin.zip.sha256)
+GRADLE_DISTRIBUTION_SHA256 = "bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531"
 SNIPPET_HEADER = "공유 파일에 직접 붙일 코드 조각:"
 
 
@@ -339,7 +341,8 @@ def ensure_wrapper(build_root: Path) -> None:
     try:
         (empty / "settings.gradle").write_text("", encoding="utf-8")
         result = subprocess.run([gradle, "--no-daemon", "-q", "wrapper", "--gradle-version", GRADLE_VERSION,
-                                 "--distribution-type", "bin"], cwd=empty, capture_output=True, text=True,
+                                 "--distribution-type", "bin", "--gradle-distribution-sha256-sum", GRADLE_DISTRIBUTION_SHA256],
+                                cwd=empty, capture_output=True, text=True,
                                 encoding="utf-8", errors="replace", env=child_env())
         if result.returncode != 0:
             raise RehearsalError(f"gradle wrapper 실패: {(result.stdout + result.stderr).strip()[:500]}")

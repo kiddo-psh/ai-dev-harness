@@ -68,6 +68,10 @@ jobs:
   profiles:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # 같은 PR에서 새 실행(본문 수정 edited 포함)이 오면 앞 실행을 취소한다. 최대 45분짜리 job이 겹쳐 쌓이지 않게
+    concurrency:
+      group: profiles-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
     steps:
