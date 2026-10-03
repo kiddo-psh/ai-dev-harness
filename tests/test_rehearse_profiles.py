@@ -76,14 +76,14 @@ class ScenarioTableTest(unittest.TestCase):
 
     def test_negative_scenarios_cover_decided_rules(self):
         """H-3·A-12: controller→repository, mocks import, alt 없는 img. #59: ViewModel의 Retrofit, feature의 Room,
-        contentDescription."""
+        contentDescription. #59 리뷰 F2: feature domain→ui 계층 의존."""
         names = {n["name"] for scenario in rp.scenarios().values() for n in scenario["negatives"]}
         self.assertEqual(names, {"controller-calls-repository", "page-imports-mocks", "img-without-alt",
-                                 "viewmodel-imports-retrofit", "feature-imports-room",
+                                 "viewmodel-imports-retrofit", "feature-imports-room", "domain-imports-ui",
                                  "image-without-content-description"})
 
     def test_android_scenario_matches_adr_modules(self):
-        """#59 T7: 영역 5개(app·core·feature·wear + konsist-test), 스캐폴드, 음성 3개가 규칙·파일을 가리킨다."""
+        """#59 T7: 영역 5개(app·core·feature·wear + konsist-test), 스캐폴드, 음성(Konsist 3개 + Lint 1개)이 규칙·파일을 가리킨다."""
         scenario = rp.scenarios()["android-kotlin"]
         self.assertEqual([(a["dir"], a.get("profile", "android-kotlin")) for a in scenario["areas"]], [
             ("android/app", "android-kotlin"), ("android/core", "android-kotlin"),
@@ -113,6 +113,23 @@ class ScenarioTableTest(unittest.TestCase):
         self.assertIn("api(libs.androidx.room.runtime)", core)
         self.assertIn('implementation(project(":core"))',
                       (android / "feature/meal/build.gradle.kts").read_text(encoding="utf-8"))
+        # #59 리뷰 F2: allow에 없는 계층 의존(domain→ui)은 계층 규칙에서만 실패한다
+        layered = negatives["domain-imports-ui"]
+        self.assertEqual(layered["expect"], ["featureLayersDependOnlyOnAllowedLayers", "WorkoutSessionLabel"])
+        layer_test = (ROOT / "profiles/android-konsist/conventions/HarnessLayerArchitectureTest.kt").read_text(
+            encoding="utf-8")
+        self.assertIn("fun featureLayersDependOnlyOnAllowedLayers()", layer_test)
+        (rel, content), = layered["files"].items()
+        source = "android/feature/workout/src/main/java/com/example/rehearsal/feature/workout/"
+        self.assertEqual(rel, f"{source}domain/WorkoutSessionLabel.kt")
+        self.assertIn("package com.example.rehearsal.feature.workout.domain\n", content)
+        # 컴파일되는 import: 같은 모듈 fixture의 ViewModel이다. 다른 고정 규칙(이름 *ViewModel·*UseCase·*Screen)에 걸리지 않는다
+        self.assertIn("import com.example.rehearsal.feature.workout.ui.session.WorkoutSessionViewModel\n", content)
+        self.assertTrue((FIXTURES / "android-kotlin" / f"{source}ui/session/WorkoutSessionViewModel.kt").is_file())
+        self.assertIn("val volume: StateFlow<Int>", (FIXTURES / "android-kotlin" /
+                                                     f"{source}ui/session/WorkoutSessionViewModel.kt").read_text(
+            encoding="utf-8"))
+        self.assertIsNone(re.search(r"\b(class|fun) \w*(ViewModel|UseCase|Screen)\b", content))
         self.assertEqual(negatives["image-without-content-description"]["expect"],
                          ["[ContentDescription]", "negative_image.xml"])
 

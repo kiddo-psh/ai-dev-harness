@@ -57,7 +57,9 @@ profiles/<name>/
 | `allowed`·`allowed_separator` | `{{name}}` 하나 / 이음 | `{{name}}` / `, ` |
 | `separator` | 계층 사이 | 줄바꿈 |
 
-`allow`에 없는 의존은 금지다. 계층이 `allow`에 없으면 어떤 계층에도 의존하지 않는다.
+`allow`에 없는 의존은 금지다. 계층이 `allow`에 없으면 어떤 계층에도 의존하지 않는다. 엔진은 여집합을 계산하지 않으므로
+대상 도구의 "의존 허용" API가 빠진 계층을 막지 않으면(예: Konsist `dependsOn`은 "의존해도 된다"만 뜻한다) 프로필이
+서식으로 계층·`allow`를 데이터로 렌더하고 생성 코드에서 나머지 계층을 금지한다(`android-konsist` 참고).
 
 ## 고정 규칙 블록과 끄기
 

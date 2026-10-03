@@ -109,6 +109,17 @@ data class MealCacheEntity(
 )
 """
 
+ANDROID_DOMAIN_IMPORTS_UI = """package com.example.rehearsal.feature.workout.domain
+
+import com.example.rehearsal.feature.workout.ui.session.WorkoutSessionViewModel
+
+// 음성 시나리오: domain 계층이 ui 계층을 import한다(allow에 없는 계층 의존, ADR-04). 같은 모듈이라 컴파일은 된다.
+// Konsist dependsOn은 빠진 계층을 막지 않으므로 생성 코드의 doesNotDependOn이 막아야 한다(#59 리뷰 F2)
+class WorkoutSessionLabel {
+    fun label(viewModel: WorkoutSessionViewModel): String = "volume=${viewModel.volume.value}"
+}
+"""
+
 ANDROID_IMAGE_LAYOUT = """\
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 음성 시나리오: contentDescription 없는 이미지(Android Lint ContentDescription) -->
@@ -187,6 +198,10 @@ def scenarios() -> dict[str, dict]:
                  "files": {"android/feature/meal/src/main/java/com/example/rehearsal/feature/meal/data/"
                            "MealCacheEntity.kt": ANDROID_ROOM_ENTITY},
                  "expect": ["featureDoesNotUseRoom", "MealCacheEntity"]},
+                {"name": "domain-imports-ui",
+                 "files": {"android/feature/workout/src/main/java/com/example/rehearsal/feature/workout/domain/"
+                           "WorkoutSessionLabel.kt": ANDROID_DOMAIN_IMPORTS_UI},
+                 "expect": ["featureLayersDependOnlyOnAllowedLayers", "WorkoutSessionLabel"]},
                 {"name": "image-without-content-description",
                  "files": {"android/app/src/main/res/layout/negative_image.xml": ANDROID_IMAGE_LAYOUT},
                  "expect": ["[ContentDescription]", "negative_image.xml"]},

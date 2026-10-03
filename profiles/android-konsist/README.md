@@ -85,11 +85,18 @@ feature 간 import 금지(ADR-05)도 Gradle 모듈 의존이 막는다.
 "allow": {"ui": ["data", "domain"], "data": [], "domain": ["data"]}
 ```
 
-생성 결과는 `val ui = Layer("ui", "..ui..")` … `ui.dependsOn(data, domain)`, `data.dependsOnNothing()`,
-`domain.dependsOn(data)` 형태다. `di` 패키지처럼 어느 계층에도 없는 패키지는 검사하지 않는다. `:core` 모델은 범위 밖이다.
+생성 파일은 두 맵을 렌더한다. `layers`는 `"ui" to Layer("ui", "..ui..")` 항목(서식 `konsist_layers`), `allow`는
+`"ui" to listOf("data", "domain")`·`"data" to emptyList<String>()` 항목(서식 `konsist_allowed`)이다. 그 뒤 계층마다
+`allow`가 비면 `dependsOnNothing()`, 아니면 `dependsOn(허용 계층)`과 `doesNotDependOn(나머지 계층)`(나머지가 있을 때)을
+Kotlin 반복문이 부른다. Konsist 0.17.3의 `dependsOn`은 "의존해도 된다"(strict=false)만 뜻하고 빠진 계층을 막지 않기
+때문이다(#59 리뷰 F2). 기본값이면 `ui`는 `data`·`domain`만, `domain`은 `data`만 의존할 수 있고 `domain`→`ui`가 실패한다.
+`di` 패키지처럼 어느 계층에도 없는 패키지는 검사하지 않는다. `:core` 모델은 범위 밖이다.
 
 - Konsist `Layer`는 계층마다 패키지 패턴 하나(`..`로 끝남)를 받으므로 계층마다 패턴을 하나만 적는다
-- 계층 이름은 Kotlin 변수 이름으로 쓰이므로 영문자·숫자·밑줄만 쓰고 예약어는 쓰지 않는다
+- 계층 이름은 Kotlin 문자열로 쓰이므로 영문자·숫자·밑줄만 쓴다
+- 패턴 `..ui..`는 패키지 경로 어디든 `ui` 조각이 있으면 맞으므로 `androidx.compose.ui` 같은 외부 import도 ui 계층 의존으로
+  읽힌다. data·domain 파일이 Compose UI를 import하면 그 자체로 계층 위반이 된다. 프로젝트 패키지로 좁히려면
+  `harness.json` 영역의 `layers`에 `com.acme.fit.feature..ui..`처럼 `<base_package>`로 시작하는 패턴을 적는다
 - 계층마다 파일이 하나 이상 있어야 한다. 아직 `domain`(UseCase)이 없으면 `layers`·`allow`에서 지우고 `--force`로 다시 만든다.
   `:core`에 `..data..`처럼 계층 이름과 같은 패키지를 두면 feature에서 그 패키지 import가 계층 의존으로 읽힐 수 있으니 피한다
 - feature 하나를 3계층으로 승격하는 경우(ADR-04 결과)도 이 설정으로 맞춘다

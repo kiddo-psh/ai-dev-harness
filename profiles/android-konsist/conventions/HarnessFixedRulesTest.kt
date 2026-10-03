@@ -104,7 +104,8 @@ class HarnessFixedRulesTest {
         // ADR-04: UseCase는 domain 패키지에 두고 2개 이상 ViewModel이 공유할 때만 만든다. 1회성 로직은 ViewModel·Repository에 둔다
         val viewModelFiles = moduleFiles().filter { file -> file.classes().any { it.name.endsWith("ViewModel") } }
         filesIn(featureDir).assertFalse { file ->
-            val inDomain = file.packagee?.name.orEmpty().split('.').contains("domain")
+            val packageName = file.packagee?.name.orEmpty()
+            val inDomain = "domain" in packageName.split('.')
             file.classes().any { useCase ->
                 val usage = Regex("\\b${useCase.name}\\b")
                 useCase.name.endsWith("UseCase") &&

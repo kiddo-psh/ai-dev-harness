@@ -42,6 +42,44 @@ LAYERS = "HarnessLayerArchitectureTest.kt"
 FEATURE_TASKS = ":feature:meal:check :feature:workout:check"
 
 
+# 리뷰 F1(#59) 근사 검사용: 가장 안쪽 괄호 묶음(안에 빈 묶음만 있는 것)과 연쇄 호출 덩어리
+_GROUP = re.compile(r"\((?:[^(){}\[\]]|\(\)|\{\}|\[\])*\)|\{(?:[^(){}\[\]]|\(\)|\{\}|\[\])*\}|"
+                    r"\[(?:[^(){}\[\]]|\(\)|\{\}|\[\])*\]")
+_CHAIN = re.compile(r"[A-Za-z_]\w*(?:\s*(?:\(\)|\{\}|\[\]))*(?:\s*\??\.\s*[A-Za-z_]\w*(?:\s*(?:\(\)|\{\}|\[\]))*)+")
+_LITERAL = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+
+
+def chain_operator_counts(line):
+    """한 줄의 연쇄 식마다 연쇄 연산자(`.`·`?.`) 수(ktlint_official `chain-method-continuation`의 근사).
+
+    ktlint 1.5.0은 한 식의 연쇄 연산자가 4개 이상이면 한 줄에 맞아도 연산자마다 줄을 바꾼다(첫 `a.b` 참조도 개수에 든다).
+    근사 규칙: 주석 줄·import·package는 보지 않는다. 문자열·문자 리터럴과 줄 끝 주석을 지운다. 가장 안쪽 괄호 묶음
+    `(…)`·`{…}`·`[…]`부터 안의 식을 따로 센 뒤 빈 묶음으로 접는다(인자·람다 안의 식은 바깥 연쇄와 별개다). 접은 줄에서
+    `식별자(묶음)*`에 `.`·`?.` + `식별자(묶음)*`가 이어지는 덩어리를 연쇄 하나로 보고 연산자를 센다. 여러 줄로 이미 나눈
+    연쇄(`.`으로 시작하는 줄)는 그 줄의 덩어리만 보므로 걸리지 않는다. 연산자 결합(`a.b() + c.d()`)은 따로 센다.
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith(("//", "*", "/*", "import ", "package ", "@file:")):
+        return []
+    code = re.sub(r"//.*", "", _LITERAL.sub('""', line))
+    counts = []
+
+    def fold(match):
+        counts.extend(chain_operator_counts_flat(match.group(0)[1:-1]))
+        return match.group(0)[0] + match.group(0)[-1]
+
+    while True:
+        folded = _GROUP.sub(fold, code)
+        if folded == code:
+            break
+        code = folded
+    return counts + chain_operator_counts_flat(code)
+
+
+def chain_operator_counts_flat(code):
+    return [len(re.findall(r"\??\.", chain.group(0))) for chain in _CHAIN.finditer(code)]
+
+
 def run(argv):
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
@@ -137,11 +175,20 @@ class AndroidProfileTest(unittest.TestCase):
     def test_init_module_areas_and_konsist_area(self):
         out = self.init_module(APP)
         self.assertIn("android-konsist", out)  # 컨벤션 테스트 영역 안내
-        self.assertIn("android/gradlew -p android :app:dependencies --write-locks", out)
+        # 리뷰 F3(#59): 잠금·Hilt·ktlint 안내는 gradle_tasks에 적은 모듈마다다
+        self.assertIn("의존성 잠금이 필수다: gradle_tasks 에 적은 모듈마다(:app:check)", out)
+        self.assertIn("android/gradlew -p android <모듈 경로>:dependencies … --write-locks", out)
+        self.assertIn("Hilt·KSP: gradle_tasks 에 적은 모듈마다(:app:check", out)
         self.init_module(CORE, "--var", "module=core")
-        self.init_feature()
+        out = self.init_feature()
+        # feature 영역의 module(feature)은 상위 컨테이너라 잠금·Hilt 대상이 아니다. :feature:<이름> 모듈마다 안내한다
+        self.assertIn(f"gradle_tasks 에 적은 모듈마다({FEATURE_TASKS})", out)
+        self.assertIn(":feature:<이름>:dependencies 를 모듈마다", out)
+        self.assertNotIn(":feature:dependencies", out)
+        self.assertNotIn("모듈 feature ", out)
         self.init_wear()
         out = self.init_konsist()
+        self.assertIn("android/gradlew -p android :konsist-test:dependencies --write-locks", out)
         self.assertIn('include(":konsist-test")', out)
         self.assertIn("outputs.upToDateWhen { false }", out)
         expected = {APP: ":app:check", CORE: ":core:check", FEATURE: FEATURE_TASKS, WEAR: ":wear:check"}
@@ -391,42 +438,102 @@ class AndroidProfileTest(unittest.TestCase):
         self.assertIn('listOf("retrofit2.", "okhttp3.", "io.ktor.")', blocks["wear-no-network"])
         self.assertIn('listOf("Repository", "DataSource", "Dao", "UseCase")', blocks["app-no-data-layer"])
         self.assertIn("< 2", blocks["usecase-shared-by-two-viewmodels"])
-        self.assertIn('contains("domain")', blocks["usecase-shared-by-two-viewmodels"])
+        self.assertIn("\"domain\" in packageName.split('.')", blocks["usecase-shared-by-two-viewmodels"])
         self.assertNotIn("wear-not-depend-on-app", text)  # Gradle 모듈 의존이 컴파일 에러로 막는다(ADR-05)
 
     # --- T6 ---------------------------------------------------------------
 
+    # 생성 코드의 계층 반복문(계층·allow 맵을 읽어 Konsist 호출을 고른다). 리뷰 F2(#59): Konsist dependsOn은 "의존해도 된다"만
+    # 뜻하므로 allow에 없는 나머지 계층을 doesNotDependOn으로 막아야 한다
+    LAYER_LOOP = "\n".join([
+        '            .assertArchitecture(testName = "featureLayersDependOnlyOnAllowedLayers") {',
+        "                for ((name, layer) in layers) {",
+        "                    val targets = allowed.getValue(name).map { layers.getValue(it) }.toSet()",
+        "                    val others = layers.values.toSet() - targets - layer",
+        "                    if (targets.isEmpty()) {",
+        "                        layer.dependsOnNothing()",
+        "                    } else {",
+        "                        layer.dependsOn(targets)",
+        "                        if (others.isNotEmpty()) {",
+        "                            layer.doesNotDependOn(others)",
+        "                        }",
+        "                    }",
+        "                }",
+        "            }",
+    ])
+
+    def konsist_calls(self, text):
+        """생성 파일의 두 맵을 읽어 반복문이 계층마다 부를 Konsist 호출을 계산한다(LAYER_LOOP와 같은 규칙)."""
+        layers = dict(re.findall(r'^ {16}"(\w+)" to Layer\("\1", "([^"]+)"\),$', text, re.M))
+        allowed = {}
+        for name, args in re.findall(r'^ {16}"(\w+)" to (?:listOf\(([^)]*)\)|emptyList<String>\(\)),$', text, re.M):
+            allowed[name] = re.findall(r'"(\w+)"', args)
+        self.assertEqual(list(layers), list(allowed))
+        calls = {}
+        for name in layers:
+            targets = allowed[name]
+            others = [other for other in layers if other not in targets and other != name]
+            if not targets:
+                calls[name] = ("dependsOnNothing",)
+            elif others:
+                calls[name] = ("dependsOn", tuple(targets), "doesNotDependOn", tuple(others))
+            else:
+                calls[name] = ("dependsOn", tuple(targets))
+        return layers, calls
+
     def test_layer_config_renders_konsist(self):
         self.init_konsist()
         rel = f"{ARCH}/{LAYERS}"
+        text = self.read(rel)
         self.assertIn("\n".join([
-            "            .assertArchitecture {",
-            '                val ui = Layer("ui", "..ui..")',
-            '                val data = Layer("data", "..data..")',
-            '                val domain = Layer("domain", "..domain..")',
-            "",
-            "                ui.dependsOn(data, domain)",
-            "                data.dependsOnNothing()",
-            "                domain.dependsOn(data)",
-            "            }",
-        ]), self.read(rel))
-        self.assertIn("import com.lemonappdev.konsist.api.architecture.KoArchitectureCreator.assertArchitecture",
-                      self.read(rel))
-        # allow 변경은 다시 생성하기 전까지 check 불일치다
-        config = self.config()
-        area = next(a for a in config["areas"] if a["dir"] == KONSIST_AREA)
-        area["allow"]["ui"] = ["data"]
-        del area["layers"]["domain"]
-        del area["allow"]["domain"]
-        self.save_config(config)
+            "        val layers: Map<String, Layer> =",
+            "            mapOf(",
+            '                "ui" to Layer("ui", "..ui.."),',
+            '                "data" to Layer("data", "..data.."),',
+            '                "domain" to Layer("domain", "..domain.."),',
+            "            )",
+            "        // 계층 이름 → 의존해도 되는 계층 이름(allow)",
+            "        val allowed: Map<String, List<String>> =",
+            "            mapOf(",
+            '                "ui" to listOf("data", "domain"),',
+            '                "data" to emptyList<String>(),',
+            '                "domain" to listOf("data"),',
+            "            )",
+        ]), text)
+        self.assertIn(self.LAYER_LOOP, text)
+        self.assertIn("import com.lemonappdev.konsist.api.architecture.KoArchitectureCreator.assertArchitecture", text)
+        # 기본값(ADR-04): data는 아무것도, domain은 ui를 의존하지 못한다(리뷰 F2의 빈틈이 domain→ui였다)
+        layers, calls = self.konsist_calls(text)
+        self.assertEqual(layers, {"ui": "..ui..", "data": "..data..", "domain": "..domain.."})
+        self.assertEqual(calls, {"ui": ("dependsOn", ("data", "domain")), "data": ("dependsOnNothing",),
+                                 "domain": ("dependsOn", ("data",), "doesNotDependOn", ("ui",))})
+
+        # allow를 부분 목록으로 바꾸면(ADR-04 승격 등) 빠진 계층이 금지로 바뀐다. 다시 생성하기 전까지 check 불일치다
+        self.set_area(KONSIST_AREA, allow={"ui": ["data"], "data": [], "domain": ["data"]})
         code, out = self.check()
         self.assertEqual(code, 1)
         self.assertIn(f"불일치: {rel}", out)
         self.init_area(KONSIST_AREA, "--force")
         self.assertEqual(self.check()[0], 0)
         text = self.read(rel)
-        self.assertIn("                ui.dependsOn(data)\n", text)
-        self.assertNotIn("domain", text.split(".assertArchitecture {", 1)[1])
+        self.assertIn('                "ui" to listOf("data"),\n', text)
+        self.assertIn(self.LAYER_LOOP, text)
+        self.assertEqual(self.konsist_calls(text)[1], {
+            "ui": ("dependsOn", ("data",), "doesNotDependOn", ("domain",)), "data": ("dependsOnNothing",),
+            "domain": ("dependsOn", ("data",), "doesNotDependOn", ("ui",))})
+
+        # 계층을 지우면 맵에서도 빠진다. allow에 없는 계층은 아무것도 의존하지 않는다
+        config = self.config()
+        area = next(a for a in config["areas"] if a["dir"] == KONSIST_AREA)
+        del area["layers"]["domain"]
+        area["allow"] = {"ui": ["data"]}
+        self.save_config(config)
+        self.init_area(KONSIST_AREA, "--force")
+        self.assertEqual(self.check()[0], 0)
+        text = self.read(rel)
+        self.assertNotIn('"domain"', text)
+        self.assertIn('                "data" to emptyList<String>(),\n', text)
+        self.assertEqual(self.konsist_calls(text)[1], {"ui": ("dependsOn", ("data",)), "data": ("dependsOnNothing",)})
 
     # --- 검증 명령 ---------------------------------------------------------
 
@@ -473,6 +580,24 @@ class AndroidProfileTest(unittest.TestCase):
         self.assertFalse(violates('val message = "GlobalScope는 쓰지 않는다"\n'))
         self.assertFalse(violates('val message = "escaped \\" GlobalScope"\n'))
 
+    def test_chain_operator_heuristic(self):
+        """연쇄 연산자 근사 검사 자체: 리뷰 F1(#59)이 찾은 두 줄은 4개 이상, 나눈 형태와 별개 식은 4개 미만이다."""
+        def longest(line):
+            return max(chain_operator_counts(line), default=0)
+
+        self.assertEqual(longest('            val inDomain = file.packagee?.name.orEmpty().split(\'.\').contains("domain")'), 5)
+        self.assertEqual(longest("            .slice { file -> file.projectPath.replace('\\\\', '/').trimStart('/')"
+                                 '.startsWith("feature/") }'), 4)
+        self.assertEqual(longest("    private fun KoFileDeclaration.isIn(dir: String): Boolean = "
+                                 "projectPath.replace('\\\\', '/').trimStart('/').startsWith(\"$dir/\")"), 3)
+        self.assertEqual(longest("            val names = file.classes().map { it.name } + file.interfaces().map { it.name }"), 2)
+        self.assertEqual(longest("                    val targets = allowed.getValue(name).map { layers.getValue(it) }"
+                                 ".toSet()"), 3)
+        self.assertEqual(longest('        assertTrue("a.b.c.d.e 는 문자열", x.y)  // a.b.c.d.e 주석'), 1)
+        self.assertEqual(longest("            .assertArchitecture {"), 0)
+        self.assertEqual(longest("import com.lemonappdev.konsist.api.architecture.Layer"), 0)
+        self.assertEqual(longest("        call(a.b.c.d.e())"), 4)  # 인자 안의 식도 따로 센다
+
     def test_templates_follow_ktlint_basics(self):
         self.init_feature()
         self.init_wear()
@@ -503,6 +628,8 @@ class AndroidProfileTest(unittest.TestCase):
                 for number, line in enumerate(text.split("\n"), 1):
                     self.assertEqual(line, line.rstrip(), f"{number}행 끝 공백")
                     self.assertLessEqual(len(line), 140, f"{number}행 길이")
+                    # 리뷰 F1(#59): ktlintFormat이 check 관리 파일을 고치면 harness check 드리프트가 된다
+                    self.assertLess(max(chain_operator_counts(line), default=0), 4, f"{number}행 연쇄 4개 이상: {line!r}")
                     stripped = line.lstrip(" ")
                     if stripped.startswith("*"):  # KDoc 본문은 " * " 정렬이라 한 칸 더 들어간다
                         continue

@@ -172,8 +172,11 @@ dependencyLocking {
 ```
 
 ```bash
-./gradlew :app:dependencies :core:dependencies :wear:dependencies --write-locks   # feature·konsist-test 모듈도 같이
+./gradlew :app:dependencies :core:dependencies :feature:meal:dependencies :feature:workout:dependencies \n  :wear:dependencies :konsist-test:dependencies --write-locks
 ```
+
+feature는 `:feature` 상위 프로젝트가 아니라 `gradle_tasks`에 적은 `:feature:<이름>` 모듈마다 잠근다(`:feature:dependencies`는
+하위 모듈의 `gradle.lockfile`을 만들지 않는다). `init` 안내도 `gradle_tasks` 기준으로 나온다.
 
 의존성을 바꾸면 같은 명령으로 잠금을 갱신한다. `gradle.lockfile` 변경은 엄격 판정이다.
 
