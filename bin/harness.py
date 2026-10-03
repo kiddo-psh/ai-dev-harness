@@ -1007,8 +1007,14 @@ def cmd_init(args) -> int:
                 "이미 존재하는 파일이 있어 중단한다. 덮어쓰려면 --force 를 지정한다:\n" + listing
             )
 
+    not_files = [dest for dest in outputs if dest in seeds and (target / dest).exists()
+                 and not (target / dest).is_file()]
+    if not_files:  # 디렉터리 등을 시드 파일처럼 유지하면 check는 없음으로 보고하고 init으로도 복구되지 않는다
+        listing = "\n".join(f"  {d}" for d in not_files)
+        raise HarnessError("시드 파일 경로가 파일이 아니라 중단한다. 그 경로를 정리한 뒤 다시 실행한다:\n" + listing)
+
     target.mkdir(parents=True, exist_ok=True)
-    kept = [dest for dest in outputs if dest in seeds and (target / dest).exists()]
+    kept = [dest for dest in outputs if dest in seeds and (target / dest).is_file()]
     for dest, content in outputs.items():
         if dest in kept:  # 시드 파일은 소비자 소유라 --force 로도 덮어쓰지 않는다
             continue

@@ -826,6 +826,19 @@ class SeedFileTest(unittest.TestCase):
     def force_init(self):
         return run(["init", str(self.target), "--force"])  # 기존 harness.json 이 있으면 루트 설정 인자를 주지 않는다
 
+    def test_seed_path_that_is_not_a_file_aborts(self):
+        """PR #63 Codex: 시드 경로가 디렉터리면 시드 파일처럼 유지하지 않고 --force여도 아무것도 쓰지 않고 중단한다."""
+        self.git.unlink()
+        self.git.mkdir()
+        (self.target / "AGENTS.md").write_text("손 수정\n", encoding="utf-8")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code, _out = self.force_init()
+        self.assertEqual(code, 2)
+        self.assertIn("docs/git-convention.md", err.getvalue())
+        self.assertTrue(self.git.is_dir())
+        self.assertEqual((self.target / "AGENTS.md").read_text(encoding="utf-8"), "손 수정\n")  # 쓰기 전에 중단
+
     def test_seed_files_kept_and_not_compared(self):
         for path, extra in ((self.adr, "| [ADR-0001](0001-x.md) | 결정 | 채택 |"), (self.git, "| `web` | `web/` |")):
             path.write_text(path.read_text(encoding="utf-8") + extra + "\n", encoding="utf-8")
