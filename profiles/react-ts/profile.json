@@ -1,0 +1,102 @@
+{
+  "name": "react-ts",
+  "description": "React + TypeScript + Vite 웹 프론트(react-router 데이터 라우터, Vitest + Testing Library). 화면·API 스캐폴드와 ESLint 경계·접근성 규칙",
+  "verify": [
+    "npm run {{lint_script}}",
+    "npm run {{format_script}}",
+    "npm run {{test_script}}",
+    "npm run {{build_script}}"
+  ],
+  "trigger_paths": {
+    "strict": [
+      "/package.json",
+      "package-lock.json",
+      "npm-shrinkwrap.json",
+      "yarn.lock",
+      "pnpm-lock.yaml",
+      "bun.lock",
+      "bun.lockb",
+      "/vite.config.*",
+      "/eslint.config.*"
+    ],
+    "standard": ["/src/routes/", "/src/components/"]
+  },
+  "test_paths": ["*.test.ts", "*.test.tsx"],
+  "triggers": [
+    "공용 컴포넌트(`src/components/`)의 생성·변경(여러 화면이 함께 쓴다)",
+    "라우팅(`routes/router.tsx`·`routes/paths.ts`) 변경",
+    "인증 가드(로그인이 필요한 라우트 보호)의 추가·변경·제거",
+    "새 라이브러리(의존성) 추가, `package.json`·lock·`vite.config.*`·`eslint.config.*` 변경"
+  ],
+  "review_focus": [
+    "접근성(역할·이름·대체 텍스트, 키보드 조작)",
+    "화면 경계(`mocks/`·다른 화면 하위 컴포넌트 import 금지, 계층 허용 방향)",
+    "API 호출은 `src/api/` 도메인 함수와 공통 클라이언트를 거친다",
+    "테스트는 역할 기반 질의(`getByRole`)로 사용자 관점을 검증한다"
+  ],
+  "vars": {
+    "src_root": {"description": "영역 기준 소스 루트(예: src)", "pattern": "[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*", "default": "src"},
+    "api_client_import": {"description": "api 도메인 모듈이 공통 클라이언트를 가져오는 경로(api 디렉터리 기준)", "pattern": "[@A-Za-z0-9_./-]+", "default": "./client"},
+    "api_client_fn": {"description": "공통 클라이언트의 요청 함수 이름(request<T>(path, options))", "pattern": "[A-Za-z_$][A-Za-z0-9_$]*", "default": "request"},
+    "lint_script": {"description": "lint npm 스크립트 이름", "pattern": "[A-Za-z0-9:_-]+", "default": "lint"},
+    "format_script": {"description": "형식 검사 npm 스크립트 이름", "pattern": "[A-Za-z0-9:_-]+", "default": "format:check"},
+    "test_script": {"description": "테스트 1회 실행 npm 스크립트 이름", "pattern": "[A-Za-z0-9:_-]+", "default": "test:run"},
+    "build_script": {"description": "타입 검사 + 빌드 npm 스크립트 이름", "pattern": "[A-Za-z0-9:_-]+", "default": "build"}
+  },
+  "layers": {
+    "routes": ["routes"],
+    "pages": ["pages"],
+    "components": ["components"],
+    "api": ["api"],
+    "types": ["types"],
+    "utils": ["utils"]
+  },
+  "allow": {
+    "routes": ["pages", "components", "api", "types", "utils"],
+    "pages": ["components", "api", "types", "utils", "routes"],
+    "components": ["types", "utils"],
+    "api": ["types", "utils"],
+    "types": [],
+    "utils": ["types"]
+  },
+  "scaffold": {
+    "screen": {
+      "description": "화면: pages/<area>/<Name>Page/{index.tsx, <Name>Page.module.css, <Name>Page.test.tsx}. 라우트는 조각으로 출력",
+      "vars": {"area": {"description": "화면 영역 디렉터리(선택, 예: movies)", "pattern": "[a-z][a-z0-9-]*", "default": ""}},
+      "files": [
+        {"src": "index.tsx", "dest": "{{src_root}}/pages/{{area}}/{{name_pascal}}Page/index.tsx"},
+        {"src": "Page.module.css", "dest": "{{src_root}}/pages/{{area}}/{{name_pascal}}Page/{{name_pascal}}Page.module.css"},
+        {"src": "Page.test.tsx", "dest": "{{src_root}}/pages/{{area}}/{{name_pascal}}Page/{{name_pascal}}Page.test.tsx"}
+      ],
+      "snippet": "snippet.txt"
+    },
+    "api": {
+      "description": "API 도메인 모듈: api/<domain>.ts(공통 클라이언트 호출, 함수마다 API-ID 주석)와 fetch 대체 테스트",
+      "files": [
+        {"src": "domain.ts", "dest": "{{src_root}}/api/{{name_camel}}.ts"},
+        {"src": "domain.test.ts", "dest": "{{src_root}}/api/{{name_camel}}.test.ts"}
+      ]
+    },
+    "api-client": {
+      "description": "클라이언트가 없는 새 저장소용 최소 공통 클라이언트 api/<name>.ts(fetch, 실패 시 throw). 한 번만 만든다",
+      "files": [
+        {"src": "client.ts", "dest": "{{src_root}}/api/{{name_camel}}.ts"}
+      ]
+    }
+  },
+  "conventions": {
+    "rules": {
+      "no-mocks-import": "화면(pages)·공용 컴포넌트(components)는 mocks/를 import하지 않는다. 데이터는 api/를 거친다",
+      "no-cross-screen-import": "화면 하위 컴포넌트는 그 화면 안에서만 쓴다. 다른 화면 디렉터리(*Page/)를 import하지 않는다(두 화면이 쓰면 components/로 올린다)",
+      "jsx-a11y-recommended": "eslint-plugin-jsx-a11y recommended 규칙(대체 텍스트, 역할·속성, 상호작용 요소)"
+    },
+    "files": [
+      {"src": "conventions/eslint.harness.js", "dest": "eslint.harness.js", "kind": "configured"}
+    ]
+  },
+  "setup_notes": [
+    "eslint.harness.js 는 devDependency eslint-plugin-jsx-a11y 가 필요하다: npm install -D eslint-plugin-jsx-a11y (ESLint 10 이면 package.json overrides 에 \"eslint-plugin-jsx-a11y\": { \"eslint\": \"$eslint\" } 를 함께 둔다. 빌드·lock 파일 변경이라 엄격 트리거다)",
+    "eslint.config.js 에서 import harness from './eslint.harness.js'; 로 가져와 설정 배열 끝에 ...harness 를 펼친다. 생성 파일이라 .prettierignore 에 eslint.harness.js 를 넣는다",
+    "스캐폴드: harness scaffold <영역> screen <Name> [--var area=<영역>], api <domain>, api-client Client(클라이언트가 없을 때 한 번). 라우트는 출력된 조각을 routes/paths.ts·routes/router.tsx 에 붙인다"
+  ]
+}
