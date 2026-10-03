@@ -147,7 +147,10 @@ def validate_config(config: dict, source: Path | str) -> None:
         raise HarnessError(f"{source}: 최상위 설정은 객체여야 한다")
     unknown = sorted(set(config) - CONFIG_KEYS)
     if unknown:
-        raise HarnessError(f"{source}: 알 수 없는 설정 키: {', '.join(unknown)}")
+        # 제거한 기능의 키는 무엇을 지울지 알려 준다
+        hint = (" (Claude MR 리뷰는 키트에서 제거됐다(#43). 이 키와 `.harness/claude-review/`, CI의 claude-review include를 지운다)"
+                if "claude_review" in unknown else "")
+        raise HarnessError(f"{source}: 알 수 없는 설정 키: {', '.join(unknown)}{hint}")
     required = ["project_name", "platform", "tracker", "default_branch", "integration_branch"]
     missing = [key for key in required if not isinstance(config.get(key), str) or not config[key].strip()]
     if missing:

@@ -380,7 +380,7 @@ class ConfigTest(unittest.TestCase):
         """#43: Claude MR 리뷰를 제거해 claude_review 블록과 매니페스트 requires는 더 이상 받지 않는다."""
         config = {**self.BASE, "platform": "gitlab", "tracker": "jira", "issue_prefix": "DEMO",
                   "claude_review": {"target_branch": "develop"}}
-        with self.assertRaisesRegex(harness.HarnessError, "알 수 없는 설정 키: claude_review"):
+        with self.assertRaisesRegex(harness.HarnessError, "알 수 없는 설정 키: claude_review.*제거됐다.*\.harness/claude-review/"):
             harness.validate_config(config, "test")
         real = harness.read_manifest()
         entry = {"src": "AGENTS.md", "dest": "X.md", "requires": "claude_review"}
