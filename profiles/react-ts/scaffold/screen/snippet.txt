@@ -1,0 +1,11 @@
+// routes/paths.ts — ROUTE_PATTERN에 경로 패턴을 더한다(파라미터는 `:id`처럼)
+{{name_camel}}: '/{{name_kebab}}',
+
+// routes/paths.ts — path에 이동 함수를 더한다(파라미터가 있으면 인자로 받는다)
+{{name_camel}}: () => ROUTE_PATTERN.{{name_camel}},
+
+// routes/router.tsx — import를 더한다(area를 비웠다면 경로의 `//`를 `/`로 고친다)
+import {{name_pascal}}Page from '../pages/{{area}}/{{name_pascal}}Page';
+
+// routes/router.tsx — 알맞은 레이아웃의 children에 더한다. 로그인이 필요한 화면은 인증 가드 아래에 둔다
+{ path: ROUTE_PATTERN.{{name_camel}}, element: <{{name_pascal}}Page /> },

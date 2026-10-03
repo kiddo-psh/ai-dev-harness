@@ -1,0 +1,5 @@
+// 1) 형식: ./gradlew spotlessApply (google-java-format AOSP. 이름 길이에 따라 줄바꿈이 달라질 수 있다)
+// 2) 공개 API면 보안 설정(SecurityConfig 등 공유 파일)의 허용 경로에 직접 붙인다:
+//        .requestMatchers("/api/v1/{{name_kebab}}/**").permitAll()
+// 3) 테이블({{name_snake}})의 DB 마이그레이션은 스키마 문서에 맞춰 직접 만든다
+// 4) lombok={{lombok}}. false면 .harness/templates/spring-java/domain/ 에 Lombok 없는 템플릿을 두고 다시 생성한다

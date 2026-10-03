@@ -67,8 +67,8 @@
 명령이 있고, 생성물이 컨벤션 테스트와 CI를 통과한다. 모바일은 이전 프로젝트 근거가 없어 규칙을 처음 정하므로 1주를 더 둔다.
 
 - [x] M3-1 프로필 구조 확정: `profiles/<name>/{profile.json,scaffold/,conventions/}`, `init --area --profile`, `harness scaffold`, 계층 규칙 설정(`layers`·`allow`)과 고정 규칙 끄기(`disabled_rules`) (#47)
-- [ ] M3-2 `spring-java` 프로필: 도메인(패키지·Controller·Service·Repository·DTO·테스트 뼈대) 생성, 컨벤션 테스트(계층 의존 방향, 예외 처리, 트랜잭션 경계 규칙)
-- [ ] M3-3 `react-ts` 프로필: 화면(라우트·페이지·API 클라이언트·테스트 뼈대) 생성, 컨벤션 테스트(공용 컴포넌트 경계, 접근성 lint)
+- [x] M3-2 `spring-java` 프로필: 도메인(패키지·Controller·Service·Repository·DTO·테스트 뼈대) 생성, 컨벤션 테스트(계층 의존 방향, 트랜잭션 경계 규칙). 예외 처리는 공통 예외 사용 예시만 두고(J-4) 테스트는 후속 (#49)
+- [x] M3-3 `react-ts` 프로필: 화면(라우트·페이지·API 클라이언트·테스트 뼈대) 생성, 컨벤션 테스트(공용 컴포넌트 경계, 접근성 lint) (#50)
 - [ ] M3-4 `android-kotlin` 프로필(폰 + Wear OS): M3-4a 기본값·고정 규칙·최소 템플릿, M3-4b 새 프로젝트 아키텍처 ADR에 맞춘 구체 템플릿·계층 설정
 - [ ] M3-5 리허설 확장: 프로필별로 생성 → 컨벤션 테스트 → CI 조각 실행
 
