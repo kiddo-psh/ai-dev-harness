@@ -60,6 +60,56 @@ jobs:
       - name: 보안 검사 리허설
         run: python3 .github/scripts/rehearse.py security
 
+  # 프로필별 리허설(M3-5). fixture 저장소에 프로필을 적용하고 scaffold → 영역 검증 명령(형식·컨벤션 테스트·lint·빌드)을
+  # 저장소 루트에서 실행한다. 음성 시나리오는 컨벤션 테스트·lint가 실패해야 통과다. Maven Central·npm·Google Maven과
+  # 러너의 Android SDK에 기대므로 필수 체크로 두지 않는다. 앞 프로필이 실패해도 뒤 프로필을 돌려 실패 위치를 모두 본다.
+  # Gradle 캐시는 setup-java(actions/cache)로 둔다. setup-gradle은 MIT인 v5를 고정하고 자체 캐시는 끈다
+  # (v6부터 캐시가 별도 약관 컴포넌트다).
+  profiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # 같은 PR에서 새 실행(본문 수정 edited 포함)이 오면 앞 실행을 취소한다. 최대 45분짜리 job이 겹쳐 쌓이지 않게
+    concurrency:
+      group: profiles-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            tests/fixtures/profiles/**/*.gradle*
+            tests/fixtures/profiles/**/libs.versions.toml
+
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c  # v5.0.2
+        with:
+          gradle-version: "8.14.3"
+          cache-disabled: true
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/fixtures/profiles/react-ts/frontend/package-lock.json
+
+      - name: spring-java
+        run: python3 .github/scripts/rehearse_profiles.py spring-java
+
+      - name: react-ts
+        if: ${{ !cancelled() }}
+        run: python3 .github/scripts/rehearse_profiles.py react-ts
+
+      - name: android-kotlin
+        if: ${{ !cancelled() }}
+        run: python3 .github/scripts/rehearse_profiles.py android-kotlin
+
   # PR 본문 필수 절 검사(M2-2). GitLab 조각(core/ci/gitlab/mr-lint.yml)과 같은 모듈을 원본에서 실행한다.
   # pull_request 이벤트만 쓴다(pull_request_target은 쓰지 않는다). PR이 바꾼 검사 코드가 쓰기 토큰과 함께 돌지 않게
   # lint(PR 코드, 읽기 전용, 토큰 없음)와 댓글(기준 커밋 코드, pull-requests: write)을 두 job으로 나눈다.

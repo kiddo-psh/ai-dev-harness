@@ -76,7 +76,10 @@ class RehearseTest(unittest.TestCase):
     def test_secret_fixture_not_in_kit(self):
         tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True,
                                  check=True).stdout.splitlines()
-        lockfiles = [f for f in tracked if Path(f).name in ("package-lock.json", "gradle.lockfile", "yarn.lock")]
+        # M3-5(#56): 프로필 리허설 fixture의 npm lock은 의존성 고정(결정 H-5)이라 커밋한다. 이 경로 하나만 예외다
+        profile_lock = "tests/fixtures/profiles/react-ts/frontend/package-lock.json"
+        lockfiles = [f for f in tracked if Path(f).name in ("package-lock.json", "gradle.lockfile", "yarn.lock")
+                     and f != profile_lock]
         self.assertEqual(lockfiles, [])  # 취약 lockfile은 실행 중에만 만든다
         pattern = re.compile(r"ghp_[A-Za-z0-9]{36}")
         for rel in tracked:

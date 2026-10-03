@@ -92,6 +92,10 @@ PR에는 `security` workflow가 `core/ci/gitlab/`의 Secret 탐지(차단)와 SA
 (`.github/scripts/run_fragment.py`). 조각을 고치면 키트 PR에서 바로 그 조각이 돈다.
 `ci` workflow의 `rehearsal` job은 설치된 hooks와 보안 조각 4종의 검출 시나리오를 임시 대상 저장소에서 실행한다.
 외부 이미지·취약점 DB에 의존하므로 필수 체크에는 포함하지 않는다.
+같은 workflow의 `profiles` job은 프로필마다 `tests/fixtures/profiles/<name>/` 저장소에 `init --area --profile`과
+`scaffold`를 적용하고 영역 검증 명령(형식·컨벤션 테스트·lint·빌드)을 저장소 루트에서 실행한다. 규칙 위반을 넣은
+음성 시나리오는 실패해야 통과다(`.github/scripts/rehearse_profiles.py`). Maven·npm 레지스트리와 러너의 Android SDK에
+의존하므로 역시 필수 체크가 아니다. 프로필 템플릿·컨벤션 파일을 고친 PR은 이 job 결과를 확인한다.
 PR이 workflow·러너·조각을 바꾸면 그 PR의 검사도 바뀐 정의로 돈다. 러너가 경고로 알리지만 막지는 않는다.
 이런 PR은 엄격이라 사람이 병합하는 것이 최종 방어선이다. 브랜치 보호에는 `secret-detection`·`sast` 필수 체크와
 "Require branches to be up to date before merging"을 함께 켠다(대상 브랜치가 앞서가도 검사가 다시 돌지 않는다).

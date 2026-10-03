@@ -37,22 +37,27 @@ class FixedRulesArchitectureTest {
     // harness:rule transactional-in-service-only
 
     @ArchTest static final ArchRule TRANSACTIONAL_IN_SERVICE_ONLY = transactionalInServiceOnly();
+
     // harness:end
     // harness:rule controller-no-entity-return
 
     @ArchTest static final ArchRule CONTROLLER_NO_ENTITY_RETURN = controllerNoEntityReturn();
+
     // harness:end
     // harness:rule no-field-injection
 
     @ArchTest static final ArchRule NO_FIELD_INJECTION = noFieldInjection();
+
     // harness:end
     // harness:rule service-no-web-types
 
     @ArchTest static final ArchRule SERVICE_NO_WEB_TYPES = serviceNoWebTypes();
+
     // harness:end
     // harness:rule no-service-cycle-between-domains
 
     @ArchTest static final ArchRule NO_DOMAIN_SERVICE_CYCLE = noDomainServiceCycle();
+
     // harness:end
 
     private static ArchRule transactionalInServiceOnly() {
@@ -116,8 +121,7 @@ class FixedRulesArchitectureTest {
     }
 
     private static ArchRule noDomainServiceCycle() {
-        return slices()
-                .matching("{{base_package}}.domain.(*).service..")
+        return slices().matching("{{base_package}}.domain.(*).service..")
                 .should()
                 .beFreeOfCycles()
                 .because("기능 사이 Service 순환은 유스케이스 경계나 이벤트로 다시 설계한다")
