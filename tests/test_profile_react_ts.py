@@ -274,8 +274,9 @@ class ReactProfileTest(unittest.TestCase):
         dump = self.tmp / "dump.mjs"
         dump.write_text(
             "import configs from './eslint-harness.mjs';\n"
-            "console.log(JSON.stringify(configs.map((c) => ({ files: c.files, messages: "
-            "(c.rules?.['no-restricted-imports']?.[1]?.patterns ?? []).map((p) => p.message) }))));\n",
+            "console.log(JSON.stringify(configs.map((c) => ({ files: c.files, "
+            "messages: (c.rules?.['no-restricted-imports']?.[1]?.patterns ?? []).map((p) => p.message), "
+            "regexes: (c.rules?.['no-restricted-imports']?.[1]?.patterns ?? []).map((p) => p.regex) }))));\n",
             encoding="utf-8")
         result = subprocess.run([node, str(dump)], capture_output=True, text=True, encoding="utf-8",
                                 errors="replace", timeout=60)
@@ -288,6 +289,14 @@ class ReactProfileTest(unittest.TestCase):
         messages = " ".join(configs[index[inner]]["messages"])
         for expected in ("[no-mocks-import]", "[layers] 계층 components은", "[layers] 계층 shared은"):
             self.assertIn(expected, messages)
+        # PR #53 Codex: components가 shared를 허용하지 않으면 바깥 계층 파일의 하위 상대 import(`./shared`)도 막는다
+        def blocked(glob, source):
+            return any(re.search(regex, source) for regex in configs[index[glob]]["regexes"])
+
+        self.assertTrue(blocked("src/components/*.{js,jsx,ts,tsx}", "./shared/Card"))
+        self.assertTrue(blocked("src/components/*/*.{js,jsx,ts,tsx}", "../shared/Card"))
+        self.assertFalse(blocked("src/components/*.{js,jsx,ts,tsx}", "./Button"))
+        self.assertFalse(blocked("src/components/*/*.{js,jsx,ts,tsx}", "./shared/Card"))  # components/X/shared는 다른 곳
 
 
 if __name__ == "__main__":

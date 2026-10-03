@@ -52,13 +52,23 @@ function restrict(dir, pattern) {
     if (!restrictions.has(glob)) {
       restrictions.set(glob, { dir, depth, patterns: [] });
     }
-    restrictions.get(glob).patterns.push(pattern(depth));
+    restrictions.get(glob).patterns.push(pattern(depth, extra));
   }
 }
 
 /** 소스 루트까지 올라간 뒤 `dir`로 들어가는 상대 import */
 function intoDir(depth, dir) {
   return `^(\\.\\./)${'{'}${depth}${'}'}${escapeRegex(dir)}(/|$)`;
+}
+
+/**
+ * `source` 디렉터리 아래(extra 단계) 파일이 하위 디렉터리 `target`으로 내려가는 상대 import.
+ * 중첩 계층(components 안의 components/shared)은 소스 루트까지 올라가지 않고 `./shared`·`../shared`로 닿는다.
+ */
+function downInto(extra, source, target) {
+  const rest = escapeRegex(target.slice(source.length + 1));
+  const climb = extra === 0 ? '\\./' : `(\\.\\./)${'{'}${extra}${'}'}`;
+  return `^${climb}${rest}(/|$)`;
 }
 
 // harness:rule no-mocks-import
@@ -88,9 +98,12 @@ for (const [layer, dirs] of Object.entries(LAYERS)) {
   const allowed = new Set([layer, ...(ALLOW[layer] || [])]);
   const forbidden = Object.keys(LAYERS).filter((other) => !allowed.has(other));
   for (const dir of dirs) {
-    restrict(dir, (depth) => ({
+    restrict(dir, (depth, extra) => ({
       regex: forbidden
-        .flatMap((other) => LAYERS[other].map((target) => intoDir(depth, target)))
+        .flatMap((other) => LAYERS[other].flatMap((target) => [
+          intoDir(depth, target),
+          ...(target.startsWith(`${dir}/`) ? [downInto(extra, dir, target)] : []),
+        ]))
         .join('|') || '(?!)',
       message: `[layers] 계층 ${layer}은 ${forbidden.join(', ') || '(없음)'}에 의존하지 않는다. 허용: ${
         [...allowed].filter((name) => name !== layer).join(', ') || '(없음)'
