@@ -22,8 +22,7 @@
         "/.claude/settings.json", "/.claude/hooks/protect-paths.py", "/.claude/hooks/stop-verify.py",
         "/core/ci/gitlab/secret-detection.yml", "/core/ci/gitlab/sast.yml",
         "/core/ci/gitlab/dependency-audit.yml", "/core/ci/gitlab/image-scan.yml",
-        "/.github/workflows/security.yml", "/.github/scripts/run_fragment.py",
-        "/core/ci/gitlab/claude-review.yml", "/core/ci/claude-review/", "/core/templates/claude-review/"
+        "/.github/workflows/security.yml", "/.github/scripts/run_fragment.py"
       ],
       "standard": [
         "/core/", "/bin/", "/.github/", "/profiles/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/harness.json",
@@ -35,7 +34,6 @@
     "triggers": [
       "core/hooks/harness_common.py의 차단·수정 로직 변경이면 엄격",
       ".github/workflows/ci.yml의 보안 검사 리허설 단계나 .github/scripts/rehearse.py의 보안 시나리오 변경이면 엄격",
-      "core/templates/review-perspectives.md의 공통·CI 절(Claude 리뷰 시스템 프롬프트로 렌더된다) 변경이면 엄격",
       "harness.json 스키마·CLI 인자·자리표시자 이름·판정 식별자를 깨는 변경이면 첫 소비자 적용 뒤 엄격"
     ]
   }

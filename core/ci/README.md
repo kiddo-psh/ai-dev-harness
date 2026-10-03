@@ -1,7 +1,7 @@
 # core/ci
 
-대상 저장소가 `include: remote:`로 끌어 쓰는 GitLab CI 조각(ADR-0003). 보안 검사 4종(M1-6), MR 본문 lint(M2-2),
-Claude MR 리뷰(M2-4)가 있다.
+대상 저장소가 `include: remote:`로 끌어 쓰는 GitLab CI 조각(ADR-0003). 보안 검사 4종(M1-6)과
+MR 본문 lint(M2-2)가 있다.
 
 ```text
 core/ci/gitlab/
@@ -11,14 +11,9 @@ core/ci/gitlab/
   image-scan.yml         trivy image
   mr-lint.yml            MR 본문 필수 절 검사 (M2-2, 보안 검사 아님)
 core/ci/mr-lint/         MR 본문 lint 모듈 원본. init이 GitLab 대상 저장소 .harness/mr-lint/에 복사한다
-  claude-review.yml      도구 없는 Claude MR 리뷰 (M2-4, feelm 이관, 보호 브랜치 파이프라인 전용)
-core/ci/claude-review/   리뷰 스크립트 원본. init이 대상 저장소 .harness/claude-review/에 복사한다
-  examples/              서버 설정·systemd 유닛 예시 (init이 설치하지 않는다)
 ```
 
-각 조각은 단독으로 동작하고 MR 파이프라인에서만 실행된다. **예외는 `claude-review`다.** 리뷰 토큰이 MR 소스의
-CI·스크립트와 함께 실행되지 않도록 보호된 대상 브랜치의 파이프라인에서만 돈다(아래 "Claude MR 리뷰").
-필요한 변수와 조건은 파일 머리 주석에 있다.
+각 조각은 단독으로 동작하고 MR 파이프라인에서만 실행된다. 필요한 변수와 조건은 파일 머리 주석에 있다.
 
 ## 사용법
 
@@ -192,42 +187,6 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 - 리포트: `mr-lint.json`(결과 `pass`·`fail`·`error`·`skipped`, 실패 항목, 본문·변경 파일·적용 판정과 불일치, 파일별 판정, 사람 확인 목록, 댓글 상태)을 30일 보관한다.
   측정 수집기(M4-1)가 판정 불일치를 여기서 읽는다.
 
-## Claude MR 리뷰
-
-`claude-review.yml`은 열린 MR 하나를 도구 없는 Claude Code CLI로 리뷰해 댓글 하나로 남긴다. 설치(서버 계정·네트워크
-가드·systemd·runner·Secret)는 [`docs/install.md`](../docs/install.md) 14절을 따른다.
-
-| 숨은 job (재사용 rules) | 실행 조건 | 하는 일 |
-| --- | --- | --- |
-| `.harness-claude-auth-check` (`.harness-claude-auth-check-rules`) | 보호된 브랜치의 push·web 파이프라인, 수동 | 고정 `OK` 요청 하나로 자격 증명 확인 |
-| `.harness-claude-review` (`.harness-claude-review-rules`) | 보호된 브랜치의 web 파이프라인(수동) 또는 `CLAUDE_REVIEW_TRIGGER=comment`인 api 파이프라인 | 상태 댓글 → 수집 → 생성 → 게시, `after_script`에서 상태 갱신 |
-
-- **조각은 숨은 job만 준다.** 소비자가 로컬 `.gitlab-ci.yml`에서 `extends`로 `harness-claude-auth-check`·
-  `harness-claude-review`를 만들고 러너 태그·`environment.name`·대상 브랜치 규칙(`$CI_COMMIT_BRANCH != "<대상>"`이면
-  `when: never`)을 값으로 적은 뒤 재사용 rules를 `!reference`로 잇는다(`docs/install.md` 14.3). 파이프라인 변수가 CI
-  변수를 덮어쓸 수 있어 이 셋을 변수로 받지 않는다. job을 적지 않거나 rules 없이 `extends`만 하면 job은 돌지 않는다.
-
-- **MR 파이프라인에서는 돌지 않는다.** 스크립트도 대상 브랜치(`claude_review.target_branch`), 보호 ref, 환경 이름,
-  파이프라인 출처를 다시 확인하고 debug trace가 켜져 있으면 거부한다. 판정 기준은 보호 브랜치 체크아웃의
-  `harness.json`이다.
-- **실행하는 코드는 보호 브랜치의 `.harness/claude-review/` 사본뿐이다.** MR 브랜치는 checkout하지 않고 GitLab API로
-  메타데이터와 diff만 받는다. fork MR, 대상 브랜치가 다른 MR, 입력한 SHA와 현재 HEAD가 다른 MR은 거부한다.
-- **도구 없는 실행.** `--tools ""`, slash command·설정 파일·MCP·hook·세션 저장을 끄고 빈 HOME에서 한 번만 응답받는다.
-  이 인자 목록은 `review_common.CLI_ARGS` 상수이며 테스트가 고정한다. 자식 프로세스에는 `credential`이 고른 자격 증명
-  하나와 고정 환경만 넘기고 GitLab 토큰·다른 자격 증명·proxy는 넘기지 않는다.
-- **MR 내용은 신뢰하지 않는다.** 시스템 프롬프트는 리뷰 관점 원본의 공통+CI 절(`review_perspectives_ci`)에서 렌더한
-  `.harness/claude-review/system-prompt.md`다. MR 설명은 근거로 쓰지 않는다. 신뢰된 규칙은 `claude_review.rules_docs`
-  allowlist만 읽고 MR 경로를 로컬 경로로 쓰지 않는다. 결과는 스키마·심각도·변경 파일·줄 번호를 검증한 뒤에만 게시한다.
-- **댓글.** 숨은 식별자(`comment_marker`, 프로젝트·MR·SHA)로 같은 토큰 사용자의 기존 리뷰가 있으면 다시 게시하지 않는다.
-  게시 전 두 번, 게시 후 한 번 HEAD를 확인하고 그사이 새 커밋이 오면 방금 만든 댓글만 지운다. 모델 문자열은 코드 블록에
-  가둬 멘션·링크·quick action으로 해석되지 않게 한다.
-- **크기 상한.** 파일 100개, 파일당 diff 128 KiB, 전체 512 KiB, GitLab이 접은 diff는 리뷰하지 않고 실패한다.
-  `claude_review.limits`로 낮출 수 있다.
-- **로그.** 분류 코드, 모델명과 토큰 수만 남긴다. 토큰, MR diff, 리뷰 원문은 출력하지 않는다.
-- **네트워크 가드.** 리뷰 계정 UID에만 nftables 규칙을 건다(DNS 53과 공개 IPv4 443만 허용). 공개 HTTPS 전체를 허용하므로
-  도메인 단위 차단은 아니다. 그래서 MR 소스를 실행하지 않고 도구도 허용하지 않는다.
-- 리뷰는 참고용이며 `allow_failure: true`다. 승인·병합 판단은 사람이 한다.
-
 ## 키트 자기 적용
 
 키트 저장소의 PR에서는 `.github/workflows/security.yml`이 `secret-detection`과 `sast` 조각을 GitHub Actions로 실행한다(M1-7).
@@ -238,7 +197,6 @@ job 이름은 `harness-`로 시작한다. `stage`(기본 `test`), `needs`, `imag
 `script:` 아래 `- |` 블록 하나, 변수 값은 큰따옴표 또는 맨 값(`$` 없음)이다. 모르는 모양은 실패한다(스크립트 일부만 돌려 통과하지 않는다).
 PR이 workflow·러너·조각을 바꿨으면 job 로그에 경고가 나온다.
 키트에는 lockfile과 이미지가 없어 의존성 감사·이미지 스캔은 리허설(M1-8)에서 돌린다.
-`claude-review`는 자기 적용하지 않는다. 스크립트 단위 테스트(`tests/test_claude_review*.py`)만 돈다.
 
 MR 본문 lint는 `ci` workflow의 `mr-lint` job이 같은 모듈 원본(`core/ci/mr-lint/mr_lint.py`)을 실행한다. 본문은 이벤트 파일의
 `pull_request.body`, 변경 범위는 `pull_request.base.sha`·`head.sha`다. PR 본문만 고쳐도 다시 돌도록 `pull_request` 타입에

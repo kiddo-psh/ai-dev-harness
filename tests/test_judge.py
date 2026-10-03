@@ -192,9 +192,6 @@ class KitSelfJudgeTest(unittest.TestCase):
         "core/ci/gitlab/secret-detection.yml": "strict", "core/ci/gitlab/sast.yml": "strict",
         "core/ci/gitlab/dependency-audit.yml": "strict", "core/ci/gitlab/image-scan.yml": "strict",
         ".github/workflows/security.yml": "strict", ".github/scripts/run_fragment.py": "strict",
-        # M2-4 Claude 리뷰: 토큰·신뢰 경계(결정표 1장 엄격). 판정표 문구 추가는 사람 확인
-        "core/ci/gitlab/claude-review.yml": "strict", "core/ci/claude-review/review_common.py": "strict",
-        "core/templates/claude-review/system-prompt.md": "strict", "core/templates/review-perspectives.md": "standard",
         # 표준: CLI, 템플릿, 보안이 아닌 CI 조각·워크플로, 생성 파일
         "bin/harness.py": "standard", "core/templates/AGENTS.md": "standard",
         "core/hooks/harness_common.py": "standard", ".claude/hooks/harness_common.py": "standard",
@@ -202,6 +199,7 @@ class KitSelfJudgeTest(unittest.TestCase):
         "core/metrics/classify_ci.py": "standard", "AGENTS.md": "standard",
         "docs/templates/plan.md": "standard", "docs/secret-environment-variables.md": "standard",
         "core/ci/README.md": "standard", "harness.json": "standard", "README.md": "standard",
+        "core/templates/review-perspectives.md": "standard",
         "profiles/README.md": "standard", "core/hooks/README.md": "standard",
         "core/hooks/settings.template.json": "strict", ".claude/hooks/protect-paths.py": "strict",
         ".github/PULL_REQUEST_TEMPLATE.md": "standard",
@@ -240,8 +238,7 @@ class KitSelfJudgeTest(unittest.TestCase):
     def test_human_check_lists_unpathable_strict_conditions(self):
         """리뷰 F8·F10: 경로로 가를 수 없는 엄격 조건은 사람 확인 문장으로 나와야 한다."""
         triggers = " ".join(item["trigger"] for item in common.judge(["bin/harness.py"], self.config())["human_check"])
-        for name in ("core/hooks/harness_common.py", ".github/workflows/ci.yml", "rehearse.py", "harness.json 스키마",
-                     "review-perspectives.md"):
+        for name in ("core/hooks/harness_common.py", ".github/workflows/ci.yml", "rehearse.py", "harness.json 스키마"):
             self.assertIn(name, triggers)
 
     def test_contributing_strict_row_names_the_rule_targets(self):

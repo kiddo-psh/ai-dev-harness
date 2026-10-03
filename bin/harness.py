@@ -36,13 +36,11 @@ CI_DIR = KIT_ROOT / "core" / "ci"
 METRICS_DIR = KIT_ROOT / "core" / "metrics"
 # 매니페스트 항목의 base가 가리키는 원본 디렉터리
 SOURCE_DIRS = {"templates": TEMPLATES_DIR, "hooks": HOOKS_DIR, "ci": CI_DIR}
-# 매니페스트 항목의 requires가 가리킬 수 있는 설정 키. 설정에 그 키가 있을 때만 생성한다
-OPTIONAL_BLOCKS = {"claude_review"}
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
 AREA_TEMPLATE = "AREA-AGENTS.md"
 AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs", "trigger_paths", "test_paths"}
 CONFIG_KEYS = {"harness_version", "project_name", "platform", "tracker", "issue_prefix",
-               "default_branch", "integration_branch", "related_docs", "areas", "hooks", "judge", "claude_review"}
+               "default_branch", "integration_branch", "related_docs", "areas", "hooks", "judge"}
 RELATED_DOC_KEYS = {"label", "path"}
 CONFIG_NAME = "harness.json"
 
@@ -110,12 +108,6 @@ _HOOKS_SPEC.loader.exec_module(hooks_common)
 # 영역 AGENTS.md의 기본 트리거. 판정의 사람 확인 목록과 같은 값이라 hook 공통 코드에 둔다
 DEFAULT_TRIGGERS = list(hooks_common.DEFAULT_AREA_TRIGGERS)
 
-# claude_review 검증은 대상에 복사되는 리뷰 공통 코드와 같은 규칙을 쓴다
-_REVIEW_SPEC = importlib.util.spec_from_file_location("harness_review_common",
-                                                      CI_DIR / "claude-review" / "review_common.py")
-review_common = importlib.util.module_from_spec(_REVIEW_SPEC)
-_REVIEW_SPEC.loader.exec_module(review_common)
-
 # CI 실패 분류는 M4-1 수집기도 쓰는 core/metrics 모듈에 둔다
 _CLASSIFY_SPEC = importlib.util.spec_from_file_location("harness_classify_ci", METRICS_DIR / "classify_ci.py")
 classify_ci = importlib.util.module_from_spec(_CLASSIFY_SPEC)
@@ -155,7 +147,10 @@ def validate_config(config: dict, source: Path | str) -> None:
         raise HarnessError(f"{source}: 최상위 설정은 객체여야 한다")
     unknown = sorted(set(config) - CONFIG_KEYS)
     if unknown:
-        raise HarnessError(f"{source}: 알 수 없는 설정 키: {', '.join(unknown)}")
+        # 제거한 기능의 키는 무엇을 지울지 알려 준다
+        hint = (" (Claude MR 리뷰는 키트에서 제거됐다(#43). 이 키와 `.harness/claude-review/`, CI의 claude-review include를 지운다)"
+                if "claude_review" in unknown else "")
+        raise HarnessError(f"{source}: 알 수 없는 설정 키: {', '.join(unknown)}{hint}")
     required = ["project_name", "platform", "tracker", "default_branch", "integration_branch"]
     missing = [key for key in required if not isinstance(config.get(key), str) or not config[key].strip()]
     if missing:
@@ -184,13 +179,6 @@ def validate_config(config: dict, source: Path | str) -> None:
             hooks_common.validate_judge_root(config["judge"], source)
     except hooks_common.ConfigError as exc:
         raise HarnessError(str(exc)) from exc
-    if "claude_review" in config:  # 생략하면 리뷰 파일을 만들지 않는다. 명시한 null은 객체 계약 위반이다
-        if config["platform"] != "gitlab":
-            raise HarnessError(f"{source}: claude_review는 platform이 gitlab일 때만 쓴다")
-        try:
-            review_common.validate_policy(config["claude_review"], str(source))
-        except review_common.PolicyError as exc:
-            raise HarnessError(str(exc)) from exc
 
 
 def normalize_area_dir(value: str, source: Path | str) -> str:
@@ -384,7 +372,7 @@ def load_manifest() -> list[dict]:
     data = read_manifest()
     seen = set()
     for entry in data["files"]:
-        if not isinstance(entry, dict) or not {"src", "dest"} <= set(entry) or set(entry) - {"src", "dest", "base", "platform", "self", "render", "requires"}:
+        if not isinstance(entry, dict) or not {"src", "dest"} <= set(entry) or set(entry) - {"src", "dest", "base", "platform", "self", "render"}:
             raise HarnessError("매니페스트 항목의 키가 잘못됐다")
         base = entry.get("base", "templates")
         if not isinstance(base, str) or base not in SOURCE_DIRS:
@@ -397,8 +385,7 @@ def load_manifest() -> list[dict]:
             raise HarnessError(f"매니페스트 목적지가 중복된다: {entry['dest']}")
         seen.add(entry["dest"])
         if ("platform" in entry and (not isinstance(entry["platform"], str) or entry["platform"] not in PLATFORMS) or
-                any(key in entry and not isinstance(entry[key], bool) for key in ("self", "render")) or
-                "requires" in entry and (not isinstance(entry["requires"], str) or entry["requires"] not in OPTIONAL_BLOCKS)):
+                any(key in entry and not isinstance(entry[key], bool) for key in ("self", "render"))):
             raise HarnessError(f"매니페스트 선택 값이 잘못됐다: {entry['dest']}")
     return data["files"]
 
@@ -411,8 +398,6 @@ def planned_files(config: dict, self_mode: bool) -> list[tuple[Path, str, bool]]
         if wanted_platform and wanted_platform != config["platform"]:
             continue
         if self_mode and not entry.get("self", False):
-            continue
-        if "requires" in entry and entry["requires"] not in config:  # 선택 블록이 없으면 만들지 않는다
             continue
         base = entry.get("base", "templates")
         if base not in SOURCE_DIRS:

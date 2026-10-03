@@ -34,7 +34,7 @@ python bin/harness.py check ../my-project
 bin/harness.py     명령 진입점 (init · check · version). 표준 라이브러리만 사용
 core/templates/    규칙 문서와 양식 템플릿 + manifest.json
 core/hooks/        Claude Code hooks: 보호 경로 차단·확인, 종료 시 검증. (3·4주차) 3단계 자동 판정
-core/ci/           (2·3주차) GitLab CI include 조각: 보안 검사 4종, MR 본문 lint, Claude 리뷰
+core/ci/           (2·3주차) GitLab CI include 조각: 보안 검사 4종, MR 본문 lint
 core/metrics/      (7주차) 플랜·리뷰 측정 칸 수집, CI 결과 분류, 주간 요약
 profiles/          (5주차) 스택별 스캐폴드와 컨벤션 테스트
 docs/              키트 자체 문서: 개발 계획, 기여 규칙, ADR, 이관 대장
