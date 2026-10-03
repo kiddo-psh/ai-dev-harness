@@ -1,0 +1,121 @@
+{
+  "name": "android-kotlin",
+  "description": "Android(Kotlin·Jetpack Compose) 폰·Wear OS 모듈 영역 기본값. 계층·DI는 프로젝트 아키텍처 ADR이 정한다(M3-4b)",
+  "verify": [
+    "./gradlew :{{module}}:ktlintCheck :{{module}}:lintDebug :{{module}}:testDebugUnitTest :{{module}}:assembleDebug"
+  ],
+  "trigger_paths": {
+    "strict": [
+      "**/build.gradle.kts",
+      "**/AndroidManifest.xml",
+      "**/proguard-rules.pro",
+      "*.jks",
+      "*.keystore",
+      "gradle.lockfile"
+    ],
+    "standard": []
+  },
+  "test_paths": ["/src/test/", "/src/androidTest/", "*Test.kt", "*Tests.kt"],
+  "triggers": [
+    "권한 추가·변경(AndroidManifest.xml의 uses-permission, 런타임 권한 요청)",
+    "토큰·인증 정보의 저장·전달(SharedPreferences·DataStore·Keystore·Intent)",
+    "백그라운드 작업(WorkManager·Service·알람·포그라운드 서비스)의 신설·변경",
+    "폰↔워치 데이터 동기화(Wearable Data Layer API)와 메시지 형식",
+    "계약(서버 API·DTO·직렬화 형식) 변경, 또는 계약과 다른 구현"
+  ],
+  "review_focus": [
+    "생명주기·구성 변경에서 상태 보존(ViewModel·SavedStateHandle)",
+    "메인 스레드 차단과 코루틴 범위",
+    "접근성(contentDescription·터치 영역·글자 크기)"
+  ],
+  "vars": {
+    "base_package": {
+      "description": "모듈의 기본 패키지(예: com.acme.fit, com.acme.fit.wear)",
+      "pattern": "[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*"
+    },
+    "module": {
+      "description": "Gradle 모듈 이름(한 단계, 예: app, wear). 검증 명령과 Konsist 범위에 쓴다",
+      "pattern": "[a-z][a-z0-9_-]*",
+      "default": "app"
+    },
+    "app_module": {
+      "description": "폰 앱 모듈 이름. 규칙 wear-not-depend-on-app이 이 모듈 패키지 import를 막는다",
+      "pattern": "[a-z][a-z0-9_-]*",
+      "default": "app"
+    },
+    "kotlin_src": {"description": "모듈 기준 생산 소스 루트", "default": "src/main/java"},
+    "kotlin_test": {"description": "모듈 기준 단위 테스트 소스 루트", "default": "src/test/java"},
+    "min_sdk": {"description": "minSdk(안내에만 쓴다)", "pattern": "[0-9]+", "default": "26"}
+  },
+  "layers": {
+    "ui": ["..ui.."],
+    "domain": ["..domain.."],
+    "data": ["..data.."]
+  },
+  "allow": {
+    "ui": ["domain", "data"],
+    "domain": [],
+    "data": ["domain"]
+  },
+  "scaffold": {
+    "screen": {
+      "description": "폰 화면: 무상태 Screen·Route·ViewModel·UiState·ViewModel 테스트(DI 없는 생성자 주입)",
+      "files": [
+        {"src": "Screen.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}Screen.kt"},
+        {"src": "Route.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}Route.kt"},
+        {"src": "ViewModel.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}ViewModel.kt"},
+        {"src": "UiState.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}UiState.kt"},
+        {"src": "ViewModelTest.kt", "dest": "{{kotlin_test}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}ViewModelTest.kt"}
+      ],
+      "snippet": "snippet.kt"
+    },
+    "wear-screen": {
+      "description": "Wear OS 화면: Wear Compose Material 3 Screen·Route·ViewModel·UiState·ViewModel 테스트",
+      "files": [
+        {"src": "Screen.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}Screen.kt"},
+        {"src": "Route.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}Route.kt"},
+        {"src": "ViewModel.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}ViewModel.kt"},
+        {"src": "UiState.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}UiState.kt"},
+        {"src": "ViewModelTest.kt", "dest": "{{kotlin_test}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}ViewModelTest.kt"}
+      ],
+      "snippet": "snippet.kt"
+    }
+  },
+  "conventions": {
+    "rules": {
+      "no-global-scope": "GlobalScope 금지(수명 있는 코루틴 범위를 쓴다)",
+      "viewmodel-no-android-context": "ViewModel 파일은 Context·Activity·View를 import하지 않는다",
+      "screen-no-viewmodel-param": "이름이 *Screen인 함수는 ViewModel 타입 매개변수를 받지 않는다",
+      "wear-not-depend-on-app": "app 모듈이 아닌 모듈(wear 등)은 app 모듈 패키지를 import하지 않는다"
+    },
+    "formats": {
+      "konsist_layers": {
+        "layer": "                val {{layer}} = Layer(\"{{layer}}\", {{patterns}})",
+        "pattern": "\"{{pattern}}\""
+      },
+      "konsist_dependencies": {
+        "layer": "                {{layer}}.dependsOn({{allowed}})",
+        "layer_empty": "                {{layer}}.dependsOnNothing()"
+      }
+    },
+    "files": [
+      {
+        "src": "conventions/HarnessFixedRulesTest.kt",
+        "dest": "{{kotlin_test}}/{{base_package_path}}/architecture/HarnessFixedRulesTest.kt",
+        "kind": "fixed"
+      },
+      {
+        "src": "conventions/HarnessLayerArchitectureTest.kt",
+        "dest": "{{kotlin_test}}/{{base_package_path}}/architecture/HarnessLayerArchitectureTest.kt",
+        "kind": "configured"
+      }
+    ]
+  },
+  "setup_notes": [
+    "모듈 {{module}} 의 build.gradle.kts 에 컨벤션 테스트 의존성을 추가한다: testImplementation(\"com.lemonappdev:konsist:<버전>\"), testImplementation(\"junit:junit:4.13.2\")",
+    "scaffold 생성물 의존성: lifecycle-viewmodel-compose·lifecycle-runtime-compose, testImplementation kotlinx-coroutines-test, 폰은 navigation-compose·compose-material3, 워치는 wear compose-material3·compose-navigation",
+    "ktlint Gradle 플러그인(org.jlleitschuh.gradle.ktlint)과 Android Lint abortOnError 설정을 모듈 {{module}} 에 적용한다(profiles/android-kotlin/README.md)",
+    "의존성 잠금이 필수다: 모듈 {{module}} 에 dependencyLocking { lockAllConfigurations() } 를 켜고 ./gradlew :{{module}}:dependencies --write-locks 로 gradle.lockfile 을 커밋한다(의존성 감사 전제)",
+    "모듈 {{module}} 의 minSdk 가정값: defaultConfig { minSdk = {{min_sdk}} } (Wear OS 모듈은 보통 30 이상, --var min_sdk=30)"
+  ]
+}
