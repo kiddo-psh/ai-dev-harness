@@ -1,3 +1,6 @@
+// 규칙을 모두 끄면 assertFalse import가 남는다. 이 파일은 harness check가 관리해 손으로 못 고치므로 해당 검사만 끈다
+@file:Suppress("ktlint:standard:no-unused-imports")
+
 package {{base_package}}.architecture
 
 import com.lemonappdev.konsist.api.Konsist

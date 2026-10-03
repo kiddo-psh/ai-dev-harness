@@ -113,7 +113,8 @@
   },
   "setup_notes": [
     "모듈 {{module}} 의 build.gradle.kts 에 컨벤션 테스트 의존성을 추가한다: testImplementation(\"com.lemonappdev:konsist:<버전>\"), testImplementation(\"junit:junit:4.13.2\")",
-    "scaffold 생성물 의존성: lifecycle-viewmodel-compose·lifecycle-runtime-compose, testImplementation kotlinx-coroutines-test, 폰은 navigation-compose·compose-material3, 워치는 wear compose-material3·compose-navigation",
+    "scaffold 생성물 의존성: lifecycle-viewmodel-compose·lifecycle-runtime-compose, compose ui-tooling-preview(@Preview), testImplementation kotlinx-coroutines-test, 폰은 navigation-compose·androidx.compose.material3:material3, 워치는 wear compose-material3·compose-navigation",
+    "기본 계층 ui·domain·data 중 아직 패키지가 없는 계층은 Konsist 계층 검사가 실패할 수 있다. 모듈 {{module}} 에 domain·data 패키지가 생길 때까지 harness.json 영역의 layers·allow에서 지우고 init --area --force 로 다시 만든다",
     "ktlint Gradle 플러그인(org.jlleitschuh.gradle.ktlint)과 Android Lint abortOnError 설정을 모듈 {{module}} 에 적용한다(profiles/android-kotlin/README.md)",
     "의존성 잠금이 필수다: 모듈 {{module}} 에 dependencyLocking { lockAllConfigurations() } 를 켜고 ./gradlew :{{module}}:dependencies --write-locks 로 gradle.lockfile 을 커밋한다(의존성 감사 전제)",
     "모듈 {{module}} 의 minSdk 가정값: defaultConfig { minSdk = {{min_sdk}} } (Wear OS 모듈은 보통 30 이상, --var min_sdk=30)"

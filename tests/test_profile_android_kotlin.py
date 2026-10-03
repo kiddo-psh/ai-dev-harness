@@ -125,7 +125,7 @@ class AndroidProfileTest(unittest.TestCase):
                     self.assertIn(f'.scopeFromProduction("{module}")' if rel.endswith(LAYERS)
                                   else f'private val module = "{module}"', text)
                 self.assertIn(VERIFY.format(m=module), self.read(f"{dir_}/AGENTS.md"))
-        self.assertTrue(self.read(f"{WEAR_ARCH}/{FIXED}").startswith("package com.acme.fit.wear.architecture\n"))
+        self.assertIn("\npackage com.acme.fit.wear.architecture\n", self.read(f"{WEAR_ARCH}/{FIXED}"))
         self.assertIn('val appModule = "app"', self.read(f"{WEAR_ARCH}/{FIXED}"))
         self.assertEqual(self.check()[0], 0)
 
@@ -244,6 +244,13 @@ class AndroidProfileTest(unittest.TestCase):
         self.assertNotIn("harness:", text)
         self.assertNotIn("\n\n\n", text)
         self.assertIn("fun moduleHasProductionSources()", text)
+        # 리뷰 F1: 전부 끄면 쓰지 않는 import가 남는다. check 관리 파일이라 ktlint 검사를 파일에서 꺼 둬야 한다
+        code = "\n".join(line for line in text.splitlines()
+                         if not line.startswith(("import ", "//", "@file:")))
+        unused = [line for line in text.splitlines() if line.startswith("import ")
+                  and line.rsplit(".", 1)[-1] not in code]
+        self.assertEqual(unused, ["import com.lemonappdev.konsist.api.verify.assertFalse"])
+        self.assertIn('@file:Suppress("ktlint:standard:no-unused-imports")', text)
 
     # --- T6 ---------------------------------------------------------------
 

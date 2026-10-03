@@ -38,6 +38,8 @@ class {{name_pascal}}ViewModelTest {
 
     @Test
     fun refreshFinishesLoading() {
+        // 자리표시 테스트: 지금 ViewModel은 중단 지점 없이 로딩을 켜고 끄므로 끝 상태만 본다.
+        // 데이터 계층 호출을 넣으면 그 대역을 지연시켜 isLoading이 true였다가 false가 되는 전이를 단언하도록 바꾼다
         runTest {
             val viewModel = {{name_pascal}}ViewModel()
 
