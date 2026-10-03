@@ -42,6 +42,8 @@ RULE_FIELDS = {
     "no-field-injection": "NO_FIELD_INJECTION",
     "service-no-web-types": "SERVICE_NO_WEB_TYPES",
     "no-service-cycle-between-domains": "NO_DOMAIN_SERVICE_CYCLE",
+    "no-cross-domain-persistence": "NO_CROSS_DOMAIN_PERSISTENCE",
+    "event-publisher-in-service-only": "EVENT_PUBLISHER_IN_SERVICE_ONLY",
 }
 J8_STRICT = [
     "/src/main/resources/db/migration/", "/build.gradle", "/settings.gradle",

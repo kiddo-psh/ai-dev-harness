@@ -66,6 +66,26 @@ public class MovieReviewCountController {
 }
 """
 
+SPRING_CROSS_DOMAIN_SERVICE = """\
+package com.example.rehearsal.domain.rating.service;
+
+import com.example.rehearsal.domain.moviereview.repository.MovieReviewRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+// 음성 시나리오: 다른 기능(moviereview)의 repository를 직접 쓴다(no-cross-domain-persistence 위반)
+@Service
+@RequiredArgsConstructor
+public class RatingService {
+
+    private final MovieReviewRepository movieReviewRepository;
+
+    public long reviewCount() {
+        return movieReviewRepository.count();
+    }
+}
+"""
+
 REACT_MOCKS_PAGE = """\
 import { movies } from '../../mocks/movies';
 
@@ -150,6 +170,10 @@ def scenarios() -> dict[str, dict]:
                  "files": {"backend/src/main/java/com/example/rehearsal/domain/moviereview/controller/"
                            "MovieReviewCountController.java": SPRING_LEAK_CONTROLLER},
                  "expect": ["Architecture Violation", "MovieReviewCountController"]},
+                {"name": "service-uses-other-domain-repository",
+                 "files": {"backend/src/main/java/com/example/rehearsal/domain/rating/service/"
+                           "RatingService.java": SPRING_CROSS_DOMAIN_SERVICE},
+                 "expect": ["Architecture Violation", "another domain's repository or entity", "RatingService"]},
             ],
         },
         "react-ts": {
