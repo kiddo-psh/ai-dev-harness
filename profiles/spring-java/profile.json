@@ -16,7 +16,9 @@
       "**/infrastructure/",
       "**/*SecurityConfig.java",
       "gradle.lockfile",
-      "settings-gradle.lockfile"
+      "settings-gradle.lockfile",
+      "/gradle/libs.versions.toml",
+      "/gradle/wrapper/"
     ],
     "standard": []
   },

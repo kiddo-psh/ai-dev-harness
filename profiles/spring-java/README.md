@@ -74,8 +74,9 @@ testImplementation 'com.tngtech.archunit:archunit-junit5:1.4.1' // 1.x 버전
 ### 형식(spotlessApply)
 
 템플릿은 google-java-format AOSP 형식(4칸 들여쓰기, 100자, 와일드카드 import 없음)으로 썼지만 이름 길이에 따라
-줄바꿈과 import 순서(`base_package`가 `lombok`·`org`보다 뒤에 정렬되는 경우)가 달라질 수 있다. 생성 뒤
-`./gradlew spotlessApply`를 실행한다.
+줄바꿈과 import 순서(`base_package`가 `lombok`·`org`보다 뒤에 정렬되는 경우, Boot 3.x용 `webmvc_test_package`를 준
+경우 `ControllerTest`의 `test.autoconfigure`·`test.context` 순서)가 달라질 수 있다. 생성 뒤 `./gradlew spotlessApply`를
+실행한다.
 
 ### Lombok 없이 쓰기
 
@@ -84,6 +85,11 @@ testImplementation 'com.tngtech.archunit:archunit-junit5:1.4.1' // 1.x 버전
 같은 이름 템플릿 대신 쓴다. 생성자와 getter를 직접 쓴 템플릿으로 덮어쓴다. 자리표시자는 프로필 템플릿과 같다.
 
 ## 컨벤션 테스트
+
+계층 기본값은 feelm의 **문서 규칙**(`backend-convention.md`)을 옮긴 것이다. feelm 코드 자체는 이 규칙을 모두 지키지 않는다
+(조회용 repository → dto, controller → 엔티티 enum, dto → service, service 밖 `@Transactional` 등). 기존 코드가 있는 저장소에
+적용하면 첫 `./gradlew build`에서 위반이 드러날 수 있으므로, 아키텍처 ADR에 맞춰 영역의 `allow`를 고치거나 고정 규칙을
+`disabled_rules`(이유 필수)로 끄고 `init --area <dir> --force`로 다시 생성한다.
 
 `FixedRulesArchitectureTest`(고정 규칙)와 `LayerRulesArchitectureTest`(계층 설정 규칙) 두 ArchUnit JUnit 5 클래스다.
 `harness check`가 드리프트를 보므로 손으로 고치지 않는다. 테스트 소스는 검사하지 않는다(`DoNotIncludeTests`).

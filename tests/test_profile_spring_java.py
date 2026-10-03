@@ -47,6 +47,8 @@ J8_STRICT = [
     "/src/main/resources/db/migration/", "/build.gradle", "/settings.gradle",
     "/src/main/resources/application*.yml", "**/global/", "**/infrastructure/", "**/*SecurityConfig.java",
     "gradle.lockfile",
+    # 리뷰 F2: 영역 strict가 키트 기본값을 대체하므로 같은 성격의 Gradle 버전 카탈로그·wrapper도 넣는다
+    "/gradle/libs.versions.toml", "/gradle/wrapper/",
 ]
 IMPORT = re.compile(r"import (static )?([\w.]+);")
 
