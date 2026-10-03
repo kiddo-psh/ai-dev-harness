@@ -93,7 +93,8 @@ python bin/harness.py scaffold android/wear wear-screen HeartRate --target ../my
 
 생성 결과는 `val ui = Layer("ui", "..ui..")` … `ui.dependsOn(domain, data)`, `domain.dependsOnNothing()` 형태다.
 Konsist `Layer`는 계층마다 패키지 패턴 하나(`..`로 끝남)를 받으므로 **계층마다 패턴을 하나만** 적는다(둘 이상이면 생성된
-코드가 컴파일되지 않는다). 계층 이름은 Kotlin 변수 이름으로 쓰이므로 영문자·숫자·밑줄만 쓴다. 아직 패키지가 없는
+코드가 컴파일되지 않는다). 계층 이름은 Kotlin 변수 이름으로 쓰이므로 영문자·숫자·밑줄만 쓰고 Kotlin 예약어(`class`·`object`·`in` 등)는 쓰지 않는다
+(엔진은 막지 않고, 생성 테스트가 컴파일 단계에서 실패한다). 아직 패키지가 없는
 계층(예: domain을 쓰지 않는 모듈)은 Konsist가 실패로 볼 수 있으니 `layers`·`allow`에서 지운다. 스캐폴드는 `ui/`만 만들므로 새 모듈(특히 워치)은 `domain`·`data` 패키지가 생길 때까지 두 계층을 지우거나 패키지를 먼저 만든다. `layers`를 빈 객체로 두면 생성 파일이 ktlint를 통과하지 못하니 계층을 하나 이상 남긴다.
 
 ## 소비자 의존성 (P-8)

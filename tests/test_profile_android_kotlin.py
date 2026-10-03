@@ -3,6 +3,7 @@
 생성된 Kotlin·Konsist 코드의 컴파일·실행은 여기서 하지 않는다(로컬 JDK·SDK 없음). 실제 빌드는 리허설(M3-5)이 맡는다.
 """
 
+import ast
 import importlib.util
 import io
 import json
@@ -289,6 +290,24 @@ class AndroidProfileTest(unittest.TestCase):
         self.assertNotIn("dependsOn(domain, data)", text)
 
     # --- T7 ---------------------------------------------------------------
+
+    def test_global_scope_ignores_comments_and_strings(self):
+        """PR #54 Codex: 주석·KDoc·문자열의 GlobalScope 언급은 위반이 아니고 실제 사용만 잡는다."""
+        self.init_app()
+        text = self.read(f"{APP_ARCH}/{FIXED}")
+        literals = re.findall(r'val (commentsAndStrings|globalScope) = Regex\(("(?:\\.|[^"\\])*")\)', text)
+        patterns = {name: ast.literal_eval(literal) for name, literal in literals}  # Kotlin 문자열 이스케이프는 Python과 같다
+        self.assertEqual(set(patterns), {"commentsAndStrings", "globalScope"})
+
+        def violates(source):
+            return re.search(patterns["globalScope"], re.sub(patterns["commentsAndStrings"], "", source)) is not None
+
+        self.assertTrue(violates("fun f() {\n    GlobalScope.launch { }\n}\n"))
+        self.assertTrue(violates('val s = "x" + GlobalScope.toString()\n'))
+        self.assertFalse(violates("/**\n * GlobalScope 대신 viewModelScope를 쓴다\n */\nfun f() = Unit\n"))
+        self.assertFalse(violates("// GlobalScope 금지\nfun f() = Unit\n"))
+        self.assertFalse(violates('val message = "GlobalScope는 쓰지 않는다"\n'))
+        self.assertFalse(violates('val message = "escaped \\" GlobalScope"\n'))
 
     def test_templates_follow_ktlint_basics(self):
         self.init_app()
