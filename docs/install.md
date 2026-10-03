@@ -84,7 +84,7 @@ python bin/harness.py init ../my-project --area backend \
   --area-doc "docs/api/openapi.yaml"
 ```
 
-- `--verify-cmd`는 **하나 이상 필수**다. 반복해서 여러 개를 줄 수 있다. 파일을 고치지 않는 명령만 적는다
+- `--verify-cmd`는 **하나 이상 필수**다(프로필을 쓰면 프로필 기본값으로 생략 가능, 3.6절). 반복해서 여러 개를 줄 수 있다. 파일을 고치지 않는 명령만 적는다
 - `--trigger`, `--review-focus`는 생략하면 키트 기본값을 쓴다. 주면 기본값을 **대체**한다(추가가 아니다)
 - `--area-doc`은 그 영역의 기준 문서다. 준 것만 적힌다. 여기 적은 경로는 hooks가 `ask`로 보호한다
 - `--area`는 대상의 `harness.json`을 쓰므로 `--platform` 같은 루트 인자와 함께 쓸 수 없다
@@ -150,6 +150,32 @@ python bin/harness.py lint-plans ABC123-52 --target ../my-project   # 그 키의
 - 절 목록과 자리표시자는 대상의 `docs/templates/plan.md`·`review.md`에서 읽고, 없으면 키트 원본을 대상 설정으로 렌더해
   쓴다. 절 제목은 공백과 끝의 괄호 주석을 빼고 비교한다. 표 구분줄은 `|---|`, `| :---: |` 등 GFM 변형을 모두 받는다
 - 종료 코드: 실패 없음 0(경고만 있어도 0), 실패 1, 설정 오류·없는 키 2. 파일은 고치지 않는다
+
+### 3.6 프로필 적용과 스캐폴드 (`--profile`, `harness scaffold`)
+
+프로필(`profiles/<name>/`, [설명](../profiles/README.md))은 스택별 기본값 묶음이다. 영역을 만들 때 고른다.
+
+```bash
+python bin/harness.py init ../my-project --area backend --profile <name> --var base_package=com.acme.app
+python bin/harness.py scaffold backend <kind> MovieReview --target ../my-project
+```
+
+- `--profile`은 `--area`와 함께 쓴다. 프로필의 `verify`·`triggers`·`review_focus`·`trigger_paths`·`test_paths`·`layers`·`allow`를
+  영역 설정에 굳히고 `profile`·`vars`·`disabled_rules` 키를 남긴다. 명시한 `--verify-cmd`·`--trigger`·`--review-focus`가 우선한다
+- `--var 이름=값`은 프로필이 선언한 변수만 받는다. 기본값이 없는 변수는 필수이고, 값은 프로필의 형식(정규식)에 맞아야 한다
+- 같은 영역을 `--force`로 다시 만들 때 `--profile`·`--var`를 생략하면 이전 값을 유지한다. 다른 프로필로 바꿀 수는 없다
+  (영역 항목을 지우고 다시 만든다)
+- 프로필의 컨벤션 파일(아키텍처 테스트, lint 설정)이 영역 아래에 렌더된다. 손으로 고치지 않는다. `check`가 드리프트를 본다.
+  계층 규칙은 `harness.json` 영역의 `layers`(계층 → 패턴 목록)·`allow`(계층 → 의존 가능한 계층)를 고친 뒤
+  `init --area <dir> --force`로 다시 생성한다. 고정 규칙은 `disabled_rules`에 `"규칙 ID": "이유"`를 적어야 끌 수 있다.
+  이 세 키의 변경은 영역의 엄격 트리거다
+- 컨벤션 테스트에 필요한 의존성은 `init`이 `안내:`로 출력한다. 키트는 소비자 빌드·lock 파일을 고치지 않으므로 직접 추가한다
+- `scaffold <영역> <종류> <이름>`은 프로필 템플릿으로 파일을 만든다. 이름은 `MovieReview`·`movie-review`처럼 주고
+  템플릿이 Pascal·camel·kebab·snake 형태를 쓴다. 목적지 파일이 하나라도 있으면 아무것도 만들지 않고 중단한다(`--force` 없음).
+  생성물은 팀 소유이고 `check` 대상이 아니다
+- 라우터·경로 상수 같은 공유 파일은 고치지 않고 붙일 코드 조각을 출력한다. 붙이는 위치는 사람이 정한다
+- 프로젝트 저장소의 `.harness/templates/<profile>/<kind>/<파일>`이 있으면 프로필의 같은 이름 템플릿 대신 쓴다.
+  아키텍처 ADR에 맞춰 생성물을 바꿀 때 쓴다
 
 ## 4. 기존 저장소에 붙이기
 
@@ -349,6 +375,12 @@ GitLab이면 `.harness/mr-lint/`도 지운다.
 목록이다. 영역을 새로 만들면 기본 `triggers`·`review_focus`·`trigger_paths`·`test_paths`를 설정 파일에 저장한다. 같은 영역을 `--force`로 다시 만들 때 생략한
 선택 항목은 이전 값을 유지한다.
 최상위 `judge`(선택)는 영역 밖 파일의 판정 규칙으로 `trigger_paths`·`test_paths`·`triggers`(사람 확인 문장)만 가진다.
+영역의 프로필 키(3.6절)는 `profile`(프로필 이름), `vars`(변수 이름 → 문자열), `layers`(계층 이름 → 패턴 목록),
+`allow`(계층 이름 → `layers`에 있는 계층 이름 목록, 빈 목록 허용), `disabled_rules`(규칙 ID → 비어 있지 않은 이유)다.
+`profile` 없이 나머지 키를 쓰면 오류다. CLI는 `init <target> --area <dir> --profile <name> [--var 이름=값 ..]`와
+`scaffold <area> <kind> <name> [--var 이름=값 ..] [--target <dir>]`이고, 스캐폴드 템플릿 덮어쓰기 경로는
+`.harness/templates/<profile>/<kind>/`다. 프로필 정의 파일 `profiles/<name>/profile.json`의 스키마와 템플릿 표식
+(`harness:rule <id>` ~ `harness:end`)은 키트 작성자용 계약이다([profiles/README.md](../profiles/README.md)).
 
 템플릿의 `{{name}}`은 키트가 가진 값으로 치환한다. 이름은 소문자와 밑줄만 사용한다. 지원 이름은 `project_name`, `platform`,
 `pr_noun`, `pr_long`, `ci_variables`, `tracker_name`, `issue_noun`, `issue_key`,

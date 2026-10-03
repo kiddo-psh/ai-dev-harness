@@ -1,0 +1,4 @@
+package {{base_package}}
+{{layer_defs}}
+{{layer_rules}}
+json {{layers_json}} {{allow_json}}

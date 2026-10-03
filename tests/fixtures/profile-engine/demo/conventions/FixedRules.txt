@@ -1,0 +1,8 @@
+// 고정 규칙 {{base_package}}
+// harness:rule no-field-injection
+rule no-field-injection
+// harness:end
+// harness:rule tx-in-service
+rule tx-in-service
+// harness:end
+// 끝
