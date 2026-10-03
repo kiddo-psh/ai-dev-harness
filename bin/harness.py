@@ -568,8 +568,10 @@ def validate_profile(profile, base: Path, source: str) -> None:
 
 
 def validate_var_spec(spec, source: str, reserved: set[str] = frozenset()) -> None:
+    """`reserved`는 앞서 선언된 변수(종류 변수에서 프로필 변수). 기본값은 그 변수와 앞의 변수만 쓸 수 있다."""
     if not isinstance(spec, dict):
         raise HarnessError(f"{source}: vars는 객체여야 한다")
+    known = set(reserved)
     for name, item in spec.items():
         if (not VAR_NAME.fullmatch(name) or name.endswith("_path") or name.startswith("name") or
                 name in LAYER_JSON_NAMES or name in reserved):
@@ -579,6 +581,9 @@ def validate_var_spec(spec, source: str, reserved: set[str] = frozenset()) -> No
             raise HarnessError(f"{source}: 변수 {name}은 description(필수)·pattern·default만 가진다")
         if "default" in item and not isinstance(item["default"], str):
             raise HarnessError(f"{source}: 변수 {name}의 default는 문자열이어야 한다")
+        if "default" in item:  # 뒤에 선언된 변수를 쓰면 init에서야 실패하므로 여기서 잡는다
+            render(item["default"], var_context({n: "x" for n in known}), source=f"{source} 변수 {name} 기본값")
+        known.add(name)
         if "pattern" in item:
             try:
                 re.compile(item["pattern"])
@@ -614,10 +619,12 @@ def validate_scaffold(scaffold, variables: dict, base: Path, source: str) -> Non
         for entry in files:
             if not isinstance(entry, dict) or set(entry) != {"src", "dest"}:
                 raise HarnessError(f"{where}: files 항목은 src·dest만 가진다")
-            scaffold_template(base, kind, entry["src"], where)
+            path = scaffold_template(base, kind, entry["src"], where)
+            render(path.read_text(encoding="utf-8"), dummy, source=f"{base.name}/scaffold/{kind}/{entry['src']}")
             render_dest(entry["dest"], dummy, where)
-        if "snippet" in spec:
-            scaffold_template(base, kind, spec["snippet"], where)
+        if "snippet" in spec:  # 본문 자리표시자도 미리 검사한다(소비자의 첫 scaffold에서 실패하지 않게)
+            path = scaffold_template(base, kind, spec["snippet"], where)
+            render(path.read_text(encoding="utf-8"), dummy, source=f"{base.name}/scaffold/{kind}/{spec['snippet']}")
 
 
 def scaffold_template(base: Path, kind: str, rel, source: str) -> Path:
@@ -647,7 +654,9 @@ def validate_conventions(conventions, dummy: dict, base: Path, source: str) -> N
                 any(not isinstance(v, str) for v in spec.values()):
             raise HarnessError(f"{where}: 서식 {name}은 layer(필수)와 {', '.join(sorted(FORMAT_KEYS - {'layer'}))}"
                                " 문자열만 가진다")
-    format_blocks(formats, {"a": ["p"], "b": ["q"]}, {"a": ["b"]}, where)  # 서식 자리표시자를 미리 검사한다
+    # 서식 자리표시자를 미리 검사하고, 그 결과로 configured 본문도 검사한다
+    configured = {**dummy, **format_blocks(formats, {"a": ["p"], "b": ["q"]}, {"a": ["b"]}, where),
+                  **{name: "{}" for name in LAYER_JSON_NAMES}}
     files = conventions.get("files")
     if not isinstance(files, list) or not files:
         raise HarnessError(f"{where}: files는 비어 있지 않은 목록이어야 한다")
@@ -657,7 +666,8 @@ def validate_conventions(conventions, dummy: dict, base: Path, source: str) -> N
                 entry["kind"] not in CONVENTION_KINDS:
             raise HarnessError(f"{where}: files 항목은 src·dest·kind({'|'.join(CONVENTION_KINDS)})만 가진다")
         path = profile_file(base, entry["src"], where, "컨벤션")
-        _text, ids = apply_rule_blocks(path.read_text(encoding="utf-8"), rules, {}, f"{base.name}/{entry['src']}")
+        text, ids = apply_rule_blocks(path.read_text(encoding="utf-8"), rules, {}, f"{base.name}/{entry['src']}")
+        render(text, configured if entry["kind"] == "configured" else dummy, source=f"{base.name}/{entry['src']}")
         used |= ids
         render_dest(entry["dest"], dummy, where)
     unused = sorted(set(rules) - used)
@@ -875,21 +885,24 @@ def cmd_init_area(args, target: Path) -> int:
         values = resolve_vars(profile.get("vars", {}), parse_var_args(args.var), previous.get("vars", {}),
                               f"프로필 {profile_name}")
     ctx = var_context(values)
-    # 명시 인자 → 이전 영역 값 → 프로필 기본값 → 키트 기본값(P-3)
-    verify = args.verify_cmd or (previous.get("verify") if profile_name else None) or \
+    # 명시 인자 → 이전 영역 값 → 프로필 기본값 → 키트 기본값(P-3). 프로필 없던 영역에 처음 적용하면 이전 값은
+    # 키트 기본값을 굳힌 것이라 프로필 기본값을 가리지 않게 기준 문서만 이어받는다
+    kept = previous if previous.get("profile") or not profile_name else \
+        {key: value for key, value in previous.items() if key == "docs"}
+    verify = args.verify_cmd or (kept.get("verify") if profile_name else None) or \
         [render(cmd, ctx, source=f"프로필 {profile_name} verify") for cmd in profile.get("verify", [])]
     if not verify:
         raise HarnessError("--area 에는 --verify-cmd 가 하나 이상 필요하다(프로필에 verify 가 있으면 생략 가능)")
     area = {"dir": dir_, "verify": verify}
-    area["triggers"] = list(args.trigger or previous.get("triggers") or profile.get("triggers") or DEFAULT_TRIGGERS)
+    area["triggers"] = list(args.trigger or kept.get("triggers") or profile.get("triggers") or DEFAULT_TRIGGERS)
     if profile_name and PROFILE_TRIGGER not in area["triggers"]:
         area["triggers"].append(PROFILE_TRIGGER)  # 컨벤션 규칙을 조용히 바꾸거나 끄지 않게 한다(P-12)
-    area["review_focus"] = args.review_focus or previous.get("review_focus") or profile.get("review_focus") or \
+    area["review_focus"] = args.review_focus or kept.get("review_focus") or profile.get("review_focus") or \
         list(DEFAULT_REVIEW_FOCUS)
     # 경로 판정 규칙도 생성 시점의 기본값을 설정에 굳힌다. 키트 기본값이 바뀌어도 기존 영역 판정은 그대로다
-    area["trigger_paths"] = previous.get("trigger_paths", copy.deepcopy(
+    area["trigger_paths"] = kept.get("trigger_paths", copy.deepcopy(
         profile.get("trigger_paths", hooks_common.DEFAULT_TRIGGER_PATHS)))
-    area["test_paths"] = previous.get("test_paths", list(profile.get("test_paths", hooks_common.DEFAULT_TEST_PATHS)))
+    area["test_paths"] = kept.get("test_paths", list(profile.get("test_paths", hooks_common.DEFAULT_TEST_PATHS)))
     if args.area_doc or previous.get("docs"):
         area["docs"] = args.area_doc or previous["docs"]
     if profile_name:
@@ -906,6 +919,10 @@ def cmd_init_area(args, target: Path) -> int:
     validate_config(config, "명령 인자")
 
     outputs = {f"{dir_}/AGENTS.md": render_area(area, build_context(config)), **render_conventions(area)}
+    try:  # 변수(패키지 등)가 바뀌면 이전 경로의 컨벤션 파일이 남는다. 지우지 않고 알린다
+        stale = [dest for dest in render_conventions(previous) if dest not in outputs and (target / dest).is_file()]
+    except HarnessError:
+        stale = []
     collisions = [dest for dest in outputs if (target / dest).exists()]
     if collisions and not args.force:
         listing = "\n".join(f"  {target / dest}" for dest in collisions)
@@ -918,6 +935,8 @@ def cmd_init_area(args, target: Path) -> int:
         print(f"프로필 {profile_name} 을 적용했다. 컨벤션 파일(손으로 고치지 않는다. 설정을 바꾸면 --force 로 다시 생성):")
         for dest in list(outputs)[1:]:
             print(f"  {dest}")
+        for dest in stale:
+            print(f"이전 컨벤션 파일(관리 대상에서 빠졌다. 확인 후 지운다): {dest}")
         for note in profile.get("setup_notes", []):
             print(f"안내: {render(note, ctx, source=f'프로필 {profile_name} setup_notes')}")
     return 0

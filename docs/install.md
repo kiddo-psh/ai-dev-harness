@@ -164,7 +164,10 @@ python bin/harness.py scaffold backend <kind> MovieReview --target ../my-project
   영역 설정에 굳히고 `profile`·`vars`·`disabled_rules` 키를 남긴다. 명시한 `--verify-cmd`·`--trigger`·`--review-focus`가 우선한다
 - `--var 이름=값`은 프로필이 선언한 변수만 받는다. 기본값이 없는 변수는 필수이고, 값은 프로필의 형식(정규식)에 맞아야 한다
 - 같은 영역을 `--force`로 다시 만들 때 `--profile`·`--var`를 생략하면 이전 값을 유지한다. 다른 프로필로 바꿀 수는 없다
-  (영역 항목을 지우고 다시 만든다)
+  (영역 항목을 지우고 다시 만든다). 프로필 없이 만든 영역에 처음 프로필을 적용하면 기준 문서만 유지하고 나머지는 프로필
+  기본값을 쓴다
+- 변수를 바꿔 컨벤션 파일 경로가 달라지면(예: `base_package`) 이전 경로의 파일은 지우지 않고 `이전 컨벤션 파일`로 출력한다.
+  확인 후 직접 지운다
 - 프로필의 컨벤션 파일(아키텍처 테스트, lint 설정)이 영역 아래에 렌더된다. 손으로 고치지 않는다. `check`가 드리프트를 본다.
   계층 규칙은 `harness.json` 영역의 `layers`(계층 → 패턴 목록)·`allow`(계층 → 의존 가능한 계층)를 고친 뒤
   `init --area <dir> --force`로 다시 생성한다. 고정 규칙은 `disabled_rules`에 `"규칙 ID": "이유"`를 적어야 끌 수 있다.

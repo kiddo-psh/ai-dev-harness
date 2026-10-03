@@ -80,8 +80,10 @@ class ProfileSchemaTest(ProfileTestBase):
         self.assertEqual(set(profile["conventions"]["rules"]), {"no-field-injection", "tx-in-service"})
 
     def test_invalid_profiles_rejected(self):
+        pristine = self.profile_json()
+
         def mutate(change):
-            data = self.profile_json()
+            data = json.loads(json.dumps(pristine))
             change(data)
             return data
 
@@ -113,6 +115,37 @@ class ProfileSchemaTest(ProfileTestBase):
                 self.write_profile(data)
                 with self.assertRaises(harness.HarnessError):
                     harness.load_profile("demo")
+        # 본문·조각·기본값의 자리표시자도 프로필을 읽을 때 잡는다(리뷰 F2: 소비자의 첫 scaffold·init에서야 실패하지 않게)
+        demo = self.profiles / "demo"
+        bodies = {
+            "scaffold body typo": (demo / "scaffold" / "domain" / "Service.txt", "class {{nmae_pascal}} {}\n"),
+            "snippet typo": (demo / "scaffold" / "domain" / "snippet.txt", "{{name_pascl}}\n"),
+            "fixed body uses layer format": (demo / "conventions" / "FixedRules.txt",
+                                             (demo / "conventions" / "FixedRules.txt").read_text(encoding="utf-8")
+                                             + "{{layer_rules}}\n"),
+            "configured body typo": (demo / "conventions" / "LayerRules.txt", "{{layer_rulez}}\n"),
+        }
+        self.write_profile(pristine)
+        harness.load_profile("demo")  # 원래 프로필은 통과한다(아래 실패가 다른 원인이 아님을 보장)
+        for label, (path, text) in bodies.items():
+            with self.subTest(label):
+                original = path.read_text(encoding="utf-8")
+                path.write_text(text, encoding="utf-8")
+                try:
+                    with self.assertRaises(harness.HarnessError):
+                        harness.load_profile("demo")
+                finally:
+                    path.write_text(original, encoding="utf-8")
+        later = json.loads(json.dumps(pristine))
+        later["vars"] = {"first": {"description": "x", "default": "{{second}}"}, "second": {"description": "y"},
+                         **pristine["vars"]}
+        self.write_profile(later)
+        with self.subTest("default refers to later var"), self.assertRaises(harness.HarnessError):
+            harness.load_profile("demo")
+        later["vars"] = {"second": {"description": "y"}, "first": {"description": "x", "default": "{{second}}"},
+                         **pristine["vars"]}
+        self.write_profile(later)
+        harness.load_profile("demo")  # 앞에서 선언한 변수는 쓸 수 있다
         for bad in ("Demo", "../demo", "", "missing"):
             with self.subTest(name=bad), self.assertRaises(harness.HarnessError):
                 harness.load_profile(bad)
@@ -200,6 +233,29 @@ class InitProfileTest(ProfileTestBase):
         self.assertEqual(code, 2)
         self.assertIn("demo", err)
         self.assertEqual(self.area()["profile"], "demo")
+
+    def test_first_profile_on_plain_area_uses_profile_defaults(self):
+        """리뷰 F1: 프로필 없던 영역에 처음 적용하면 굳혀 둔 키트 기본값이 프로필 기본값을 가리지 않는다."""
+        code, _out, err = self.init_area("--verify-cmd", "make test", "--area-doc", "docs/api.md")
+        self.assertEqual(code, 0, err)
+        self.init_demo("--force")
+        area = self.area()
+        self.assertEqual(area["verify"], ["build app", "test com.acme.app"])
+        self.assertEqual(area["triggers"], ["데모 트리거", harness.PROFILE_TRIGGER])
+        self.assertEqual(area["review_focus"], ["데모 관점"])
+        self.assertEqual(area["trigger_paths"], {"strict": ["/build.conf"], "standard": ["/shared/"]})
+        self.assertEqual(area["test_paths"], ["/test/"])
+        self.assertEqual(area["docs"], ["docs/api.md"])
+
+    def test_changed_var_reports_stale_conventions(self):
+        """리뷰 F4: 패키지 변수를 바꾸면 이전 경로의 컨벤션 파일을 지우지 않고 알린다."""
+        self.init_demo()
+        code, out, err = self.init_area("--force", "--var", "base_package=com.other")
+        self.assertEqual(code, 0, err)
+        old = "backend/test/com/acme/app/architecture/FixedRules.txt"
+        self.assertIn(f"이전 컨벤션 파일(관리 대상에서 빠졌다. 확인 후 지운다): {old}", out)
+        self.assertTrue((self.target / old).is_file())
+        self.assertTrue((self.target / "backend/test/com/other/architecture/FixedRules.txt").is_file())
 
     def test_plain_area_unchanged(self):
         """프로필 없는 영역은 예전과 같다: --verify-cmd 필수, 프로필 키 없음."""
