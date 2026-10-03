@@ -1,4 +1,4 @@
-package {{base_package}}.ui.{{name_lower}}
+package {{base_package}}.feature.{{feature}}.ui.{{name_lower}}
 
 /**
  * [{{name_pascal}}Screen]이 그리는 불변 상태.

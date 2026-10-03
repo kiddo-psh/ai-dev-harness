@@ -3,7 +3,8 @@
 스택 종속 기능(ADR-0004). 프로필은 "기본값 묶음"이다. 아키텍처는 키트가 정하지 않고 프로젝트 설정과 템플릿 덮어쓰기로
 맞춘다. core(`bin/harness.py`)는 프로필 이름을 모르고 `profile.json` 스키마만 안다. 프로필 코드는 실행하지 않는다.
 
-예정 프로필: `spring-java`(M3-2), `react-ts`(M3-3), `android-kotlin`(M3-4a·4b). 적용 방법은
+프로필: `spring-java`(M3-2), `react-ts`(M3-3), `android-kotlin`(M3-4a·4b, 모듈 영역)과 `android-konsist`(M3-4b, Android
+컨벤션 테스트 전용 모듈 영역). 한 Gradle 빌드에 두 프로필을 영역별로 함께 적용한다. 적용 방법은
 [install.md 3.6](../docs/install.md)을 본다.
 
 ## 구조

@@ -12,6 +12,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 
+/**
+ * ViewModel 단위 테스트는 Hilt 없이 생성자로 만든다(ADR-06). Repository를 받게 되면 테스트 소스의 Fake 구현을 넘긴다.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class {{name_pascal}}ViewModelTest {
     private val dispatcher = StandardTestDispatcher()

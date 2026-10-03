@@ -7,7 +7,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 
 /**
- * 내비게이션 그래프. 리허설 스크립트가 `harness scaffold screen` 조각을 아래 표식 자리에 붙인다.
+ * 내비게이션 그래프. ADR-05: 화면 간 이동은 :app이 맡는다. 리허설 스크립트가 feature 영역의 `harness scaffold screen` 조각을 아래 표식 자리에 붙인다.
  */
 @Composable
 fun RehearsalNavHost() {

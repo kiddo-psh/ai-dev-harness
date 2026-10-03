@@ -1,4 +1,4 @@
-package {{base_package}}.ui.{{name_lower}}
+package {{base_package}}.feature.{{feature}}.ui.{{name_lower}}
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -12,6 +12,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 
+/**
+ * ViewModel 단위 테스트는 Hilt 없이 생성자로 만든다(ADR-06). Repository를 받게 되면 테스트 소스의 Fake 구현을 넘긴다.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class {{name_pascal}}ViewModelTest {
     private val dispatcher = StandardTestDispatcher()
@@ -39,7 +42,7 @@ class {{name_pascal}}ViewModelTest {
     @Test
     fun refreshFinishesLoading() {
         // 자리표시 테스트: 지금 ViewModel은 중단 지점 없이 로딩을 켜고 끄므로 끝 상태만 본다.
-        // 데이터 계층 호출을 넣으면 그 대역을 지연시켜 isLoading이 true였다가 false가 되는 전이를 단언하도록 바꾼다
+        // Repository 호출을 넣으면 Fake를 지연시켜 isLoading이 true였다가 false가 되는 전이를 단언하도록 바꾼다
         runTest {
             val viewModel = {{name_pascal}}ViewModel()
 
