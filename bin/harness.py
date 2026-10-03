@@ -7,7 +7,11 @@
     python bin/harness.py init <target> --area <dir> --verify-cmd <cmd> [--verify-cmd ..]
                                [--trigger ..] [--review-focus ..] [--area-doc ..] [--force]
                                              # 영역 디렉터리에 AGENTS.md 생성(루트 init 이후)
-    python bin/harness.py check <target>     # 렌더링 결과와 실제 파일의 차이(드리프트) 검사
+    python bin/harness.py init <target> --area <dir> --profile <name> [--var k=v ..] [--force]
+                                             # 프로필 기본값을 영역 설정에 굳히고 컨벤션 파일 생성
+    python bin/harness.py scaffold <area> <kind> <Name> [--var k=v ..] [--target <dir>]
+                                             # 영역 프로필의 템플릿으로 뼈대 생성(기존 파일이 있으면 중단)
+    python bin/harness.py check <target>    # 렌더링 결과와 실제 파일의 차이(드리프트) 검사
     python bin/harness.py check --self
     python bin/harness.py judge [<target>|--self] [--base <ref> | --files <목록 파일|->] [--json]
                                              # 변경 파일로 경량·표준·엄격(lite·standard·strict) 판정
@@ -38,11 +42,36 @@ METRICS_DIR = KIT_ROOT / "core" / "metrics"
 SOURCE_DIRS = {"templates": TEMPLATES_DIR, "hooks": HOOKS_DIR, "ci": CI_DIR}
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
 AREA_TEMPLATE = "AREA-AGENTS.md"
-AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs", "trigger_paths", "test_paths"}
+AREA_PROFILE_KEYS = {"profile", "vars", "layers", "allow", "disabled_rules"}
+AREA_KEYS = {"dir", "verify", "triggers", "review_focus", "docs", "trigger_paths", "test_paths", *AREA_PROFILE_KEYS}
 CONFIG_KEYS = {"harness_version", "project_name", "platform", "tracker", "issue_prefix",
                "default_branch", "integration_branch", "related_docs", "areas", "hooks", "judge"}
 RELATED_DOC_KEYS = {"label", "path"}
 CONFIG_NAME = "harness.json"
+
+# 프로필(ADR-0004): 스택 종속 기본값 묶음. core는 프로필 이름을 모르고 profile.json 스키마만 안다
+PROFILES_DIR = KIT_ROOT / "profiles"
+PROFILE_FILE = "profile.json"
+PROFILE_KEYS = {"name", "description", "verify", "trigger_paths", "test_paths", "triggers", "review_focus",
+                "vars", "scaffold", "conventions", "layers", "allow", "setup_notes"}
+PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
+VAR_NAME = re.compile(r"[a-z][a-z_]*")
+VAR_KEYS = {"description", "pattern", "default"}
+LAYER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+RULE_ID = re.compile(r"[a-z0-9][a-z0-9-]*")
+SCAFFOLD_KIND = re.compile(r"[a-z][a-z0-9-]*")
+SCAFFOLD_NAME = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*")
+CONVENTION_KINDS = ("fixed", "configured")
+FORMAT_KEYS = {"layer", "layer_empty", "pattern", "pattern_separator", "allowed", "allowed_separator", "separator"}
+NAME_VARIANTS = ("name", "name_pascal", "name_camel", "name_kebab", "name_snake", "name_lower")
+LAYER_JSON_NAMES = ("layers_json", "allow_json")
+# 고정 규칙 블록 표식. 각 언어의 주석 안에 쓰고, 끈 규칙은 표식 줄과 함께 지운다
+RULE_START = re.compile(r"harness:rule\s+(\S+)")
+RULE_END = re.compile(r"harness:end\b")
+# 계층·고정 규칙 설정은 컨벤션 테스트를 바꾸거나 끈다. 프로필 영역의 엄격 트리거에 항상 넣는다(P-12)
+PROFILE_TRIGGER = "harness.json 이 영역 설정의 layers·allow·disabled_rules 변경(컨벤션 규칙을 바꾸거나 끈다)"
+# harness.json은 저장소 루트라 영역 트리거로는 판정에 나오지 않는다. 최상위 judge.triggers에도 넣어 사람 확인으로 낸다
+PROFILE_ROOT_TRIGGER = "harness.json 의 프로필 영역 설정(layers·allow·disabled_rules) 변경이면 엄격(컨벤션 규칙을 바꾸거나 끈다)"
 
 PLATFORMS = {
     "gitlab": {
@@ -221,6 +250,49 @@ def validate_areas(areas, source: Path | str) -> None:
             hooks_common.validate_judge_rules(area, source)
         except hooks_common.ConfigError as exc:
             raise HarnessError(str(exc)) from exc
+        validate_area_profile(area, f"{source}: 영역 {dir_}")
+
+
+def validate_area_profile(area: dict, source: str) -> None:
+    """영역의 프로필 키 형식. 프로필 내용과의 대조(변수·규칙 ID)는 렌더할 때 한다."""
+    present = sorted(key for key in AREA_PROFILE_KEYS - {"profile"} if key in area)
+    if "profile" not in area:
+        if present:
+            raise HarnessError(f"{source}: {', '.join(present)}는 profile과 함께 쓴다")
+        return
+    if not isinstance(area["profile"], str) or not PROFILE_NAME.fullmatch(area["profile"]):
+        raise HarnessError(f"{source}: profile 이름이 잘못됐다: {area['profile']!r}")
+    values = area.get("vars", {})
+    if not isinstance(values, dict) or any(not isinstance(k, str) or not isinstance(v, str)
+                                           for k, v in values.items()):
+        raise HarnessError(f"{source}: vars는 문자열 값의 객체여야 한다")
+    validate_layers(area.get("layers", {}), area.get("allow", {}), source)
+    disabled = area.get("disabled_rules", {})
+    if not isinstance(disabled, dict) or any(
+            not isinstance(k, str) or not isinstance(v, str) or not v.strip() for k, v in disabled.items()):
+        raise HarnessError(f"{source}: disabled_rules는 규칙 ID → 끈 이유(비어 있지 않은 문자열) 객체여야 한다")
+
+
+def validate_layers(layers, allow, source: str) -> None:
+    if not isinstance(layers, dict):
+        raise HarnessError(f"{source}: layers는 계층 이름 → 패턴 목록 객체여야 한다")
+    for name, patterns in layers.items():
+        if not LAYER_NAME.fullmatch(name):
+            raise HarnessError(f"{source}: 계층 이름이 잘못됐다: {name!r}")
+        if not _str_list(patterns):
+            raise HarnessError(f"{source}: 계층 {name}의 패턴은 비어 있지 않은 문자열 목록이어야 한다")
+    if not isinstance(allow, dict):
+        raise HarnessError(f"{source}: allow는 계층 이름 → 의존 가능한 계층 목록 객체여야 한다")
+    for name, targets in allow.items():
+        if name not in layers:
+            raise HarnessError(f"{source}: allow의 계층이 layers에 없다: {name}")
+        if not _str_list(targets, allow_empty=True) or any(t not in layers for t in targets):
+            raise HarnessError(f"{source}: allow.{name}은 layers에 있는 계층 이름 목록이어야 한다")
+
+
+def _str_list(value, allow_empty: bool = False) -> bool:
+    return (isinstance(value, list) and (allow_empty or bool(value)) and
+            all(isinstance(item, str) and item.strip() for item in value))
 
 
 def build_context(config: dict) -> dict:
@@ -416,6 +488,11 @@ def render_all(config: dict, self_mode: bool) -> dict[str, str]:
         outputs[dest] = render(text, ctx, source=path.name) if rendered else text
     for area in config.get("areas", []):
         outputs[f"{area['dir']}/AGENTS.md"] = render_area(area, ctx)
+    for area in config.get("areas", []):
+        for dest, content in render_conventions(area).items():
+            if dest in outputs:
+                raise HarnessError(f"영역 {area['dir']}: 컨벤션 파일 목적지가 다른 생성 파일과 겹친다: {dest}")
+            outputs[dest] = content
     return outputs
 
 
@@ -437,6 +514,312 @@ def ensure_plans_ignored(target: Path) -> bool:
     with path.open("ab") as handle:
         handle.write(prefix + comment + newline + mr_lint.PLANS_IGNORE.encode("ascii") + newline)
     return True
+
+
+# ---------------------------------------------------------------------------
+# 프로필 (M3-1). 프로필 코드는 실행하지 않는다: profile.json 데이터와 템플릿만 읽는다
+# ---------------------------------------------------------------------------
+
+
+def load_profile(name: str) -> tuple[dict, Path]:
+    """(profile.json 내용, 프로필 디렉터리). 스키마와 템플릿 존재·자리표시자를 미리 검사한다."""
+    if not isinstance(name, str) or not PROFILE_NAME.fullmatch(name):
+        raise HarnessError(f"프로필 이름이 잘못됐다: {name!r}")
+    base = PROFILES_DIR / name
+    path = base / PROFILE_FILE
+    if not path.is_file():
+        available = sorted(p.name for p in PROFILES_DIR.iterdir() if (p / PROFILE_FILE).is_file()) \
+            if PROFILES_DIR.is_dir() else []
+        raise HarnessError(f"프로필이 없다: {name} (사용 가능: {', '.join(available) or '없음'})")
+    source = f"{name}/{PROFILE_FILE}"
+    try:
+        profile = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HarnessError(f"{source}: 읽을 수 없다: {exc}") from exc
+    validate_profile(profile, base, source)
+    return profile, base
+
+
+def validate_profile(profile, base: Path, source: str) -> None:
+    if not isinstance(profile, dict):
+        raise HarnessError(f"{source}: 최상위는 객체여야 한다")
+    unknown = sorted(set(profile) - PROFILE_KEYS)
+    if unknown:
+        raise HarnessError(f"{source}: 알 수 없는 키: {', '.join(unknown)}")
+    if profile.get("name") != base.name:
+        raise HarnessError(f"{source}: name은 디렉터리 이름 {base.name!r}과 같아야 한다")
+    if not isinstance(profile.get("description"), str) or not profile["description"].strip():
+        raise HarnessError(f"{source}: description이 필요하다")
+    for key in ("verify", "triggers", "review_focus", "setup_notes"):
+        if key in profile and not _str_list(profile[key]):
+            raise HarnessError(f"{source}: {key}는 비어 있지 않은 문자열 목록이어야 한다")
+    try:
+        hooks_common.validate_judge_rules({"dir": base.name, **{k: profile[k] for k in ("trigger_paths", "test_paths")
+                                                                if k in profile}}, source)
+    except hooks_common.ConfigError as exc:
+        raise HarnessError(str(exc)) from exc
+    variables = profile.get("vars", {})
+    validate_var_spec(variables, source)
+    validate_layers(profile.get("layers", {}), profile.get("allow", {}), source)
+    dummy = var_context({name: "x" for name in variables})
+    for key in ("verify", "setup_notes"):
+        for text in profile.get(key, []):
+            render(text, dummy, source=f"{source} {key}")
+    validate_scaffold(profile.get("scaffold", {}), variables, base, source)
+    validate_conventions(profile.get("conventions"), dummy, base, source)
+
+
+def validate_var_spec(spec, source: str, reserved: set[str] = frozenset()) -> None:
+    """`reserved`는 앞서 선언된 변수(종류 변수에서 프로필 변수). 기본값은 그 변수와 앞의 변수만 쓸 수 있다."""
+    if not isinstance(spec, dict):
+        raise HarnessError(f"{source}: vars는 객체여야 한다")
+    known = set(reserved)
+    for name, item in spec.items():
+        if (not VAR_NAME.fullmatch(name) or name.endswith("_path") or name.startswith("name") or
+                name in LAYER_JSON_NAMES or name in reserved):
+            # `<이름>_path`·이름 변형·계층 JSON은 엔진이 만드는 값이라 변수 이름으로 쓸 수 없다
+            raise HarnessError(f"{source}: 변수 이름이 잘못됐거나 예약어다: {name!r}")
+        if not isinstance(item, dict) or set(item) - VAR_KEYS or not isinstance(item.get("description"), str):
+            raise HarnessError(f"{source}: 변수 {name}은 description(필수)·pattern·default만 가진다")
+        if "default" in item and not isinstance(item["default"], str):
+            raise HarnessError(f"{source}: 변수 {name}의 default는 문자열이어야 한다")
+        if "default" in item:  # 뒤에 선언된 변수를 쓰면 init에서야 실패하므로 여기서 잡는다
+            render(item["default"], var_context({n: "x" for n in known}), source=f"{source} 변수 {name} 기본값")
+        known.add(name)
+        if "pattern" in item:
+            try:
+                re.compile(item["pattern"])
+            except (re.error, TypeError) as exc:
+                raise HarnessError(f"{source}: 변수 {name}의 pattern이 잘못됐다: {exc}") from exc
+
+
+def profile_file(base: Path, rel, source: str, what: str) -> Path:
+    if not valid_template_path(rel):
+        raise HarnessError(f"{source}: {what} 경로가 잘못됐다: {rel!r}")
+    path = base / rel
+    if not path.is_file():
+        raise HarnessError(f"{source}: {what} 파일이 없다: {rel}")
+    return path
+
+
+def validate_scaffold(scaffold, variables: dict, base: Path, source: str) -> None:
+    if not isinstance(scaffold, dict):
+        raise HarnessError(f"{source}: scaffold는 종류 → 정의 객체여야 한다")
+    for kind, spec in scaffold.items():
+        where = f"{source} scaffold.{kind}"
+        if not SCAFFOLD_KIND.fullmatch(kind):
+            raise HarnessError(f"{source}: 스캐폴드 종류 이름이 잘못됐다: {kind!r}")
+        if not isinstance(spec, dict) or set(spec) - {"description", "files", "snippet", "vars"} or \
+                not isinstance(spec.get("description"), str):
+            raise HarnessError(f"{where}: description·files·snippet·vars만 가진다(description 필수)")
+        kind_vars = spec.get("vars", {})
+        validate_var_spec(kind_vars, where, reserved=set(variables))
+        dummy = {**var_context({name: "x" for name in {**variables, **kind_vars}}), **name_variants("Demo")}
+        files = spec.get("files")
+        if not isinstance(files, list) or not files:
+            raise HarnessError(f"{where}: files는 비어 있지 않은 목록이어야 한다")
+        for entry in files:
+            if not isinstance(entry, dict) or set(entry) != {"src", "dest"}:
+                raise HarnessError(f"{where}: files 항목은 src·dest만 가진다")
+            path = scaffold_template(base, kind, entry["src"], where)
+            render(path.read_text(encoding="utf-8"), dummy, source=f"{base.name}/scaffold/{kind}/{entry['src']}")
+            render_dest(entry["dest"], dummy, where)
+        if "snippet" in spec:  # 본문 자리표시자도 미리 검사한다(소비자의 첫 scaffold에서 실패하지 않게)
+            path = scaffold_template(base, kind, spec["snippet"], where)
+            render(path.read_text(encoding="utf-8"), dummy, source=f"{base.name}/scaffold/{kind}/{spec['snippet']}")
+
+
+def scaffold_template(base: Path, kind: str, rel, source: str) -> Path:
+    """스캐폴드 템플릿은 `scaffold/<kind>/` 기준이다. 대상의 덮어쓰기 경로도 같은 상대 경로를 쓴다."""
+    if not valid_template_path(rel):
+        raise HarnessError(f"{source}: 템플릿 경로가 잘못됐다: {rel!r}")
+    return profile_file(base, f"scaffold/{kind}/{rel}", source, "템플릿")
+
+
+def validate_conventions(conventions, dummy: dict, base: Path, source: str) -> None:
+    if conventions is None:
+        return
+    where = f"{source} conventions"
+    if not isinstance(conventions, dict) or set(conventions) - {"rules", "files", "formats"}:
+        raise HarnessError(f"{where}: rules·files·formats만 가진다")
+    rules = conventions.get("rules", {})
+    if not isinstance(rules, dict) or any(not RULE_ID.fullmatch(k) or not isinstance(v, str) or not v.strip()
+                                          for k, v in rules.items()):
+        raise HarnessError(f"{where}: rules는 규칙 ID → 설명 객체여야 한다")
+    formats = conventions.get("formats", {})
+    if not isinstance(formats, dict):
+        raise HarnessError(f"{where}: formats는 객체여야 한다")
+    for name, spec in formats.items():
+        if not VAR_NAME.fullmatch(name) or name in dummy or name in LAYER_JSON_NAMES:
+            raise HarnessError(f"{where}: 서식 이름이 잘못됐거나 변수·예약어와 겹친다: {name!r}")
+        if not isinstance(spec, dict) or "layer" not in spec or set(spec) - FORMAT_KEYS or \
+                any(not isinstance(v, str) for v in spec.values()):
+            raise HarnessError(f"{where}: 서식 {name}은 layer(필수)와 {', '.join(sorted(FORMAT_KEYS - {'layer'}))}"
+                               " 문자열만 가진다")
+    # 서식 자리표시자를 미리 검사하고, 그 결과로 configured 본문도 검사한다
+    configured = {**dummy, **format_blocks(formats, {"a": ["p"], "b": ["q"]}, {"a": ["b"]}, where),
+                  **{name: "{}" for name in LAYER_JSON_NAMES}}
+    files = conventions.get("files")
+    if not isinstance(files, list) or not files:
+        raise HarnessError(f"{where}: files는 비어 있지 않은 목록이어야 한다")
+    used: set[str] = set()
+    for entry in files:
+        if not isinstance(entry, dict) or set(entry) != {"src", "dest", "kind"} or \
+                entry["kind"] not in CONVENTION_KINDS:
+            raise HarnessError(f"{where}: files 항목은 src·dest·kind({'|'.join(CONVENTION_KINDS)})만 가진다")
+        path = profile_file(base, entry["src"], where, "컨벤션")
+        text, ids = apply_rule_blocks(path.read_text(encoding="utf-8"), rules, {}, f"{base.name}/{entry['src']}")
+        render(text, configured if entry["kind"] == "configured" else dummy, source=f"{base.name}/{entry['src']}")
+        used |= ids
+        render_dest(entry["dest"], dummy, where)
+    unused = sorted(set(rules) - used)
+    if unused:
+        raise HarnessError(f"{where}: 템플릿에 블록이 없는 규칙: {', '.join(unused)}")
+
+
+def var_context(values: dict) -> dict:
+    """변수 값과 파생 값 `<이름>_path`(점을 `/`로. 패키지 → 디렉터리)."""
+    return {**values, **{f"{name}_path": value.replace(".", "/") for name, value in values.items()}}
+
+
+def parse_var_args(items) -> dict:
+    values: dict[str, str] = {}
+    for item in items or []:
+        name, sep, value = item.partition("=")
+        if not sep or not VAR_NAME.fullmatch(name):
+            raise HarnessError(f"--var 는 이름=값 형식이다: {item!r}")
+        if name in values:
+            raise HarnessError(f"--var {name} 이 중복된다")
+        values[name] = value
+    return values
+
+
+def resolve_vars(spec: dict, given: dict, previous: dict, source: str) -> dict:
+    """선언 순서대로 `--var` → 이전 영역 값 → 기본값. 기본값은 앞에서 정한 변수를 쓸 수 있다."""
+    unknown = sorted(set(given) - set(spec))
+    if unknown:
+        raise HarnessError(f"{source}: 선언되지 않은 변수: {', '.join(unknown)} (선언: {', '.join(spec) or '없음'})")
+    values: dict[str, str] = {}
+    for name, item in spec.items():
+        if name in given:
+            value = given[name]
+        elif name in previous:
+            value = previous[name]
+        elif "default" in item:
+            value = render(item["default"], var_context(values), source=f"{source} 변수 {name} 기본값")
+        else:
+            raise HarnessError(f"{source}: 필수 변수 {name} 이 없다. --var {name}=… ({item['description']})")
+        if "\n" in value or "{{" in value or "}}" in value:
+            raise HarnessError(f"{source}: 변수 {name} 값에 줄바꿈이나 자리표시자 괄호를 쓸 수 없다")
+        optional_empty = value == "" and item.get("default") == ""
+        if "pattern" in item and not optional_empty and not re.fullmatch(item["pattern"], value):
+            raise HarnessError(f"{source}: 변수 {name} 값 {value!r} 이 형식 {item['pattern']} 에 맞지 않는다")
+        values[name] = value
+    return values
+
+
+def render_dest(pattern, ctx: dict, source: str) -> str:
+    """목적지 경로를 렌더하고 빈 구간을 접는다(선택 변수가 빈 값). 영역 밖으로 나가는 경로는 거부한다."""
+    if not isinstance(pattern, str):
+        raise HarnessError(f"{source}: dest는 문자열이어야 한다")
+    rendered = render(pattern, ctx, source=f"{source} dest")
+    parts = [part for part in rendered.split("/") if part]
+    if ("\\" in rendered or rendered.startswith("/") or re.match(r"^[A-Za-z]:", rendered) or not parts or
+            any(part in (".", "..") for part in parts)):
+        raise HarnessError(f"{source}: 목적지가 영역 안의 상대 경로가 아니다: {rendered!r}")
+    return "/".join(parts)
+
+
+def name_variants(name: str) -> dict:
+    if not isinstance(name, str) or not SCAFFOLD_NAME.fullmatch(name):
+        raise HarnessError(f"이름은 영문자로 시작하는 영숫자이고 단어는 - 나 _ 로 나눈다: {name!r}")
+    words = [word for chunk in re.split(r"[-_]", name)
+             for word in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+", chunk)]
+    lower = [word.lower() for word in words]
+    pascal = "".join(word[0].upper() + word[1:] for word in words)
+    return {
+        "name": name,
+        "name_pascal": pascal,
+        "name_camel": lower[0] + pascal[len(words[0]):],
+        "name_kebab": "-".join(lower),
+        "name_snake": "_".join(lower),
+        "name_lower": "".join(lower),
+    }
+
+
+def format_blocks(formats: dict, layers: dict, allow: dict, source: str) -> dict:
+    """계층 서식: 계층마다 서식을 렌더해 잇는다. allow에 없거나 빈 계층은 layer_empty(있으면)를 쓴다."""
+    blocks = {}
+    for name, spec in formats.items():
+        items = []
+        for layer, patterns in layers.items():
+            targets = allow.get(layer, [])
+            values = {
+                "layer": layer,
+                "patterns": spec.get("pattern_separator", ", ").join(
+                    render(spec.get("pattern", "{{pattern}}"), {"pattern": p}, source=f"{source} {name}.pattern")
+                    for p in patterns),
+                "allowed": spec.get("allowed_separator", ", ").join(
+                    render(spec.get("allowed", "{{name}}"), {"name": t}, source=f"{source} {name}.allowed")
+                    for t in targets),
+            }
+            template = spec["layer_empty"] if not targets and "layer_empty" in spec else spec["layer"]
+            items.append(render(template, values, source=f"{source} {name}.layer"))
+        blocks[name] = spec.get("separator", "\n").join(items)
+    return blocks
+
+
+def apply_rule_blocks(text: str, rules: dict, disabled: dict, source: str) -> tuple[str, set[str]]:
+    """`harness:rule <id>` ~ `harness:end` 블록 중 끈 규칙을 표식과 함께 지운다. (결과, 블록이 있는 규칙 ID)."""
+    out, current, used = [], None, set()
+    for number, line in enumerate(text.split("\n"), 1):
+        start, end = RULE_START.search(line), RULE_END.search(line)
+        if start:
+            if current is not None:
+                raise HarnessError(f"{source}:{number}: 규칙 블록 {current} 이 닫히기 전에 새 블록이 열렸다")
+            current = start.group(1)
+            if current not in rules:
+                raise HarnessError(f"{source}:{number}: 선언되지 않은 규칙 ID: {current}")
+            used.add(current)
+        elif end and current is None:
+            raise HarnessError(f"{source}:{number}: 열리지 않은 규칙 블록의 harness:end")
+        if current is None or current not in disabled:
+            out.append(line)
+        if end and not start:
+            current = None
+    if current is not None:
+        raise HarnessError(f"{source}: 규칙 블록 {current} 이 닫히지 않았다")
+    return "\n".join(out), used
+
+
+def render_conventions(area: dict) -> dict[str, str]:
+    """프로필 영역의 컨벤션 파일(대상 저장소 기준 경로 → 내용). 설정이 바뀌면 결과도 바뀌어 check가 잡는다."""
+    if "profile" not in area:
+        return {}
+    profile, base = load_profile(area["profile"])
+    source = f"영역 {area['dir']}"
+    values = resolve_vars(profile.get("vars", {}), {}, area.get("vars", {}), source)
+    conventions = profile.get("conventions") or {}
+    rules = conventions.get("rules", {})
+    disabled = area.get("disabled_rules", {})
+    unknown = sorted(set(disabled) - set(rules))
+    if unknown:
+        raise HarnessError(f"{source}: disabled_rules에 프로필 {area['profile']}에 없는 규칙: {', '.join(unknown)}"
+                           f" (규칙: {', '.join(rules) or '없음'})")
+    ctx = var_context(values)
+    layers, allow = area.get("layers", {}), area.get("allow", {})
+    configured = {**ctx, **format_blocks(conventions.get("formats", {}), layers, allow, source),
+                  "layers_json": json.dumps(layers, ensure_ascii=False),
+                  "allow_json": json.dumps(allow, ensure_ascii=False)}
+    outputs: dict[str, str] = {}
+    for entry in conventions.get("files", []):
+        name = f"{area['profile']}/{entry['src']}"
+        text, _used = apply_rule_blocks((base / entry["src"]).read_text(encoding="utf-8"), rules, disabled, name)
+        dest = f"{area['dir']}/{render_dest(entry['dest'], ctx, source)}"
+        if dest in outputs or dest == f"{area['dir']}/AGENTS.md":
+            raise HarnessError(f"{source}: 컨벤션 파일 목적지가 겹친다: {dest}")
+        outputs[dest] = render(text, configured if entry["kind"] == "configured" else ctx, source=name)
+    return outputs
 
 
 # ---------------------------------------------------------------------------
@@ -479,8 +862,6 @@ def config_from_args(args, target: Path) -> dict:
 
 
 def cmd_init_area(args, target: Path) -> int:
-    if not args.verify_cmd:
-        raise HarnessError("--area 에는 --verify-cmd 가 하나 이상 필요하다")
     given = [flag for flag in ROOT_ONLY_FLAGS if getattr(args, flag) is not None]
     if given:  # 영역 모드는 대상의 harness.json만 쓴다. 루트 인자를 조용히 버리지 않는다
         flags = ", ".join(f"--{flag.replace('_', '-')}" for flag in given)
@@ -489,31 +870,82 @@ def cmd_init_area(args, target: Path) -> int:
     if not config_path.is_file():
         raise HarnessError(f"{config_path} 이 없다. 루트 init 을 먼저 실행한다")
     config = load_config(config_path)
-    area = {"dir": normalize_area_dir(args.area, "--area"), "verify": args.verify_cmd}
+    dir_ = normalize_area_dir(args.area, "--area")
     areas = list(config.get("areas", []))
-    same = [i for i, existing in enumerate(areas) if existing.get("dir") == area["dir"]]
+    same = [i for i, existing in enumerate(areas) if existing.get("dir") == dir_]
     previous = areas[same[0]] if same else {}
-    area["triggers"] = args.trigger or previous.get("triggers") or list(DEFAULT_TRIGGERS)
-    area["review_focus"] = args.review_focus or previous.get("review_focus") or list(DEFAULT_REVIEW_FOCUS)
+    # 재실행에서 --profile을 생략하면 이전 프로필을 유지한다. 다른 프로필로 바꾸면 설정이 섞이므로 거부한다
+    if args.profile and previous.get("profile") and args.profile != previous["profile"]:
+        raise HarnessError(f"영역 {dir_} 은 프로필 {previous['profile']} 로 만들어졌다. 프로필을 바꾸려면 "
+                           f"{CONFIG_NAME} 에서 이 영역 항목을 지운 뒤 다시 만든다")
+    profile_name = args.profile or previous.get("profile")
+    if args.var and not profile_name:
+        raise HarnessError("--var 는 --profile 과 함께 쓴다")
+    profile, values = {}, {}
+    if profile_name:
+        profile, _base = load_profile(profile_name)
+        values = resolve_vars(profile.get("vars", {}), parse_var_args(args.var), previous.get("vars", {}),
+                              f"프로필 {profile_name}")
+    ctx = var_context(values)
+    # 명시 인자 → 이전 영역 값 → 프로필 기본값 → 키트 기본값(P-3). 프로필 없던 영역에 처음 적용하면 이전 값은
+    # 키트 기본값을 굳힌 것이라 프로필 기본값을 가리지 않게 기준 문서만 이어받는다
+    kept = previous if previous.get("profile") or not profile_name else \
+        {key: value for key, value in previous.items() if key == "docs"}
+    verify = args.verify_cmd or (kept.get("verify") if profile_name else None) or \
+        [render(cmd, ctx, source=f"프로필 {profile_name} verify") for cmd in profile.get("verify", [])]
+    if not verify:
+        raise HarnessError("--area 에는 --verify-cmd 가 하나 이상 필요하다(프로필에 verify 가 있으면 생략 가능)")
+    area = {"dir": dir_, "verify": verify}
+    area["triggers"] = list(args.trigger or kept.get("triggers") or profile.get("triggers") or DEFAULT_TRIGGERS)
+    if profile_name and PROFILE_TRIGGER not in area["triggers"]:
+        area["triggers"].append(PROFILE_TRIGGER)  # 컨벤션 규칙을 조용히 바꾸거나 끄지 않게 한다(P-12)
+    area["review_focus"] = args.review_focus or kept.get("review_focus") or profile.get("review_focus") or \
+        list(DEFAULT_REVIEW_FOCUS)
     # 경로 판정 규칙도 생성 시점의 기본값을 설정에 굳힌다. 키트 기본값이 바뀌어도 기존 영역 판정은 그대로다
-    area["trigger_paths"] = previous.get("trigger_paths", copy.deepcopy(hooks_common.DEFAULT_TRIGGER_PATHS))
-    area["test_paths"] = previous.get("test_paths", list(hooks_common.DEFAULT_TEST_PATHS))
+    area["trigger_paths"] = kept.get("trigger_paths", copy.deepcopy(
+        profile.get("trigger_paths", hooks_common.DEFAULT_TRIGGER_PATHS)))
+    area["test_paths"] = kept.get("test_paths", list(profile.get("test_paths", hooks_common.DEFAULT_TEST_PATHS)))
     if args.area_doc or previous.get("docs"):
         area["docs"] = args.area_doc or previous["docs"]
+    if profile_name:
+        area["profile"] = profile_name
+        area["vars"] = values
+        area["layers"] = previous.get("layers", copy.deepcopy(profile.get("layers", {})))
+        area["allow"] = previous.get("allow", copy.deepcopy(profile.get("allow", {})))
+        area["disabled_rules"] = previous.get("disabled_rules", {})
     if same:
         areas[same[0]] = area  # 같은 영역을 다시 생성하면 기존 항목을 제자리에서 바꾼다
     else:
         areas.append(area)
     config["areas"] = areas
+    if profile_name:
+        judge = config.setdefault("judge", {})
+        if PROFILE_ROOT_TRIGGER not in judge.get("triggers", []):
+            judge["triggers"] = [*judge.get("triggers", []), PROFILE_ROOT_TRIGGER]
     validate_config(config, "명령 인자")
+    render_all(config, False)  # 다른 영역의 생성 파일과 목적지가 겹치는지 쓰기 전에 전체 설정으로 확인한다
 
-    content = render_area(area, build_context(config))
-    dest = target / area["dir"] / "AGENTS.md"
-    if dest.exists() and not args.force:
-        raise HarnessError(f"이미 존재하는 파일이 있어 중단한다. 덮어쓰려면 --force 를 지정한다:\n  {dest}")
-    write_text(dest, content)
+    outputs = {f"{dir_}/AGENTS.md": render_area(area, build_context(config)), **render_conventions(area)}
+    try:  # 변수(패키지 등)가 바뀌면 이전 경로의 컨벤션 파일이 남는다. 지우지 않고 알린다
+        stale = [dest for dest in render_conventions(previous) if dest not in outputs and (target / dest).is_file()]
+    except HarnessError:
+        stale = []
+    collisions = [dest for dest in outputs if (target / dest).exists()]
+    if collisions and not args.force:
+        listing = "\n".join(f"  {target / dest}" for dest in collisions)
+        raise HarnessError(f"이미 존재하는 파일이 있어 중단한다. 덮어쓰려면 --force 를 지정한다:\n{listing}")
+    for dest, content in outputs.items():
+        write_text(target / dest, content)
     write_text(config_path, json.dumps(config, ensure_ascii=False, indent=2) + "\n")
-    print(f"영역 {area['dir']} 에 AGENTS.md 를 생성하고 {CONFIG_NAME} 의 areas 를 갱신했다.")
+    print(f"영역 {dir_} 에 AGENTS.md 를 생성하고 {CONFIG_NAME} 의 areas 를 갱신했다.")
+    if profile_name:
+        print(f"프로필 {profile_name} 을 적용했다. 컨벤션 파일(손으로 고치지 않는다. 설정을 바꾸면 --force 로 다시 생성):")
+        for dest in list(outputs)[1:]:
+            print(f"  {dest}")
+        for dest in stale:
+            print(f"이전 컨벤션 파일(관리 대상에서 빠졌다. 확인 후 지운다): {dest}")
+        for note in profile.get("setup_notes", []):
+            print(f"안내: {render(note, ctx, source=f'프로필 {profile_name} setup_notes')}")
     return 0
 
 
@@ -521,7 +953,7 @@ def cmd_init(args) -> int:
     target, self_mode = resolve_target(args)
     if args.area is not None:
         return cmd_init_area(args, target)
-    for flag in ("verify_cmd", "trigger", "review_focus", "area_doc"):
+    for flag in ("verify_cmd", "trigger", "review_focus", "area_doc", "profile", "var"):
         if getattr(args, flag):
             raise HarnessError(f"--{flag.replace('_', '-')} 는 --area 와 함께 쓴다")
     if self_mode:
@@ -555,6 +987,61 @@ def cmd_init(args) -> int:
         print(f"  {dest}")
     if plans_added:
         print(f".gitignore 에 {mr_lint.PLANS_IGNORE} 를 추가했다.")
+    return 0
+
+
+def cmd_scaffold(args) -> int:
+    target = Path(args.target or ".").resolve()
+    config = load_config(target / CONFIG_NAME)
+    dir_ = normalize_area_dir(args.area, "영역 인자")
+    area = next((a for a in config.get("areas", []) if a["dir"] == dir_), None)
+    if area is None:
+        raise HarnessError(f"{CONFIG_NAME} 에 영역 {dir_} 이 없다. init --area 로 먼저 만든다")
+    if "profile" not in area:
+        raise HarnessError(f"영역 {dir_} 에 프로필이 없다. init --area {dir_} --profile <name> --force 로 적용한다")
+    name = area["profile"]
+    profile, base = load_profile(name)
+    kinds = profile.get("scaffold", {})
+    if args.kind not in kinds:
+        raise HarnessError(f"프로필 {name} 에 스캐폴드 종류 {args.kind!r} 가 없다 (종류: {', '.join(kinds) or '없음'})")
+    kind = kinds[args.kind]
+    source = f"{name} scaffold.{args.kind}"
+    values = resolve_vars({**profile.get("vars", {}), **kind.get("vars", {})}, parse_var_args(args.var),
+                          area.get("vars", {}), source)
+    ctx = {**var_context(values), **name_variants(args.name)}
+    # 대상 저장소의 같은 이름 템플릿이 프로필 기본보다 우선한다(P-4). 아키텍처에 맞게 프로젝트가 덮어쓴다
+    override = target / ".harness" / "templates" / name / args.kind
+
+    def template(rel: str) -> tuple[Path, str]:
+        path = override / rel
+        if path.is_file():
+            return path, f".harness/templates/{name}/{args.kind}/{rel}"
+        return scaffold_template(base, args.kind, rel, source), f"{name}/scaffold/{args.kind}/{rel}"
+
+    outputs: dict[str, str] = {}
+    for entry in kind["files"]:
+        path, label = template(entry["src"])
+        dest = f"{dir_}/{render_dest(entry['dest'], ctx, source)}"
+        if dest in outputs:
+            raise HarnessError(f"{source}: 목적지가 겹친다: {dest}")
+        outputs[dest] = render(path.read_text(encoding="utf-8"), ctx, source=label)
+    # 생성물은 팀 소유라 덮어쓰지 않는다. 하나라도 있으면 아무것도 쓰지 않는다(P-5)
+    existing = [dest for dest in outputs if (target / dest).exists()]
+    if existing:
+        listing = "\n".join(f"  {dest}" for dest in existing)
+        raise HarnessError(f"이미 존재하는 파일이 있어 아무것도 생성하지 않았다:\n{listing}")
+    snippet = None
+    if "snippet" in kind:
+        path, label = template(kind["snippet"])
+        snippet = render(path.read_text(encoding="utf-8"), ctx, source=label)
+    for dest, content in outputs.items():
+        write_text(target / dest, content)
+    print(f"{len(outputs)}개 파일을 생성했다({name} {args.kind} {args.name}):")
+    for dest in outputs:
+        print(f"  {dest}")
+    if snippet is not None:  # 공유 파일(라우터·설정)은 고치지 않는다. 붙일 위치는 사람이 정한다(P-6)
+        print("\n공유 파일에 직접 붙일 코드 조각:\n")
+        print(snippet.rstrip("\n"))
     return 0
 
 
@@ -972,7 +1459,17 @@ def main(argv: list[str] | None = None) -> int:
     init.add_argument("--trigger", action="append", help="엄격 단계 트리거(반복 가능, 지정하면 기본값 대체)")
     init.add_argument("--review-focus", action="append", help="리뷰 관점(반복 가능, 지정하면 기본값 대체)")
     init.add_argument("--area-doc", action="append", help="영역 기준 문서 경로(반복 가능)")
+    init.add_argument("--profile", help="영역에 적용할 프로필(profiles/<name>, --area 필수)")
+    init.add_argument("--var", action="append", help="프로필 변수 이름=값(반복 가능)")
     init.set_defaults(func=cmd_init)
+
+    scaffold = sub.add_parser("scaffold", help="영역 프로필의 템플릿으로 뼈대를 생성한다")
+    scaffold.add_argument("area", help="영역 디렉터리(harness.json areas의 dir)")
+    scaffold.add_argument("kind", help="스캐폴드 종류(profile.json scaffold의 키)")
+    scaffold.add_argument("name", help="이름(예: MovieReview, movie-review)")
+    scaffold.add_argument("--var", action="append", help="변수 이름=값(반복 가능)")
+    scaffold.add_argument("--target", help="대상 저장소(기본 현재 디렉터리)")
+    scaffold.set_defaults(func=cmd_scaffold)
 
     check = sub.add_parser("check", help="생성된 파일이 템플릿과 일치하는지 검사한다")
     check.add_argument("target", nargs="?")

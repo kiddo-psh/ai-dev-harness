@@ -1,0 +1,51 @@
+{
+  "name": "demo",
+  "description": "엔진 테스트용 프로필. 실제 스택이 아니다",
+  "verify": ["build {{module}}", "test {{base_package}}"],
+  "trigger_paths": {"strict": ["/build.conf"], "standard": ["/shared/"]},
+  "test_paths": ["/test/"],
+  "triggers": ["데모 트리거"],
+  "review_focus": ["데모 관점"],
+  "vars": {
+    "base_package": {"description": "기본 패키지(예: com.acme.app)", "pattern": "[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*"},
+    "module": {"description": "모듈 이름", "pattern": "[a-z]+", "default": "app"},
+    "error_package": {"description": "공통 오류 패키지", "default": "{{base_package}}.global.error"},
+    "src_root": {"description": "소스 루트", "default": "src"}
+  },
+  "layers": {
+    "controller": ["..controller.."],
+    "service": ["..service.."],
+    "repository": ["..repository..", "..repo.."]
+  },
+  "allow": {"controller": ["service"], "service": ["repository"]},
+  "scaffold": {
+    "domain": {
+      "description": "도메인 뼈대",
+      "files": [
+        {"src": "Controller.txt", "dest": "{{src_root}}/{{base_package_path}}/domain/{{name_lower}}/{{name_pascal}}Controller.txt"},
+        {"src": "Service.txt", "dest": "{{src_root}}/{{base_package_path}}/domain/{{name_lower}}/{{name_pascal}}Service.txt"}
+      ],
+      "snippet": "snippet.txt"
+    },
+    "screen": {
+      "description": "화면 뼈대(선택 변수 area)",
+      "vars": {"area": {"description": "화면 영역(선택)", "pattern": "[a-z]+", "default": ""}},
+      "files": [{"src": "Page.txt", "dest": "{{src_root}}/pages/{{area}}/{{name_pascal}}Page/index.txt"}]
+    }
+  },
+  "conventions": {
+    "rules": {
+      "no-field-injection": "필드 주입 금지",
+      "tx-in-service": "트랜잭션은 service에만"
+    },
+    "formats": {
+      "layer_defs": {"layer": "layer({{layer}}) = [{{patterns}}]", "pattern": "'{{pattern}}'", "pattern_separator": " | "},
+      "layer_rules": {"layer": "{{layer}} -> {{allowed}}", "layer_empty": "{{layer}} -> (none)", "allowed": "<{{name}}>", "allowed_separator": "+", "separator": "; "}
+    },
+    "files": [
+      {"src": "conventions/FixedRules.txt", "dest": "test/{{base_package_path}}/architecture/FixedRules.txt", "kind": "fixed"},
+      {"src": "conventions/LayerRules.txt", "dest": "test/{{base_package_path}}/architecture/LayerRules.txt", "kind": "configured"}
+    ]
+  },
+  "setup_notes": ["모듈 {{module}} 의 빌드 파일에 데모 의존성을 추가한다"]
+}

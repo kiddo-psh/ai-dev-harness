@@ -1,0 +1,3 @@
+package {{base_package}}.domain.{{name_lower}}.controller;
+class {{name_pascal}}Controller { /* {{name_camel}} {{name_kebab}} {{name_snake}} {{name}} */ }
+// 오류: {{error_package}}

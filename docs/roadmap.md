@@ -61,14 +61,15 @@
 - [x] M2-5 리뷰 프롬프트 단일화: 로컬 W1/W2 리뷰 관점과 CI Claude 리뷰 시스템 프롬프트를 한 파일(`core/templates/review-perspectives.md`)에서 생성. CI 절과 `review_perspectives_ci`는 M2-4 철회 때 함께 제거 (#29, #43)
 - [x] M2-6 CI 실패 원인 분류기 1차: job 로그를 규칙으로 분류해 JSON 산출 (측정 3번) (#28)
 
-### M3. Scaffold (5~6주차)
+### M3. Scaffold (5~7주차)
 
-완료 기준: 두 프로필에서 도메인·화면 생성 명령이 있고, 생성물이 컨벤션 테스트와 CI를 통과한다.
+완료 기준: 세 프로필(웹 백엔드 `spring-java`, 웹 프론트 `react-ts`, Android 폰+워치 `android-kotlin`)에서 도메인·화면 생성
+명령이 있고, 생성물이 컨벤션 테스트와 CI를 통과한다. 모바일은 이전 프로젝트 근거가 없어 규칙을 처음 정하므로 1주를 더 둔다.
 
-- [ ] M3-1 프로필 구조 확정: `profiles/<name>/{scaffold,convention-tests,verify.json}`
+- [x] M3-1 프로필 구조 확정: `profiles/<name>/{profile.json,scaffold/,conventions/}`, `init --area --profile`, `harness scaffold`, 계층 규칙 설정(`layers`·`allow`)과 고정 규칙 끄기(`disabled_rules`) (#47)
 - [ ] M3-2 `spring-java` 프로필: 도메인(패키지·Controller·Service·Repository·DTO·테스트 뼈대) 생성, 컨벤션 테스트(계층 의존 방향, 예외 처리, 트랜잭션 경계 규칙)
 - [ ] M3-3 `react-ts` 프로필: 화면(라우트·페이지·API 클라이언트·테스트 뼈대) 생성, 컨벤션 테스트(공용 컴포넌트 경계, 접근성 lint)
-- [ ] M3-4 스택 결정 후 필요하면 `spring-kotlin`·`vue-ts` 프로필 추가 (다음 프로젝트 스택에 따라)
+- [ ] M3-4 `android-kotlin` 프로필(폰 + Wear OS): M3-4a 기본값·고정 규칙·최소 템플릿, M3-4b 새 프로젝트 아키텍처 ADR에 맞춘 구체 템플릿·계층 설정
 - [ ] M3-5 리허설 확장: 프로필별로 생성 → 컨벤션 테스트 → CI 조각 실행
 
 ### M4. 측정과 가이드 (7~8주차)
