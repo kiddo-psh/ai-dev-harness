@@ -84,6 +84,15 @@ class ScenarioTableTest(unittest.TestCase):
                                  "viewmodel-imports-retrofit", "feature-imports-room", "domain-imports-ui",
                                  "image-without-content-description"})
 
+    def test_cross_domain_negative_names_its_rule(self):
+        """#61 리뷰 F1: 음성은 규칙의 실패 문구까지 요구해야 다른 규칙이 대신 잡아 통과하는 일이 없다."""
+        negative = next(n for n in rp.scenarios()["spring-java"]["negatives"]
+                        if n["name"] == "service-uses-other-domain-repository")
+        template = (ROOT / "profiles" / "spring-java" / "conventions" / "FixedRulesArchitectureTest.java").read_text(
+            encoding="utf-8")
+        rule_texts = [text for text in negative["expect"] if text in template]
+        self.assertEqual(rule_texts, ["another domain's repository or entity"])
+
     def test_android_scenario_matches_adr_modules(self):
         """#59 T7: 영역 5개(app·core·feature·wear + konsist-test), 스캐폴드, 음성(Konsist 3개 + Lint 1개)이 규칙·파일을 가리킨다."""
         scenario = rp.scenarios()["android-kotlin"]

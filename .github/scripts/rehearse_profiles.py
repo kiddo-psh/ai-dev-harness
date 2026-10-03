@@ -173,7 +173,7 @@ def scenarios() -> dict[str, dict]:
                 {"name": "service-uses-other-domain-repository",
                  "files": {"backend/src/main/java/com/example/rehearsal/domain/rating/service/"
                            "RatingService.java": SPRING_CROSS_DOMAIN_SERVICE},
-                 "expect": ["Architecture Violation", "RatingService"]},
+                 "expect": ["Architecture Violation", "another domain's repository or entity", "RatingService"]},
             ],
         },
         "react-ts": {
