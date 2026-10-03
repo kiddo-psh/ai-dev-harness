@@ -2,7 +2,7 @@
   "name": "android-kotlin",
   "description": "Android(Kotlin·Jetpack Compose) 폰·Wear OS 모듈 영역 기본값. 계층·DI는 프로젝트 아키텍처 ADR이 정한다(M3-4b)",
   "verify": [
-    "./gradlew :{{module}}:ktlintCheck :{{module}}:lintDebug :{{module}}:testDebugUnitTest :{{module}}:assembleDebug"
+    "{{gradle_root}}/gradlew -p {{gradle_root}} :{{module}}:ktlintCheck :{{module}}:lintDebug :{{module}}:testDebugUnitTest :{{module}}:assembleDebug"
   ],
   "trigger_paths": {
     "strict": [
@@ -32,6 +32,11 @@
     "base_package": {
       "description": "모듈의 기본 패키지(예: com.acme.fit, com.acme.fit.wear)",
       "pattern": "[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*"
+    },
+    "gradle_root": {
+      "description": "저장소 루트 기준 Gradle 빌드 루트(gradlew·settings.gradle.kts가 있는 디렉터리, 예: android). 영역 검증 명령은 저장소 루트에서 실행되므로 이 경로의 wrapper를 부른다. 저장소 루트면 .",
+      "pattern": "\\.|[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*",
+      "default": "android"
     },
     "module": {
       "description": "Gradle 모듈 이름(한 단계, 예: app, wear). 검증 명령과 Konsist 범위에 쓴다",
@@ -116,7 +121,7 @@
     "scaffold 생성물 의존성: lifecycle-viewmodel-compose·lifecycle-runtime-compose, compose ui-tooling-preview(@Preview), testImplementation kotlinx-coroutines-test, 폰은 navigation-compose·androidx.compose.material3:material3, 워치는 wear compose-material3·compose-navigation",
     "기본 계층 ui·domain·data 중 아직 패키지가 없는 계층은 Konsist 계층 검사가 실패할 수 있다. 모듈 {{module}} 에 domain·data 패키지가 생길 때까지 harness.json 영역의 layers·allow에서 지우고 init --area --force 로 다시 만든다",
     "ktlint Gradle 플러그인(org.jlleitschuh.gradle.ktlint)과 Android Lint abortOnError 설정을 모듈 {{module}} 에 적용한다(profiles/android-kotlin/README.md)",
-    "의존성 잠금이 필수다: 모듈 {{module}} 에 dependencyLocking { lockAllConfigurations() } 를 켜고 ./gradlew :{{module}}:dependencies --write-locks 로 gradle.lockfile 을 커밋한다(의존성 감사 전제)",
+    "의존성 잠금이 필수다: 모듈 {{module}} 에 dependencyLocking { lockAllConfigurations() } 를 켜고 {{gradle_root}}/gradlew -p {{gradle_root}} :{{module}}:dependencies --write-locks 로 gradle.lockfile 을 커밋한다(의존성 감사 전제)",
     "모듈 {{module}} 의 minSdk 가정값: defaultConfig { minSdk = {{min_sdk}} } (Wear OS 모듈은 보통 30 이상, --var min_sdk=30)"
   ]
 }

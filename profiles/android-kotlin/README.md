@@ -38,7 +38,11 @@ python bin/harness.py init ../my-project --area android/wear --profile android-k
 
 ## 판정 기본값 (A-10)
 
-- `verify`: `./gradlew :<module>:ktlintCheck :<module>:lintDebug :<module>:testDebugUnitTest :<module>:assembleDebug`
+- `verify`: `<gradle_root>/gradlew -p <gradle_root> :<module>:ktlintCheck :<module>:lintDebug :<module>:testDebugUnitTest
+  :<module>:assembleDebug`. 영역 검증 명령은 **저장소 루트에서** 실행되므로(`stop-verify`) Gradle 빌드 루트의 wrapper를
+  경로로 부르고 `-p`로 프로젝트 디렉터리를 준다. 빌드 루트가 `android/`가 아니면 `--var gradle_root=<경로>`(저장소 루트면 `.`).
+  이미 만든 영역을 `--force`로 다시 만들면 `verify`는 이전 값을 유지하므로, 변수를 바꾼 뒤에는 영역의 `verify`를 직접 고치거나
+  영역 항목을 지우고 다시 만든다
 - `trigger_paths.strict`(영역 기준): `**/build.gradle.kts`, `**/AndroidManifest.xml`(권한), `**/proguard-rules.pro`,
   서명 키(`*.jks`, `*.keystore`), `gradle.lockfile`
 - `test_paths`: `/src/test/`, `/src/androidTest/`, `*Test.kt`, `*Tests.kt`

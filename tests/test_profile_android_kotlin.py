@@ -27,7 +27,7 @@ APP_ARCH = f"{APP}/src/test/java/com/acme/fit/architecture"
 WEAR_ARCH = f"{WEAR}/src/test/java/com/acme/fit/wear/architecture"
 FIXED = "HarnessFixedRulesTest.kt"
 LAYERS = "HarnessLayerArchitectureTest.kt"
-VERIFY = "./gradlew :{m}:ktlintCheck :{m}:lintDebug :{m}:testDebugUnitTest :{m}:assembleDebug"
+VERIFY = "android/gradlew -p android :{m}:ktlintCheck :{m}:lintDebug :{m}:testDebugUnitTest :{m}:assembleDebug"
 
 
 def run(argv):
@@ -100,7 +100,7 @@ class AndroidProfileTest(unittest.TestCase):
         self.assertIn("com.lemonappdev:konsist", out)
         self.assertIn("dependencyLocking", out)
         out = self.init_wear()
-        self.assertIn("./gradlew :wear:dependencies --write-locks", out)
+        self.assertIn("android/gradlew -p android :wear:dependencies --write-locks", out)
         for dir_, module, arch in ((APP, "app", APP_ARCH), (WEAR, "wear", WEAR_ARCH)):
             with self.subTest(area=dir_):
                 area = self.area(dir_)
@@ -290,6 +290,24 @@ class AndroidProfileTest(unittest.TestCase):
         self.assertNotIn("dependsOn(domain, data)", text)
 
     # --- T7 ---------------------------------------------------------------
+
+    def test_verify_runs_gradle_root_wrapper_from_repo_root(self):
+        """PR #54 Codex P1·결정표 Q2 (a): 영역 검증 명령은 저장소 루트에서 실행되므로 Gradle 빌드 루트의 wrapper를 부른다."""
+        self.init_area(APP, "--profile", PROFILE, "--var", "base_package=com.acme.fit", "--var", "gradle_root=mobile")
+        self.assertEqual(self.config()["areas"][0]["verify"], [VERIFY.format(m="app").replace("android", "mobile")])
+        for root in (".", "apps/android"):
+            with self.subTest(root=root):
+                # 재실행은 이전 verify를 유지하므로(엔진 규칙) 영역 항목을 지우고 다시 만든다
+                config = self.config()
+                config["areas"] = []
+                self.save_config(config)
+                self.init_area(APP, "--force", "--profile", PROFILE, "--var", "base_package=com.acme.fit",
+                               "--var", f"gradle_root={root}")
+                self.assertTrue(self.config()["areas"][0]["verify"][0].startswith(f"{root}/gradlew -p {root} :app:"))
+        for bad in ("..", "../android", "/abs", "a/../b", "a\\b"):
+            with self.subTest(bad=bad):
+                code, _out, _err = run(["init", str(self.target), "--area", APP, "--force", "--var", f"gradle_root={bad}"])
+                self.assertEqual(code, 2)
 
     def test_global_scope_ignores_comments_and_strings(self):
         """PR #54 Codex: 주석·KDoc·문자열의 GlobalScope 언급은 위반이 아니고 실제 사용만 잡는다."""
