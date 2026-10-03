@@ -746,5 +746,134 @@ class SelfApplicationTest(unittest.TestCase):
         self.assertIn("python -m unittest discover tests -v\npython bin/harness.py check --self\n", verify)
 
 
+class BranchModelTest(unittest.TestCase):
+    """integration_branch == default_branch 이면 Git 컨벤션·개발 흐름 문서를 단일 브랜치(태그 릴리스) 내용으로 만든다."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="harness-branch-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def init(self, name, integration):
+        target = self.tmp / name
+        code, out = run(["init", str(target), "--platform", "gitlab", "--tracker", "jira", "--issue-prefix", "DEMO",
+                         "--integration-branch", integration])
+        self.assertEqual(code, 0, out)
+        return target
+
+    def docs(self, target):
+        return tuple((target / "docs" / name).read_text(encoding="utf-8")
+                     for name in ("git-convention.md", "development-workflow.md"))
+
+    def test_two_branch_docs_keep_integration_sections(self):
+        git, flow = self.docs(self.init("two", "develop"))
+        self.assertIn("### develop에서 main으로 병합", git)
+        self.assertIn("| `develop` | 팀 개발 결과가 합쳐지는 통합 브랜치이자 기본 브랜치 |", git)
+        self.assertIn("## 7. develop에서 main으로 통합", flow)
+        self.assertEqual(harness.branch_mode({"default_branch": "main", "integration_branch": "develop"}),
+                         harness.TWO_BRANCH)
+
+    def test_trunk_docs_have_no_integration_branch(self):
+        target = self.init("trunk", "main")
+        git, flow = self.docs(target)
+        for text in (git, flow):
+            self.assertNotIn("main에서 main", text)
+            self.assertNotIn("`main`과 `main`", text)
+            self.assertNotIn("{{", text)
+        self.assertEqual(git.count("| `main` |"), 1)  # 브랜치 표에 main 행 하나
+        self.assertIn("### 릴리스 태그", git)
+        self.assertIn("## 7. 릴리스 태그", flow)
+        self.assertIn("git tag -a", flow)
+        self.assertEqual(run(["check", str(target)])[0], 0)
+
+    def test_include_when_requires_both_variants(self):
+        config = {"project_name": "demo", "platform": "gitlab", "tracker": "jira", "issue_prefix": "DEMO",
+                  "default_branch": "main", "integration_branch": "develop"}
+        good = {"name": "x_inc", "src": "review-perspectives.md", "sections": ["공통"]}
+        real = harness.read_manifest()
+        bad = [
+            [{**good, "when": "trunk"}],  # 한쪽 변형만
+            [{**good, "when": "nope"}, {**good, "when": "two-branch"}],
+            [good, {**good, "when": "trunk"}],  # 무조건 변형과 모델별 변형을 섞음
+            [{**good, "when": "trunk"}, {**good, "when": "trunk"}, {**good, "when": "two-branch"}],
+        ]
+        for includes in bad:
+            with self.subTest(includes=includes), \
+                    patch.object(harness, "read_manifest", return_value={**real, "includes": includes}), \
+                    self.assertRaises(harness.HarnessError):
+                harness.build_context(config)
+        both = [{**good, "when": "two-branch"}, {**good, "sections": ["로컬"], "when": "trunk"}]
+        source = (harness.TEMPLATES_DIR / "review-perspectives.md").read_text(encoding="utf-8")
+        sections = harness.markdown_sections(source)
+        with patch.object(harness, "read_manifest", return_value={**real, "includes": both}):
+            two = harness.build_context(config)["x_inc"]
+            trunk = harness.build_context({**config, "integration_branch": "main"})["x_inc"]
+        self.assertEqual(two.split("{{")[0][:20], sections["공통"].split("{{")[0][:20])
+        self.assertEqual(trunk.split("{{")[0][:20], sections["로컬"].split("{{")[0][:20])
+
+
+class SeedFileTest(unittest.TestCase):
+    """seed=true 파일(Git 컨벤션·ADR 목록)은 처음 한 번만 생성하고, 그 뒤는 소비자가 채운 내용을 덮어쓰지도 비교하지도 않는다."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="harness-seed-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.target = self.tmp / "consumer"
+        code, out = run(["init", str(self.target), "--platform", "github", "--tracker", "github"])
+        self.assertEqual(code, 0, out)
+        self.adr = self.target / "docs" / "adr" / "README.md"
+        self.git = self.target / "docs" / "git-convention.md"
+
+    def force_init(self):
+        return run(["init", str(self.target), "--force"])  # 기존 harness.json 이 있으면 루트 설정 인자를 주지 않는다
+
+    def test_seed_path_that_is_not_a_file_aborts(self):
+        """PR #63 Codex: 시드 경로가 디렉터리면 시드 파일처럼 유지하지 않고 --force여도 아무것도 쓰지 않고 중단한다."""
+        self.git.unlink()
+        self.git.mkdir()
+        (self.target / "AGENTS.md").write_text("손 수정\n", encoding="utf-8")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code, _out = self.force_init()
+        self.assertEqual(code, 2)
+        self.assertIn("docs/git-convention.md", err.getvalue())
+        self.assertTrue(self.git.is_dir())
+        self.assertEqual((self.target / "AGENTS.md").read_text(encoding="utf-8"), "손 수정\n")  # 쓰기 전에 중단
+
+    def test_seed_files_kept_and_not_compared(self):
+        for path, extra in ((self.adr, "| [ADR-0001](0001-x.md) | 결정 | 채택 |"), (self.git, "| `web` | `web/` |")):
+            path.write_text(path.read_text(encoding="utf-8") + extra + "\n", encoding="utf-8")
+        code, out = run(["check", str(self.target)])
+        self.assertEqual(code, 0, out)
+        code, out = self.force_init()
+        self.assertEqual(code, 0, out)
+        self.assertIn("| [ADR-0001](0001-x.md)", self.adr.read_text(encoding="utf-8"))
+        self.assertIn("| `web` | `web/` |", self.git.read_text(encoding="utf-8"))
+        self.assertIn("docs/adr/README.md (유지: 소비자 소유 시드 파일)", out)
+        # 시드가 아닌 파일은 여전히 덮어쓴다
+        agents = self.target / "AGENTS.md"
+        agents.write_text(agents.read_text(encoding="utf-8") + "\n손으로 고친 줄\n", encoding="utf-8")
+        code, out = self.force_init()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("손으로 고친 줄", agents.read_text(encoding="utf-8"))
+
+    def test_missing_seed_file_is_reported_and_recreated(self):
+        self.adr.unlink()
+        code, out = run(["check", str(self.target)])
+        self.assertEqual(code, 1)
+        self.assertIn("없음:   docs/adr/README.md", out)
+        code, out = self.force_init()
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.adr.is_file())
+        self.assertEqual(run(["check", str(self.target)])[0], 0)
+
+    def test_existing_seed_file_does_not_block_init(self):
+        fresh = self.tmp / "fresh"
+        (fresh / "docs" / "adr").mkdir(parents=True)
+        (fresh / "docs" / "adr" / "README.md").write_text("# 우리 ADR 목록\n", encoding="utf-8")
+        code, out = run(["init", str(fresh), "--platform", "github", "--tracker", "github"])
+        self.assertEqual(code, 0, out)  # 시드 파일만 있으면 --force 없이도 진행하고 그 파일은 유지한다
+        self.assertEqual((fresh / "docs" / "adr" / "README.md").read_text(encoding="utf-8"), "# 우리 ADR 목록\n")
+
+
 if __name__ == "__main__":
     unittest.main()

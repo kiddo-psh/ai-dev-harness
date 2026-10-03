@@ -1,7 +1,17 @@
 {
-  "description": "init이 렌더링해 대상 저장소에 넣는 파일 목록. self=true인 항목만 키트 자신에게도 적용한다. base는 원본 디렉터리(기본 templates, hooks, ci), render=false는 자리표시자 치환 없이 복사한다. includes는 원본 파일(templates 기준)의 '## 절'을 골라 name 자리표시자 값으로 넣는다(포함 내용도 렌더한다). tag를 주면 목록 항목 끝에 강제 주체 표시 [tag]를 붙인다.",
+  "description": "init이 렌더링해 대상 저장소에 넣는 파일 목록. self=true인 항목만 키트 자신에게도 적용한다. base는 원본 디렉터리(기본 templates, hooks, ci), render=false는 자리표시자 치환 없이 복사한다. includes는 원본 파일(templates 기준)의 '## 절'을 골라 name 자리표시자 값으로 넣는다(포함 내용도 렌더한다). tag를 주면 목록 항목 끝에 강제 주체 표시 [tag]를 붙인다. includes의 when(two-branch|trunk)은 integration_branch와 default_branch가 다른지·같은지에 따라 고르는 변형이다(같은 name의 두 변형이 모두 있어야 한다). seed=true는 처음 한 번만 생성하는 소비자 소유 파일이다(이미 있으면 --force로도 덮어쓰지 않고 check가 비교하지 않는다).",
   "includes": [
-    {"name": "review_perspectives", "src": "review-perspectives.md", "sections": ["공통", "로컬"], "tag": "사람"}
+    {"name": "review_perspectives", "src": "review-perspectives.md", "sections": ["공통", "로컬"], "tag": "사람"},
+    {"name": "git_branch_model", "src": "docs/branch-model.md", "sections": ["Git 운영 원칙 · 두 브랜치"], "when": "two-branch"},
+    {"name": "git_branch_model", "src": "docs/branch-model.md", "sections": ["Git 운영 원칙 · 단일 브랜치"], "when": "trunk"},
+    {"name": "git_branch_table", "src": "docs/branch-model.md", "sections": ["Git 브랜치 표 · 두 브랜치"], "when": "two-branch"},
+    {"name": "git_branch_table", "src": "docs/branch-model.md", "sections": ["Git 브랜치 표 · 단일 브랜치"], "when": "trunk"},
+    {"name": "git_release_section", "src": "docs/branch-model.md", "sections": ["Git 릴리스 절 · 두 브랜치"], "when": "two-branch"},
+    {"name": "git_release_section", "src": "docs/branch-model.md", "sections": ["Git 릴리스 절 · 단일 브랜치"], "when": "trunk"},
+    {"name": "workflow_release_title", "src": "docs/branch-model.md", "sections": ["개발 흐름 통합 단계 제목 · 두 브랜치"], "when": "two-branch"},
+    {"name": "workflow_release_title", "src": "docs/branch-model.md", "sections": ["개발 흐름 통합 단계 제목 · 단일 브랜치"], "when": "trunk"},
+    {"name": "workflow_release_body", "src": "docs/branch-model.md", "sections": ["개발 흐름 통합 단계 · 두 브랜치"], "when": "two-branch"},
+    {"name": "workflow_release_body", "src": "docs/branch-model.md", "sections": ["개발 흐름 통합 단계 · 단일 브랜치"], "when": "trunk"}
   ],
   "files": [
     {"src": "AGENTS.md", "dest": "AGENTS.md", "self": true},
@@ -9,11 +19,11 @@
     {"src": "docs/README.md", "dest": "docs/README.md", "self": false},
     {"src": "docs/ai-collaboration.md", "dest": "docs/ai-collaboration.md", "self": true},
     {"src": "docs/development-workflow.md", "dest": "docs/development-workflow.md", "self": false},
-    {"src": "docs/git-convention.md", "dest": "docs/git-convention.md", "self": false},
+    {"src": "docs/git-convention.md", "dest": "docs/git-convention.md", "self": false, "seed": true},
     {"src": "docs/secret-environment-variables.md", "dest": "docs/secret-environment-variables.md", "self": true},
     {"src": "docs/templates/plan.md", "dest": "docs/templates/plan.md", "self": true},
     {"src": "docs/templates/review.md", "dest": "docs/templates/review.md", "self": true},
-    {"src": "docs/adr/README.md", "dest": "docs/adr/README.md", "self": false},
+    {"src": "docs/adr/README.md", "dest": "docs/adr/README.md", "self": false, "seed": true},
     {"src": "docs/adr/0000-template.md", "dest": "docs/adr/0000-template.md", "self": true},
     {"src": "merge-request/Default.md", "dest": ".gitlab/merge_request_templates/Default.md", "self": false, "platform": "gitlab"},
     {"src": "merge-request/Release.md", "dest": ".gitlab/merge_request_templates/Release.md", "self": false, "platform": "gitlab"},

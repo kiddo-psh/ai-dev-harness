@@ -81,16 +81,9 @@ git rebase origin/{{integration_branch}}
 - 최소 한 명의 Approve를 받은 후 병합한다.
 - 리뷰 반영 중 범위가 크게 늘어나면 후속 {{issue_noun}}으로 분리한다.
 
-## 7. {{integration_branch}}에서 {{default_branch}}으로 통합
+## 7. {{workflow_release_title}}
 
-1. 팀 합의 일정에 따라 QA와 통합 테스트를 수행한다.
-2. 실패한 빌드나 테스트가 있으면 `{{default_branch}}` 병합을 보류한다.
-3. `{{integration_branch}}`에서 `{{default_branch}}`으로 {{pr_noun}}을 생성한다.
-4. 생성 화면에서 `Release.md` 템플릿을 직접 선택한다. 대상 브랜치만으로 자동 선택되지 않는다.
-5. 릴리스 범위, 주요 변경, 환경 변수, DB 변경 및 롤백 방법을 확인한다.
-6. Squash를 해제하고 Merge commit을 생성해 병합한다.
-
-통합 {{pr_noun}}은 팀장이 진행하며, 구체적인 주기는 팀 합의로 정한다.
+{{workflow_release_body}}
 
 ## 8. 병합 후 로컬 정리
 

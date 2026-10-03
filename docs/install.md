@@ -42,6 +42,10 @@ python bin/harness.py version
 | `.harness/mr-lint/mr_lint.py` | `gitlab`만. MR 본문 lint 조각이 실행하는 검사 코드(5절) |
 | `.gitignore`의 `/plans/` 줄 | 생성 파일이 아니라 한 줄 추가다. 아래 참고 |
 
+`docs/git-convention.md`(커밋 Scope 표·릴리스 태그 이름)와 `docs/adr/README.md`(ADR 목록)는 **시드 파일**이다. 처음 한 번
+생성한 뒤에는 프로젝트가 채워 넣는 문서라 `init --force`가 덮어쓰지 않고 `check`도 내용을 비교하지 않는다(없으면 `없음`으로
+보고하고 다시 만든다).
+
 `init`은 대상의 `.gitignore`에 `/plans/` 줄이 없을 때만 끝에 주석 한 줄과 함께 추가한다. 파일이 없으면 만들고,
 있으면 기존 내용은 그대로 둔다(줄 끝 형식도 따른다). 플랜·리뷰 파일(`plans/`)은 커밋하지 않으며 MR 본문 lint가
 이 줄이 없거나 MR이 `plans/` 파일을 넣으면 실패한다. `.gitignore`는 `check`가 보지 않는다.
@@ -69,7 +73,7 @@ python bin/harness.py init ../my-project \
 | `--tracker` | `jira` | `jira` 또는 `github`. 업무 항목 용어와 이슈 키 예시를 정한다 |
 | `--issue-prefix` | 없음 | Jira 프로젝트 키. **`--tracker jira`이면 필수다** |
 | `--default-branch` | `main` | |
-| `--integration-branch` | `develop` | 통합 브랜치를 쓰지 않으면 `main`과 같게 준다 |
+| `--integration-branch` | `develop` | 통합 브랜치를 쓰지 않으면 `main`과 같게 준다. 같으면 `docs/git-convention.md`·`docs/development-workflow.md`가 단일 브랜치(태그 릴리스) 내용으로 생성된다(`git-convention.md`는 시드 파일이라 처음 생성할 때만) |
 
 대상 디렉터리가 없으면 만든다. 생성한 파일 목록이 출력된다.
 
@@ -187,7 +191,8 @@ python bin/harness.py scaffold backend <kind> MovieReview --target ../my-project
 ## 4. 기존 저장소에 붙이기
 
 기존 파일을 말없이 덮어쓰지 않는다. 충돌하는 파일이 하나라도 있으면 **아무것도 쓰지 않고 중단**하고
-목록을 보여 준다.
+목록을 보여 준다. 단 시드 파일(`docs/git-convention.md`, `docs/adr/README.md`)은 이미 있으면 충돌로 보지 않고 그 파일을
+그대로 쓴다(덮어쓰지 않는다). 기존 저장소의 같은 이름 문서가 키트 내용과 다르면 직접 맞춘다.
 
 ```
 오류: 이미 존재하는 파일이 있어 중단한다. 덮어쓰려면 --force 를 지정한다:
@@ -393,9 +398,14 @@ GitLab이면 `.harness/mr-lint/`도 지운다.
 템플릿의 `{{name}}`은 키트가 가진 값으로 치환한다. 이름은 소문자와 밑줄만 사용한다. 지원 이름은 `project_name`, `platform`,
 `pr_noun`, `pr_long`, `ci_variables`, `tracker_name`, `issue_noun`, `issue_key`,
 `issue_key_example`, `branch_key_example`, `default_branch`, `integration_branch`, `related_docs`,
-`hook_python`, `review_perspectives`다. 마지막 값은 리뷰 관점 원본
-(`core/templates/review-perspectives.md`)의 공통·로컬 절을 묶은 값이다. 영역 템플릿에는 `area_dir`, `area_docs`, `area_verify`, `area_triggers`,
+`hook_python`, `review_perspectives`, `git_branch_model`, `git_branch_table`, `git_release_section`,
+`workflow_release_title`, `workflow_release_body`다. `review_perspectives`는 리뷰 관점 원본
+(`core/templates/review-perspectives.md`)의 공통·로컬 절을 묶은 값이고, `git_*`·`workflow_*`는 브랜치 모델 조각
+(`core/templates/docs/branch-model.md`)에서 `integration_branch == default_branch`(단일 브랜치)인지에 따라 고른 절이다. 영역 템플릿에는 `area_dir`, `area_docs`, `area_verify`, `area_triggers`,
 `area_review_focus`가 추가된다. 알 수 없는 이름이나 잘못된 표기는 생성 오류다. 생성 파일 목록과 원본 경로는
 `core/templates/manifest.json`이 정의하며, 이는 소비자 설정이 아닌 키트 작성자용 계약이다.
-매니페스트의 `includes`는 원본 파일의 `##` 절을 골라 자리표시자 값으로 넣는다. 원본을 고치면 생성 파일이 바뀌므로
-`check`가 불일치로 보고한다. 항목의 `base`는 `templates`(기본)·`hooks`·`ci`(`core/ci/`) 중 하나다.
+매니페스트의 `includes`는 원본 파일의 `##` 절을 골라 자리표시자 값으로 넣는다. `when`(`two-branch`·`trunk`)을 단
+항목은 브랜치 모델별 변형이고, 같은 이름의 두 변형을 모두 둬야 한다. 원본을 고치면 생성 파일이 바뀌므로 `check`가 불일치로
+보고한다(시드 파일 제외). `files` 항목의 `seed: true`는 시드 파일(`docs/git-convention.md`, `docs/adr/README.md`)로, 처음
+한 번만 생성하고 `--force`가 덮어쓰지 않으며 `check`는 존재만 본다. 그래서 템플릿을 바꿔도 이미 만든 시드 파일에는
+반영되지 않는다(필요하면 파일을 지우고 `init --force`로 다시 만든다). 항목의 `base`는 `templates`(기본)·`hooks`·`ci`(`core/ci/`) 중 하나다.

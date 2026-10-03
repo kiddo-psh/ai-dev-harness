@@ -2,27 +2,11 @@
 
 ## 1. 운영 원칙
 
-- `{{default_branch}}`은 배포 및 시연 가능한 안정 버전을 유지한다.
-- `{{integration_branch}}`은 팀 개발 내용을 지속적으로 통합하는 기본 브랜치다.
-- 실제 개발은 {{issue_noun}} 단위의 짧은 작업 브랜치에서 진행한다.
-- `{{default_branch}}`과 `{{integration_branch}}`에는 직접 Push하지 않고 {{pr_long}}를 통해서만 병합한다.
-- 영역별 장기 통합 브랜치는 만들지 않는다.
-
-```text
-{{default_branch}}
-  ↑  팀 합의 일정에 따라 QA 및 통합 테스트 후 병합
-{{integration_branch}}
-  ↑        ↑        ↑
-feat/*    fix/*    refactor/*
-```
+{{git_branch_model}}
 
 ## 2. 브랜치 전략
 
-| 브랜치 | 역할 |
-| --- | --- |
-| `{{default_branch}}` | 배포 및 시연 가능한 안정 버전 |
-| `{{integration_branch}}` | 팀 개발 결과가 합쳐지는 통합 브랜치이자 기본 브랜치 |
-| 작업 브랜치 | 하나의 {{issue_noun}}을 구현하는 단기 브랜치 |
+{{git_branch_table}}
 
 브랜치 이름:
 
@@ -116,14 +100,7 @@ Scope는 담당자가 아니라 실제 변경 영역(디렉터리)을 기준으�
 리뷰 부담에는 포함한다. 분할하면 미완성 계약이 노출되거나 같은 변경을 반복해야 하는 등
 분리가 더 위험한 경우에는 예외를 허용하고, 본문에 합쳐야 하는 이유와 리뷰 순서를 작성한다.
 
-### {{integration_branch}}에서 {{default_branch}}으로 병합
-
-- 팀장이 팀 합의 일정에 따라 통합 {{pr_noun}}을 진행한다.
-- QA와 통합 테스트를 통과한 `{{integration_branch}}`만 `{{default_branch}}`으로 병합한다.
-- 예정된 통합일이라도 빌드·테스트가 실패하거나 시연 가능한 상태가 아니면 병합을 보류한다.
-- 통합 {{pr_noun}}에는 {{issue_key}}를 제목에 강제하지 않는다.
-- 생성 시 `Release.md` 템플릿을 직접 선택한다.
-- Squash를 사용하지 않고 Merge commit을 생성해 업무 단위 커밋 이력을 유지한다.
+{{git_release_section}}
 
 ## 5. 개발 환경 규칙
 
