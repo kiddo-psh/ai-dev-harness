@@ -42,6 +42,10 @@ python bin/harness.py version
 | `.harness/mr-lint/mr_lint.py` | `gitlab`만. MR 본문 lint 조각이 실행하는 검사 코드(5절) |
 | `.gitignore`의 `/plans/` 줄 | 생성 파일이 아니라 한 줄 추가다. 아래 참고 |
 
+`docs/git-convention.md`(커밋 Scope 표·릴리스 태그 이름)와 `docs/adr/README.md`(ADR 목록)는 **시드 파일**이다. 처음 한 번
+생성한 뒤에는 프로젝트가 채워 넣는 문서라 `init --force`가 덮어쓰지 않고 `check`도 내용을 비교하지 않는다(없으면 `없음`으로
+보고하고 다시 만든다).
+
 `init`은 대상의 `.gitignore`에 `/plans/` 줄이 없을 때만 끝에 주석 한 줄과 함께 추가한다. 파일이 없으면 만들고,
 있으면 기존 내용은 그대로 둔다(줄 끝 형식도 따른다). 플랜·리뷰 파일(`plans/`)은 커밋하지 않으며 MR 본문 lint가
 이 줄이 없거나 MR이 `plans/` 파일을 넣으면 실패한다. `.gitignore`는 `check`가 보지 않는다.
@@ -69,7 +73,7 @@ python bin/harness.py init ../my-project \
 | `--tracker` | `jira` | `jira` 또는 `github`. 업무 항목 용어와 이슈 키 예시를 정한다 |
 | `--issue-prefix` | 없음 | Jira 프로젝트 키. **`--tracker jira`이면 필수다** |
 | `--default-branch` | `main` | |
-| `--integration-branch` | `develop` | 통합 브랜치를 쓰지 않으면 `main`과 같게 준다 |
+| `--integration-branch` | `develop` | 통합 브랜치를 쓰지 않으면 `main`과 같게 준다. 같으면 `docs/git-convention.md`·`docs/development-workflow.md`가 단일 브랜치(태그 릴리스) 내용으로 생성된다 |
 
 대상 디렉터리가 없으면 만든다. 생성한 파일 목록이 출력된다.
 

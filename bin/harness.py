@@ -154,6 +154,9 @@ _MR_LINT_SPEC.loader.exec_module(mr_lint)
 
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 PLACEHOLDER_NAME = re.compile(r"[a-z_]+")
+# 브랜치 모델. integration_branch가 default_branch와 같으면 통합 브랜치 없이 main에 직접 병합하는 단일 브랜치다
+TWO_BRANCH, TRUNK = "two-branch", "trunk"
+BRANCH_MODES = (TWO_BRANCH, TRUNK)
 
 
 class HarnessError(Exception):
@@ -318,11 +321,18 @@ def build_context(config: dict) -> dict:
     docs = config.get("related_docs") or []
     ctx["related_docs"] = "\n".join(f"- [{d['label']}]({d['path']})" for d in docs)
     ctx["hook_python"] = (config.get("hooks") or {}).get("python", hooks_common.DEFAULT_PYTHON)
+    mode = branch_mode(config)
     for include in load_includes():  # 다른 파일의 절을 자리표시자 값으로 넣는다. 포함 내용도 같은 컨텍스트로 렌더한다
+        if include.get("when", mode) != mode:  # 브랜치 모델별 변형은 현재 모델 것만 넣는다
+            continue
         if include["name"] in ctx:
             raise HarnessError(f"매니페스트 include 이름이 기존 자리표시자와 겹친다: {include['name']}")
         ctx[include["name"]] = render(include_text(include), ctx, source=f"{include['src']}#{include['name']}")
     return ctx
+
+
+def branch_mode(config: dict) -> str:
+    return TRUNK if config["integration_branch"] == config["default_branch"] else TWO_BRANCH
 
 
 def area_context(area: dict) -> dict:
@@ -392,10 +402,12 @@ def load_includes() -> list[dict]:
     includes = read_manifest().get("includes", [])
     if not isinstance(includes, list):
         raise HarnessError("매니페스트 includes는 목록이어야 한다")
-    seen = set()
+    variants: dict[str, set] = {}  # 이름 → {"*"} 또는 브랜치 모델 집합
     for entry in includes:
-        if not isinstance(entry, dict) or not {"name", "src", "sections"} <= set(entry) <= {"name", "src", "sections", "tag"}:
-            raise HarnessError("매니페스트 include 항목은 name·src·sections(선택 tag)를 가져야 한다")
+        if not isinstance(entry, dict) or not {"name", "src", "sections"} <= set(entry) <= {"name", "src", "sections", "tag", "when"}:
+            raise HarnessError("매니페스트 include 항목은 name·src·sections(선택 tag·when)를 가져야 한다")
+        if "when" in entry and entry["when"] not in BRANCH_MODES:
+            raise HarnessError(f"매니페스트 include when은 {'|'.join(BRANCH_MODES)} 중 하나여야 한다: {entry['when']!r}")
         if "tag" in entry and (not isinstance(entry["tag"], str) or not re.fullmatch(r"[^\[\]\s]+", entry["tag"])):
             raise HarnessError(f"매니페스트 include tag가 잘못됐다: {entry['tag']!r}")
         name = entry["name"]
@@ -403,15 +415,20 @@ def load_includes() -> list[dict]:
             raise HarnessError(f"매니페스트 include 이름은 소문자와 밑줄만 쓴다: {name!r}")
         if name.startswith("area_"):  # 영역 자리표시자 이름공간. 영역 문서에서 조용히 가려지는 것을 막는다
             raise HarnessError(f"매니페스트 include 이름은 area_로 시작할 수 없다: {name}")
-        if name in seen:
+        key = entry.get("when", "*")
+        modes = variants.setdefault(name, set())
+        if key in modes or "*" in modes or (key == "*" and modes):
             raise HarnessError(f"매니페스트 include 이름이 중복된다: {name}")
-        seen.add(name)
+        modes.add(key)
         if not valid_template_path(entry["src"]):
             raise HarnessError(f"매니페스트 include src 경로가 잘못됐다: {entry['src']!r}")
         sections = entry["sections"]
         if not isinstance(sections, list) or not sections or any(
                 not isinstance(s, str) or not s.strip() for s in sections):
             raise HarnessError(f"매니페스트 include {name}의 sections는 비어 있지 않은 문자열 목록이어야 한다")
+    for name, modes in variants.items():  # 모델별 변형은 어느 모델에서도 자리표시자가 비지 않게 쌍으로 둔다
+        if "*" not in modes and modes != set(BRANCH_MODES):
+            raise HarnessError(f"매니페스트 include {name}은 when 변형을 {'·'.join(BRANCH_MODES)} 둘 다 둬야 한다")
     return includes
 
 
@@ -449,7 +466,7 @@ def load_manifest() -> list[dict]:
     data = read_manifest()
     seen = set()
     for entry in data["files"]:
-        if not isinstance(entry, dict) or not {"src", "dest"} <= set(entry) or set(entry) - {"src", "dest", "base", "platform", "self", "render"}:
+        if not isinstance(entry, dict) or not {"src", "dest"} <= set(entry) or set(entry) - {"src", "dest", "base", "platform", "self", "render", "seed"}:
             raise HarnessError("매니페스트 항목의 키가 잘못됐다")
         base = entry.get("base", "templates")
         if not isinstance(base, str) or base not in SOURCE_DIRS:
@@ -462,7 +479,7 @@ def load_manifest() -> list[dict]:
             raise HarnessError(f"매니페스트 목적지가 중복된다: {entry['dest']}")
         seen.add(entry["dest"])
         if ("platform" in entry and (not isinstance(entry["platform"], str) or entry["platform"] not in PLATFORMS) or
-                any(key in entry and not isinstance(entry[key], bool) for key in ("self", "render"))):
+                any(key in entry and not isinstance(entry[key], bool) for key in ("self", "render", "seed"))):
             raise HarnessError(f"매니페스트 선택 값이 잘못됐다: {entry['dest']}")
     return data["files"]
 
@@ -481,6 +498,14 @@ def planned_files(config: dict, self_mode: bool) -> list[tuple[Path, str, bool]]
             raise HarnessError(f"매니페스트 base는 {sorted(SOURCE_DIRS)} 중 하나여야 한다: {base}")
         plan.append((SOURCE_DIRS[base] / entry["src"], entry["dest"], entry.get("render", True)))
     return plan
+
+
+def seed_dests(config: dict, self_mode: bool) -> set[str]:
+    """소비자 소유 시드 파일(seed=true)의 대상 경로. 처음 한 번만 생성하고 그 뒤는 덮어쓰지도 비교하지도 않는다."""
+    return {entry["dest"] for entry in load_manifest()
+            if entry.get("seed", False)
+            and not (entry.get("platform") and entry["platform"] != config["platform"])
+            and not (self_mode and not entry.get("self", False))}
 
 
 def render_all(config: dict, self_mode: bool) -> dict[str, str]:
@@ -972,9 +997,10 @@ def cmd_init(args) -> int:
     else:
         config = config_from_args(args, target)
     outputs = render_all(config, self_mode)
+    seeds = seed_dests(config, self_mode)
 
     if not self_mode and not args.force:
-        collisions = [dest for dest in outputs if (target / dest).exists()]
+        collisions = [dest for dest in outputs if dest not in seeds and (target / dest).exists()]
         if collisions:
             listing = "\n".join(f"  {c}" for c in collisions)
             raise HarnessError(
@@ -982,7 +1008,10 @@ def cmd_init(args) -> int:
             )
 
     target.mkdir(parents=True, exist_ok=True)
+    kept = [dest for dest in outputs if dest in seeds and (target / dest).exists()]
     for dest, content in outputs.items():
+        if dest in kept:  # 시드 파일은 소비자 소유라 --force 로도 덮어쓰지 않는다
+            continue
         write_text(target / dest, content)
     plans_added = ensure_plans_ignored(target)
     if not self_mode:
@@ -990,9 +1019,9 @@ def cmd_init(args) -> int:
         if not config_path.exists() or args.force:
             config["harness_version"] = VERSION
             write_text(config_path, json.dumps(config, ensure_ascii=False, indent=2) + "\n")
-    print(f"{len(outputs)}개 파일을 {target} 에 생성했다.")
+    print(f"{len(outputs) - len(kept)}개 파일을 {target} 에 생성했다.")
     for dest in outputs:
-        print(f"  {dest}")
+        print(f"  {dest}" + (" (유지: 소비자 소유 시드 파일)" if dest in kept else ""))
     if plans_added:
         print(f".gitignore 에 {mr_lint.PLANS_IGNORE} 를 추가했다.")
     return 0
@@ -1061,11 +1090,14 @@ def cmd_check(args) -> int:
     if version_drift:
         print(f"버전 불일치: 설정의 harness_version {recorded!r} 과 키트 {VERSION} 이 다르다.")
     outputs = render_all(config, self_mode)
+    seeds = seed_dests(config, self_mode)
     missing, drifted = [], []
     for dest, content in outputs.items():
         path = target / dest
         if not path.is_file():
             missing.append(dest)
+        elif dest in seeds:  # 시드 파일은 소비자가 채우므로 내용을 비교하지 않는다
+            continue
         elif path.read_text(encoding="utf-8").replace("\r\n", "\n") != content:
             drifted.append(dest)
     hooks_dir = target / ".claude" / "hooks"
