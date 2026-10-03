@@ -47,7 +47,7 @@ python bin/harness.py scaffold frontend screen MovieDetail --var area=movies --t
 | `src_root` | `src` | 영역 기준 소스 루트. 스캐폴드 경로와 ESLint `files`의 기준 |
 | `api_client_import` | `./client` | api 도메인 모듈이 공통 클라이언트를 가져오는 경로(api 디렉터리 기준) |
 | `api_client_fn` | `request` | 공통 클라이언트의 요청 함수(`request<T>(path, options)`) |
-| `lint_script`·`format_script`·`test_script`·`build_script` | `lint`·`format:check`·`test:run`·`build` | 영역 검증 명령 `npm run <스크립트>` |
+| `lint_script`·`format_script`·`test_script`·`build_script` | `lint`·`format:check`·`test:run`·`build` | 영역 검증 명령 `npm --prefix <영역> run <스크립트>` |
 | `area`(screen) | 빈 값 | 화면 영역 디렉터리. 비우면 `pages/<Name>Page/` |
 
 ## 스캐폴드
@@ -99,7 +99,8 @@ python bin/harness.py scaffold frontend screen MovieDetail --var area=movies --t
 
 ## 영역 판정 기본값
 
-- 검증: `npm run lint`, `npm run format:check`, `npm run test:run`, `npm run build`
+- 검증: `npm --prefix <영역> run lint`, `… run format:check`, `… run test:run`, `… run build`(영역 검증 명령은 저장소 루트에서
+  실행되므로 `--prefix`로 영역의 `package.json`을 쓴다)
 - 엄격 경로: `/package.json`, lock 파일, `/vite.config.*`, `/eslint.config.*`(`...harness`를 빼면 규칙이 조용히 꺼진다)
 - 표준 경로: `/src/routes/`, `/src/components/`. 경량(테스트만): `*.test.ts`·`*.test.tsx`
 - `src_root`를 바꾸면 `harness.json`의 `trigger_paths`도 함께 고친다(판정 경로는 변수를 쓰지 않는다)

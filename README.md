@@ -14,7 +14,7 @@ SSAFY 2학기 프로젝트(feelm)에서 실제로 운용한 AI 작업 절차를 
 python bin/harness.py init ../my-project --platform gitlab --tracker jira --issue-prefix ABC123
 
 # 영역 디렉터리에 판정·절차 규칙(AGENTS.md)을 생성한다. 루트 init 이후에 실행한다
-python bin/harness.py init ../my-project --area backend --verify-cmd "./gradlew build"
+python bin/harness.py init ../my-project --area backend --verify-cmd "cd backend && ./gradlew build"
 
 # 생성된 파일이 템플릿과 어긋났는지 검사한다(영역 파일 포함)
 python bin/harness.py check ../my-project
