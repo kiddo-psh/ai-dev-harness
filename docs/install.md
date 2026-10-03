@@ -79,12 +79,13 @@ python bin/harness.py init ../my-project \
 
 ```bash
 python bin/harness.py init ../my-project --area backend \
-  --verify-cmd "./gradlew test" \
-  --verify-cmd "./gradlew ktlintCheck" \
+  --verify-cmd "cd backend && ./gradlew test" \
+  --verify-cmd "cd backend && ./gradlew ktlintCheck" \
   --area-doc "docs/api/openapi.yaml"
 ```
 
 - `--verify-cmd`는 **하나 이상 필수**다(프로필을 쓰면 프로필 기본값으로 생략 가능, 3.6절). 반복해서 여러 개를 줄 수 있다. 파일을 고치지 않는 명령만 적는다
+- 검증 명령은 **저장소 루트에서** 실행된다(hooks `stop-verify`). 영역 안의 빌드 도구는 `cd backend && …`, `npm --prefix frontend run …`처럼 루트 기준으로 쓴다
 - `--trigger`, `--review-focus`는 생략하면 키트 기본값을 쓴다. 주면 기본값을 **대체**한다(추가가 아니다)
 - `--area-doc`은 그 영역의 기준 문서다. 준 것만 적힌다. 여기 적은 경로는 hooks가 `ask`로 보호한다
 - `--area`는 대상의 `harness.json`을 쓰므로 `--platform` 같은 루트 인자와 함께 쓸 수 없다
@@ -162,6 +163,7 @@ python bin/harness.py scaffold backend <kind> MovieReview --target ../my-project
 
 - `--profile`은 `--area`와 함께 쓴다. 프로필의 `verify`·`triggers`·`review_focus`·`trigger_paths`·`test_paths`·`layers`·`allow`를
   영역 설정에 굳히고 `profile`·`vars`·`disabled_rules` 키를 남긴다. 명시한 `--verify-cmd`·`--trigger`·`--review-focus`가 우선한다
+- 프로필의 검증 명령·안내에는 영역 경로 `{{area_dir}}`가 들어가 저장소 루트에서 실행할 수 있는 명령으로 굳는다
 - `--var 이름=값`은 프로필이 선언한 변수만 받는다. 기본값이 없는 변수는 필수이고, 값은 프로필의 형식(정규식)에 맞아야 한다
 - 같은 영역을 `--force`로 다시 만들 때 `--profile`·`--var`를 생략하면 이전 값을 유지한다. 다른 프로필로 바꿀 수는 없다
   (영역 항목을 지우고 다시 만든다). 프로필 없이 만든 영역에 처음 프로필을 적용하면 기준 문서만 유지하고 나머지는 프로필
@@ -379,6 +381,7 @@ GitLab이면 `.harness/mr-lint/`도 지운다.
 목록이다. 영역을 새로 만들면 기본 `triggers`·`review_focus`·`trigger_paths`·`test_paths`를 설정 파일에 저장한다. 같은 영역을 `--force`로 다시 만들 때 생략한
 선택 항목은 이전 값을 유지한다.
 최상위 `judge`(선택)는 영역 밖 파일의 판정 규칙으로 `trigger_paths`·`test_paths`·`triggers`(사람 확인 문장)만 가진다.
+영역 `verify`와 최상위 `hooks.stop_verify` 명령은 저장소 루트에서 실행한다. 프로필의 `verify`·`setup_notes`는 변수와 `area_dir`(정규화된 영역 경로)로 렌더하며, `area_dir`는 변수 이름으로 쓸 수 없다.
 영역의 프로필 키(3.6절)는 `profile`(프로필 이름), `vars`(변수 이름 → 문자열), `layers`(계층 이름 → 패턴 목록),
 `allow`(계층 이름 → `layers`에 있는 계층 이름 목록, 빈 목록 허용), `disabled_rules`(규칙 ID → 비어 있지 않은 이유)다.
 `profile` 없이 나머지 키를 쓰면 오류다. CLI는 `init <target> --area <dir> --profile <name> [--var 이름=값 ..]`와

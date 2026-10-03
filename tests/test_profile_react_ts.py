@@ -103,7 +103,9 @@ class ReactProfileTest(unittest.TestCase):
         area = self.area()
         profile, _base = harness.load_profile(PROFILE)
         self.assertEqual(area["profile"], PROFILE)
-        self.assertEqual(area["verify"], ["npm run lint", "npm run format:check", "npm run test:run", "npm run build"])
+        # #55: 영역 검증 명령은 저장소 루트에서 실행되므로 --prefix로 영역 package.json을 쓴다
+        self.assertEqual(area["verify"], [f"npm --prefix frontend run {s}"
+                                          for s in ("lint", "format:check", "test:run", "build")])
         self.assertEqual(area["vars"], {"src_root": "src", "api_client_import": "./client", "api_client_fn": "request",
                                         "lint_script": "lint", "format_script": "format:check",
                                         "test_script": "test:run", "build_script": "build"})
@@ -123,7 +125,7 @@ class ReactProfileTest(unittest.TestCase):
         self.assertIn(ESLINT, self.files())
         self.assertNotIn("{{", self.read(ESLINT))
         self.assertNotIn("}}", self.read(ESLINT))
-        self.assertIn("npm run test:run", self.read("frontend/AGENTS.md"))
+        self.assertIn("npm --prefix frontend run test:run", self.read("frontend/AGENTS.md"))
         self.assertIn("안내: eslint.harness.js 는 devDependency eslint-plugin-jsx-a11y 가 필요하다", out)
         self.assertIn("...harness", out)
         self.assertEqual(self.check()[0], 0)
@@ -132,7 +134,7 @@ class ReactProfileTest(unittest.TestCase):
                                "--var", "test_script=test:ci"])
         self.assertEqual(code, 0, err)
         web = next(a for a in self.config()["areas"] if a["dir"] == "web")
-        self.assertEqual(web["verify"][2], "npm run test:ci")
+        self.assertEqual(web["verify"][2], "npm --prefix web run test:ci")
 
     # T3
     def test_scaffold_screen(self):

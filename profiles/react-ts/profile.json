@@ -2,10 +2,10 @@
   "name": "react-ts",
   "description": "React + TypeScript + Vite 웹 프론트(react-router 데이터 라우터, Vitest + Testing Library). 화면·API 스캐폴드와 ESLint 경계·접근성 규칙",
   "verify": [
-    "npm run {{lint_script}}",
-    "npm run {{format_script}}",
-    "npm run {{test_script}}",
-    "npm run {{build_script}}"
+    "npm --prefix {{area_dir}} run {{lint_script}}",
+    "npm --prefix {{area_dir}} run {{format_script}}",
+    "npm --prefix {{area_dir}} run {{test_script}}",
+    "npm --prefix {{area_dir}} run {{build_script}}"
   ],
   "trigger_paths": {
     "strict": [

@@ -21,7 +21,7 @@ lock 파일)을 최상위 `judge.trigger_paths.strict`에 직접 넣는다.
 
 | 항목 | 기본값 |
 | --- | --- |
-| `verify` | `./gradlew build`(spotlessCheck·test 포함) |
+| `verify` | `cd <영역> && ./gradlew build`(spotlessCheck·test 포함. 영역 검증 명령은 저장소 루트에서 실행된다) |
 | `trigger_paths.strict` | `/src/main/resources/db/migration/`, `/build.gradle(.kts)`, `/settings.gradle(.kts)`, `/src/main/resources/application*.{yml,yaml,properties}`, `**/global/`, `**/infrastructure/`, `**/*SecurityConfig.java`, `gradle.lockfile`, `settings-gradle.lockfile` |
 | `test_paths` | `/src/test/`, `*Test.java`, `*Tests.java`(`java_test`를 바꿔도 테스트로 판정) |
 | `triggers` | 계약 문서, 다른 담당 도메인·공통 코드, `@Transactional` 경계·여러 Repository 쓰기, 인증·토큰, 메시지·캐시 키 |

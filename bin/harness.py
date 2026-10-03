@@ -65,6 +65,8 @@ CONVENTION_KINDS = ("fixed", "configured")
 FORMAT_KEYS = {"layer", "layer_empty", "pattern", "pattern_separator", "allowed", "allowed_separator", "separator"}
 NAME_VARIANTS = ("name", "name_pascal", "name_camel", "name_kebab", "name_snake", "name_lower")
 LAYER_JSON_NAMES = ("layers_json", "allow_json")
+# 프로필 verify·setup_notes 렌더에만 주는 값. 영역 검증 명령은 저장소 루트에서 실행되므로(stop-verify) 영역 경로가 필요하다
+COMMAND_NAMES = ("area_dir",)
 # 고정 규칙 블록 표식. 각 언어의 주석 안에 쓰고, 끈 규칙은 표식 줄과 함께 지운다
 RULE_START = re.compile(r"harness:rule\s+(\S+)")
 RULE_END = re.compile(r"harness:end\b")
@@ -564,7 +566,7 @@ def validate_profile(profile, base: Path, source: str) -> None:
     dummy = var_context({name: "x" for name in variables})
     for key in ("verify", "setup_notes"):
         for text in profile.get(key, []):
-            render(text, dummy, source=f"{source} {key}")
+            render(text, {**dummy, **{name: "x" for name in COMMAND_NAMES}}, source=f"{source} {key}")
     validate_scaffold(profile.get("scaffold", {}), variables, base, source)
     validate_conventions(profile.get("conventions"), dummy, base, source)
 
@@ -576,8 +578,8 @@ def validate_var_spec(spec, source: str, reserved: set[str] = frozenset()) -> No
     known = set(reserved)
     for name, item in spec.items():
         if (not VAR_NAME.fullmatch(name) or name.endswith("_path") or name.startswith("name") or
-                name in LAYER_JSON_NAMES or name in reserved):
-            # `<이름>_path`·이름 변형·계층 JSON은 엔진이 만드는 값이라 변수 이름으로 쓸 수 없다
+                name in LAYER_JSON_NAMES or name in COMMAND_NAMES or name in reserved):
+            # `<이름>_path`·이름 변형·계층 JSON·명령용 영역 경로는 엔진이 만드는 값이라 변수 이름으로 쓸 수 없다
             raise HarnessError(f"{source}: 변수 이름이 잘못됐거나 예약어다: {name!r}")
         if not isinstance(item, dict) or set(item) - VAR_KEYS or not isinstance(item.get("description"), str):
             raise HarnessError(f"{source}: 변수 {name}은 description(필수)·pattern·default만 가진다")
@@ -887,12 +889,13 @@ def cmd_init_area(args, target: Path) -> int:
         values = resolve_vars(profile.get("vars", {}), parse_var_args(args.var), previous.get("vars", {}),
                               f"프로필 {profile_name}")
     ctx = var_context(values)
+    command_ctx = {**ctx, "area_dir": dir_}  # 영역 검증 명령은 저장소 루트에서 실행된다
     # 명시 인자 → 이전 영역 값 → 프로필 기본값 → 키트 기본값(P-3). 프로필 없던 영역에 처음 적용하면 이전 값은
     # 키트 기본값을 굳힌 것이라 프로필 기본값을 가리지 않게 기준 문서만 이어받는다
     kept = previous if previous.get("profile") or not profile_name else \
         {key: value for key, value in previous.items() if key == "docs"}
     verify = args.verify_cmd or (kept.get("verify") if profile_name else None) or \
-        [render(cmd, ctx, source=f"프로필 {profile_name} verify") for cmd in profile.get("verify", [])]
+        [render(cmd, command_ctx, source=f"프로필 {profile_name} verify") for cmd in profile.get("verify", [])]
     if not verify:
         raise HarnessError("--area 에는 --verify-cmd 가 하나 이상 필요하다(프로필에 verify 가 있으면 생략 가능)")
     area = {"dir": dir_, "verify": verify}
@@ -945,7 +948,7 @@ def cmd_init_area(args, target: Path) -> int:
         for dest in stale:
             print(f"이전 컨벤션 파일(관리 대상에서 빠졌다. 확인 후 지운다): {dest}")
         for note in profile.get("setup_notes", []):
-            print(f"안내: {render(note, ctx, source=f'프로필 {profile_name} setup_notes')}")
+            print(f"안내: {render(note, command_ctx, source=f'프로필 {profile_name} setup_notes')}")
     return 0
 
 
