@@ -76,9 +76,11 @@ class ScenarioTableTest(unittest.TestCase):
 
     def test_negative_scenarios_cover_decided_rules(self):
         """H-3·A-12: controller→repository, mocks import, alt 없는 img. #59: ViewModel의 Retrofit, feature의 Room,
-        contentDescription. #59 리뷰 F2: feature domain→ui 계층 의존."""
+        contentDescription. #59 리뷰 F2: feature domain→ui 계층 의존. spring-java no-cross-domain-persistence:
+        다른 기능의 repository를 쓰는 service."""
         names = {n["name"] for scenario in rp.scenarios().values() for n in scenario["negatives"]}
-        self.assertEqual(names, {"controller-calls-repository", "page-imports-mocks", "img-without-alt",
+        self.assertEqual(names, {"controller-calls-repository", "service-uses-other-domain-repository",
+                                 "page-imports-mocks", "img-without-alt",
                                  "viewmodel-imports-retrofit", "feature-imports-room", "domain-imports-ui",
                                  "image-without-content-description"})
 

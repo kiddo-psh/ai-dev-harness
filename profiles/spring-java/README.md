@@ -107,6 +107,8 @@ testImplementation 'com.tngtech.archunit:archunit-junit5:1.4.1' // 1.x 버전
 | `no-field-injection` | `@Autowired`·`@Inject` 필드 금지 |
 | `service-no-web-types` | `..service..`가 `jakarta.servlet..`·`ResponseEntity`에 의존하지 않는다 |
 | `no-service-cycle-between-domains` | `<base_package>.domain.(*).service..` 사이 순환 금지 |
+| `no-cross-domain-persistence` | `<base_package>.domain.<A>..`의 클래스가 다른 기능 `domain.<B>`의 `..repository..`·`..entity..`에 의존하지 않는다. 다른 기능의 상태 변경은 이벤트로, 조회는 그 기능의 public service로 한다. JPA 연관(`@ManyToOne` 다른 기능 엔티티)도 위반이므로 ID로 참조한다 |
+| `event-publisher-in-service-only` | `domain..` 안에서 `ApplicationEventPublisher`는 `..service..`만 의존한다(이벤트 핸들러·controller에서 재발행 금지). `global`·`infrastructure`는 보지 않는다 |
 
 고정 규칙을 끄려면 `harness.json` 영역에 이유를 적고 다시 생성한다. 끄면 그 규칙의 `@ArchTest` 필드만 빠진다.
 

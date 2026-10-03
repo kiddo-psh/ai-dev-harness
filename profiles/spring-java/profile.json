@@ -103,7 +103,9 @@
       "controller-no-entity-return": "controller 공개 메서드는 @Entity 타입(제네릭 인자 포함)을 반환하지 않는다",
       "no-field-injection": "필드 주입(@Autowired·@Inject 필드) 금지. 생성자 주입을 쓴다",
       "service-no-web-types": "service는 jakarta.servlet·ResponseEntity에 의존하지 않는다",
-      "no-service-cycle-between-domains": "domain 기능 패키지 사이의 service 순환 의존 금지"
+      "no-service-cycle-between-domains": "domain 기능 패키지 사이의 service 순환 의존 금지",
+      "no-cross-domain-persistence": "domain 기능 패키지는 다른 기능의 repository·entity에 의존하지 않는다(상태 변경은 이벤트, 조회는 그 기능의 public service)",
+      "event-publisher-in-service-only": "domain 안에서 ApplicationEventPublisher는 service 패키지만 쓴다(핸들러·controller에서 발행 금지)"
     },
     "formats": {
       "layer_definitions": {
