@@ -120,7 +120,8 @@ class SpringProfileTest(unittest.TestCase):
     def test_init_area_defaults(self):
         out = self.init_spring()
         area = self.area()
-        self.assertEqual(area["verify"], ["./gradlew build"])
+        # #55: 영역 검증 명령은 저장소 루트에서 실행되므로 영역(Gradle 빌드 루트)으로 들어가 실행한다
+        self.assertEqual(area["verify"], ["cd backend && ./gradlew build"])
         for pattern in J8_STRICT:
             with self.subTest(strict=pattern):
                 self.assertIn(pattern, area["trigger_paths"]["strict"])

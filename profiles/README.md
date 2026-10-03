@@ -34,6 +34,7 @@ profiles/<name>/
 
 ## 템플릿 자리표시자
 
+- `verify`·`setup_notes`: 변수, `<변수>_path`, `area_dir`(영역 경로). 영역 검증 명령은 저장소 루트에서 실행되므로 `cd {{area_dir}} && …`·`npm --prefix {{area_dir}} …`처럼 쓴다. `area_dir`는 변수 이름으로 쓸 수 없다
 - 스캐폴드: 변수, `<변수>_path`, 이름 변형 `name`(입력 그대로)·`name_pascal`·`name_camel`·`name_kebab`·`name_snake`·`name_lower`
 - 컨벤션 `fixed`: 변수와 `<변수>_path`
 - 컨벤션 `configured`: 위에 더해 `formats`의 서식 이름, `layers_json`·`allow_json`(JS 설정에 그대로 쓰는 JSON). 서식 이름으로 `layers_json`·`allow_json`은 쓸 수 없다

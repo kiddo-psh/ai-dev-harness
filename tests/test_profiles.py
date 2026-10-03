@@ -100,6 +100,10 @@ class ProfileSchemaTest(ProfileTestBase):
             "unknown dest placeholder": mutate(lambda d: d["scaffold"]["domain"]["files"][0].update(dest="{{nope}}")),
             "unknown convention kind": mutate(lambda d: d["conventions"]["files"][0].update(kind="other")),
             "reserved var name": mutate(lambda d: d["vars"].update(base_path={"description": "x"})),
+            # #55: area_dir는 verify·setup_notes에만 주는 엔진 값이다. 변수로 가리거나 스캐폴드 경로에 쓸 수 없다
+            "reserved area_dir var": mutate(lambda d: d["vars"].update(area_dir={"description": "x"})),
+            "area_dir in scaffold dest": mutate(lambda d: d["scaffold"]["domain"]["files"][0].update(
+                dest="{{area_dir}}/{{name}}.txt")),
             "var without description": mutate(lambda d: d["vars"].update(extra={})),
             "bad var pattern": mutate(lambda d: d["vars"]["module"].update(pattern="(")),
             "kind var shadows profile var": mutate(
@@ -200,6 +204,27 @@ class InitProfileTest(ProfileTestBase):
             with self.subTest(root_flag=flag):
                 code, _out, _err = run(["init", str(self.tmp / "other"), *flag])
                 self.assertEqual(code, 2)
+
+    def test_area_dir_in_verify_and_notes(self):
+        """#55: 영역 검증 명령은 저장소 루트에서 실행되므로 프로필 verify·setup_notes가 영역 경로를 쓸 수 있다."""
+        data = self.profile_json()
+        data["verify"] = ["cd {{area_dir}} && build {{module}}"]
+        data["setup_notes"] = ["{{area_dir}} 의 빌드 파일을 고친다"]
+        self.write_profile(data)
+        code, out, err = run(["init", str(self.target), "--area", "./apps/api/", "--profile", "demo",
+                              "--var", "base_package=com.acme.app"])
+        self.assertEqual(code, 0, err)
+        area = next(a for a in self.config()["areas"] if a["dir"] == "apps/api")
+        self.assertEqual(area["verify"], ["cd apps/api && build app"])
+        self.assertIn("안내: apps/api 의 빌드 파일을 고친다", out)
+        # 리뷰 F1: 셸 명령에 그대로 들어가므로 공백·명령 구분자가 있는 영역 경로는 거부한다
+        # PR #57 Codex: `-`로 시작하면 `cd -backend`가 옵션으로 읽힌다
+        for bad in ("my app", "a&b", "x;echo INJECT", "-backend", "-"):
+            with self.subTest(area=bad):
+                code, _out, err = run(["init", str(self.target), f"--area={bad}", "--profile", "demo",
+                                       "--var", "base_package=com.acme.app"])
+                self.assertEqual(code, 2, err)
+                self.assertFalse((self.target / bad).exists())
 
     def test_explicit_args_override_profile(self):
         self.init_demo("--verify-cmd", "make check", "--trigger", "내 트리거", "--review-focus", "내 관점",
@@ -533,9 +558,15 @@ class DocsTest(unittest.TestCase):
         self.assertIn("profile.json", adr[adr.index("## 결과"):])
         install = self.read("docs/install.md")
         contract = install[install.index("## 13."):]
-        for word in ("scaffold", "--profile", "--var", ".harness/templates/", "disabled_rules", "layers", "allow"):
+        for word in ("scaffold", "--profile", "--var", ".harness/templates/", "disabled_rules", "layers", "allow",
+                     "area_dir", "저장소 루트에서 실행"):
             with self.subTest(word=word):
                 self.assertIn(word, contract)
+        # #55: 영역 검증 명령 예시는 저장소 루트에서 실행해도 되는 형태여야 한다(리뷰 F2: README 빠른 시작 포함)
+        self.assertIn('--verify-cmd "cd backend && ./gradlew build"', self.read("README.md"))
+        area_section = install[install.index("### 3.2"):install.index("### 3.3")]
+        self.assertIn('--verify-cmd "cd backend && ./gradlew test"', area_section)
+        self.assertNotIn('--verify-cmd "./gradlew', area_section)
         readme = self.read("profiles/README.md")
         for word in ("profile.json", "harness:rule", "formats", ".harness/templates/"):
             with self.subTest(word=word):
