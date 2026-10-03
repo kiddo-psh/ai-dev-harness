@@ -255,6 +255,40 @@ class ReactProfileTest(unittest.TestCase):
                                         encoding="utf-8", errors="replace", timeout=60)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_nested_layer_keeps_outer_restrictions(self):
+        """리뷰 F1: components 안에 components/shared 계층을 두면 한 파일에 두 묶음이 맞고 마지막 객체만 남는다.
+        안쪽 묶음이 바깥 묶음의 고정 규칙·계층 제한을 모두 담고 뒤에 와야 한다."""
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node가 없어 생성된 설정을 실행해 볼 수 없다(대체: M3-5 리허설의 eslint 실행)")
+        self.init_frontend("--profile", PROFILE)
+        config = self.config()
+        area = config["areas"][0]
+        area["layers"]["shared"] = ["components/shared"]
+        area["allow"]["shared"] = ["types", "utils"]
+        area["disabled_rules"] = {"jsx-a11y-recommended": "플러그인 없이 설정만 읽는다"}
+        self.save_config(config)
+        self.init_frontend("--force")
+        module = self.tmp / "eslint-harness.mjs"
+        module.write_text(self.read(ESLINT), encoding="utf-8")
+        dump = self.tmp / "dump.mjs"
+        dump.write_text(
+            "import configs from './eslint-harness.mjs';\n"
+            "console.log(JSON.stringify(configs.map((c) => ({ files: c.files, messages: "
+            "(c.rules?.['no-restricted-imports']?.[1]?.patterns ?? []).map((p) => p.message) }))));\n",
+            encoding="utf-8")
+        result = subprocess.run([node, str(dump)], capture_output=True, text=True, encoding="utf-8",
+                                errors="replace", timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        configs = json.loads(result.stdout)
+        index = {c["files"][0]: i for i, c in enumerate(configs)}
+        inner = "src/components/shared/*.{js,jsx,ts,tsx}"
+        outer = "src/components/*/*.{js,jsx,ts,tsx}"  # 같은 파일(깊이 2)에 맞는 바깥 묶음
+        self.assertGreater(index[inner], index[outer])
+        messages = " ".join(configs[index[inner]]["messages"])
+        for expected in ("[no-mocks-import]", "[layers] 계층 components은", "[layers] 계층 shared은"):
+            self.assertIn(expected, messages)
+
 
 if __name__ == "__main__":
     unittest.main()

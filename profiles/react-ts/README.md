@@ -5,6 +5,8 @@ M3 결정(R-1~R-9)이다. 엔진 계약은 [profiles/README.md](../README.md)를
 
 - 기준 스택: React 18 이상, TypeScript, Vite, react-router 데이터 라우터(`createBrowserRouter`), Vitest + Testing Library,
   ESLint flat config(9 이상, `no-restricted-imports`의 `regex` 패턴), Node 22
+- 템플릿은 `react-router` 패키지에서 import한다(v7 이상). v6 데이터 라우터 프로젝트는 보통 `react-router-dom`만 선언하므로
+  `.harness/templates/react-ts/screen/`에서 import를 `react-router-dom`으로 바꾼다(전이 의존성에 기대면 pnpm에서 깨진다)
 - 새 런타임 의존성을 요구하지 않는다(axios·react-query·MSW 없음). 검사용 devDependency는 `eslint-plugin-jsx-a11y` 하나다
 
 ## 적용 방법
@@ -59,7 +61,8 @@ python bin/harness.py scaffold frontend screen MovieDetail --var area=movies --t
 - `screen`은 공유 파일 `routes/paths.ts`(`ROUTE_PATTERN`·`path`)와 `routes/router.tsx`(import·라우트 객체)에 붙일 조각을
   출력한다. 붙이는 위치(레이아웃, 인증 가드 안팎)는 사람이 정한다. `area`를 비우면 조각의 import 경로에 생기는 `//`를 `/`로 고친다
 - 화면 템플릿은 영역 깊이가 달라도 컴파일되도록 화면 디렉터리 밖을 상대 경로로 import하지 않는다. 테스트의 `vi.mock`은
-  Vite 루트 기준 경로(`/src/api/client`)를 쓴다(영역 디렉터리가 Vite 루트라고 가정)
+  Vite 루트 기준 경로(`/src/api/client`)를 쓴다(영역 디렉터리가 Vite 루트라고 가정). 모듈 이름 `client`는 고정이라
+  `api_client_import`를 바꾼 저장소는 테스트의 `vi.mock` 경로도 직접 맞춘다. Vitest는 없는 모듈을 mock해도 경고하지 않는다
 - 템플릿 형식은 feelm Prettier 설정(`singleQuote`, `printWidth: 100`, `trailingComma: all`)에 맞췄다. 설정이 다르면 생성 후
   `prettier --write`
 - 아키텍처가 다르면 저장소의 `.harness/templates/react-ts/<종류>/<파일>`로 템플릿을 덮어쓴다(엔진 계약)
@@ -90,7 +93,9 @@ python bin/harness.py scaffold frontend screen MovieDetail --var area=movies --t
   잡는다). 테스트 파일(`*.test.*`·`*.spec.*`)은 경계 규칙에서 뺀다(목업 데이터·여러 화면을 다루는 흐름 테스트).
   디렉터리 아래 12단계보다 깊은 파일은 보지 않는다
 - `no-restricted-imports`는 한 파일에 설정 객체가 여러 개 겹치면 마지막 옵션만 남는다. 생성 파일은 제한을 파일 묶음마다 하나로
-  모으므로, 소비자 설정에서 같은 규칙을 이 파일 **뒤에** 다시 켜지 않는다
+  모으고, 계층 디렉터리가 겹치면(`components` 안의 `components/shared`) 안쪽 묶음에 바깥 묶음의 제한을 합쳐 뒤에 둔다.
+  소비자 설정에서 같은 규칙을 이 파일 **뒤에** 다시 켜면 이 파일의 제한이 사라지고, **앞에** 둔 소비자 규칙도 계층 디렉터리
+  안 파일에서는 이 파일의 옵션으로 대체된다. 소비자 고유 import 금지 패턴을 계층 디렉터리에 함께 걸 방법은 아직 없다(후속 과제)
 
 ## 영역 판정 기본값
 

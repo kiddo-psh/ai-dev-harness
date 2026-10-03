@@ -29,7 +29,7 @@ const TEST_FILES = ['**/*.test.*', '**/*.spec.*'];
 const MAX_DEPTH = 12;
 const DIR_PATTERN = /^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/;
 
-/** 파일 묶음(glob) → no-restricted-imports 패턴 목록 */
+/** 파일 묶음(glob) → { dir, depth, patterns }. depth는 묶음 안 파일이 소스 루트에서 몇 단계 아래인지다 */
 const restrictions = new Map();
 const configs = [];
 
@@ -50,9 +50,9 @@ function restrict(dir, pattern) {
     const glob = `${SRC_ROOT}/${dir}/${'*/'.repeat(extra)}${SOURCE_FILES}`;
     const depth = dir.split('/').length + extra;
     if (!restrictions.has(glob)) {
-      restrictions.set(glob, []);
+      restrictions.set(glob, { dir, depth, patterns: [] });
     }
-    restrictions.get(glob).push(pattern(depth));
+    restrictions.get(glob).patterns.push(pattern(depth));
   }
 }
 
@@ -108,7 +108,21 @@ configs.push({
 });
 // harness:end
 
-for (const [glob, patterns] of restrictions) {
+// 디렉터리가 겹치는 묶음(예: components 안의 components/shared)은 한 파일에 둘 다 맞는다. 마지막 객체만 남으므로
+// 안쪽 묶음에 같은 깊이의 바깥 묶음 패턴을 모두 더하고, 안쪽 묶음을 뒤에 둔다(고정 규칙이 조용히 빠지지 않게)
+const groups = [...restrictions].map(([glob, group]) => ({
+  glob,
+  patterns: [
+    ...[...restrictions.values()]
+      .filter((outer) => outer !== group && outer.depth === group.depth && group.dir.startsWith(`${outer.dir}/`))
+      .flatMap((outer) => outer.patterns),
+    ...group.patterns,
+  ],
+  nesting: group.dir.split('/').length,
+}));
+groups.sort((a, b) => a.nesting - b.nesting);
+
+for (const { glob, patterns } of groups) {
   configs.push({
     files: [glob],
     ignores: TEST_FILES,
