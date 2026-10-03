@@ -218,9 +218,10 @@ class InitProfileTest(ProfileTestBase):
         self.assertEqual(area["verify"], ["cd apps/api && build app"])
         self.assertIn("안내: apps/api 의 빌드 파일을 고친다", out)
         # 리뷰 F1: 셸 명령에 그대로 들어가므로 공백·명령 구분자가 있는 영역 경로는 거부한다
-        for bad in ("my app", "a&b", "x;echo INJECT"):
+        # PR #57 Codex: `-`로 시작하면 `cd -backend`가 옵션으로 읽힌다
+        for bad in ("my app", "a&b", "x;echo INJECT", "-backend", "-"):
             with self.subTest(area=bad):
-                code, _out, err = run(["init", str(self.target), "--area", bad, "--profile", "demo",
+                code, _out, err = run(["init", str(self.target), f"--area={bad}", "--profile", "demo",
                                        "--var", "base_package=com.acme.app"])
                 self.assertEqual(code, 2, err)
                 self.assertFalse((self.target / bad).exists())

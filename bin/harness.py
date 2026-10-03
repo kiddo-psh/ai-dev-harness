@@ -68,7 +68,8 @@ LAYER_JSON_NAMES = ("layers_json", "allow_json")
 # 프로필 verify·setup_notes 렌더에만 주는 값. 영역 검증 명령은 저장소 루트에서 실행되므로(stop-verify) 영역 경로가 필요하다
 COMMAND_NAMES = ("area_dir",)
 # 셸 명령에 따옴표 없이 들어가므로 sh·cmd 어느 쪽에서도 한 낱말인 문자만 받는다
-COMMAND_SAFE_PATH = re.compile(r"[A-Za-z0-9._/-]+")
+# 첫 글자가 `-`면 `cd -x`처럼 옵션으로 읽히므로 막는다
+COMMAND_SAFE_PATH = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._/-]*")
 # 고정 규칙 블록 표식. 각 언어의 주석 안에 쓰고, 끈 규칙은 표식 줄과 함께 지운다
 RULE_START = re.compile(r"harness:rule\s+(\S+)")
 RULE_END = re.compile(r"harness:end\b")
@@ -893,7 +894,7 @@ def cmd_init_area(args, target: Path) -> int:
     ctx = var_context(values)
     command_ctx = {**ctx, "area_dir": dir_}  # 영역 검증 명령은 저장소 루트에서 실행된다
     if profile_name and not COMMAND_SAFE_PATH.fullmatch(dir_):
-        raise HarnessError(f"프로필 영역 경로는 검증 명령에 그대로 들어가므로 영문자·숫자·`._/-`만 쓴다: {dir_!r}")
+        raise HarnessError(f"프로필 영역 경로는 검증 명령에 그대로 들어가므로 영문자·숫자·`._/-`만 쓰고 `-`로 시작하지 않는다: {dir_!r}")
     # 명시 인자 → 이전 영역 값 → 프로필 기본값 → 키트 기본값(P-3). 프로필 없던 영역에 처음 적용하면 이전 값은
     # 키트 기본값을 굳힌 것이라 프로필 기본값을 가리지 않게 기준 문서만 이어받는다
     kept = previous if previous.get("profile") or not profile_name else \
