@@ -4,7 +4,7 @@ React + TypeScript + Vite 웹 프론트용 기본값 묶음(M3-3). 근거는 fee
 M3 결정(R-1~R-9)이다. 엔진 계약은 [profiles/README.md](../README.md)를 본다.
 
 - 기준 스택: React 18 이상, TypeScript, Vite, react-router 데이터 라우터(`createBrowserRouter`), Vitest + Testing Library,
-  ESLint flat config(9 이상, `no-restricted-imports`의 `regex` 패턴), Node 22
+  ESLint flat config(9.7 이상. 생성 파일이 쓰는 `no-restricted-imports`의 `patterns[].regex`가 9.7.0에서 생겼다), Node 22
 - 템플릿은 `react-router` 패키지에서 import한다(v7 이상). v6 데이터 라우터 프로젝트는 보통 `react-router-dom`만 선언하므로
   `.harness/templates/react-ts/screen/`에서 import를 `react-router-dom`으로 바꾼다(전이 의존성에 기대면 pnpm에서 깨진다)
 - 새 런타임 의존성을 요구하지 않는다(axios·react-query·MSW 없음). 검사용 devDependency는 `eslint-plugin-jsx-a11y` 하나다
