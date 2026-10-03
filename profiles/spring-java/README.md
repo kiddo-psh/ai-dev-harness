@@ -11,6 +11,11 @@ python bin/harness.py init ../my-project --area backend --profile spring-java --
 python bin/harness.py scaffold backend domain MovieReview --target ../my-project
 ```
 
+영역은 **Gradle 빌드 루트**(feelm `backend/`처럼 `gradlew`·`settings.gradle`이 있는 디렉터리)로 잡는다. 판정 경로는 영역
+기준이라 `/build.gradle`·`/gradle/` 같은 패턴이 그 빌드 루트의 파일에 맞는다. Gradle 루트가 저장소 루트이고 영역이 그 하위
+디렉터리라면 루트의 Gradle 파일(`build.gradle(.kts)`, `settings.gradle(.kts)`, `gradle/libs.versions.toml`, `gradle/wrapper/`,
+lock 파일)을 최상위 `judge.trigger_paths.strict`에 직접 넣는다.
+
 `init`은 영역 설정(`harness.json`)에 아래 기본값을 굳히고 컨벤션 테스트 두 개를 영역의
 `<java_test>/<base_package 경로>/architecture/`에 렌더한다.
 
@@ -18,7 +23,7 @@ python bin/harness.py scaffold backend domain MovieReview --target ../my-project
 | --- | --- |
 | `verify` | `./gradlew build`(spotlessCheck·test 포함) |
 | `trigger_paths.strict` | `/src/main/resources/db/migration/`, `/build.gradle(.kts)`, `/settings.gradle(.kts)`, `/src/main/resources/application*.{yml,yaml,properties}`, `**/global/`, `**/infrastructure/`, `**/*SecurityConfig.java`, `gradle.lockfile`, `settings-gradle.lockfile` |
-| `test_paths` | `/src/test/` |
+| `test_paths` | `/src/test/`, `*Test.java`, `*Tests.java`(`java_test`를 바꿔도 테스트로 판정) |
 | `triggers` | 계약 문서, 다른 담당 도메인·공통 코드, `@Transactional` 경계·여러 Repository 쓰기, 인증·토큰, 메시지·캐시 키 |
 | `layers` | `controller`·`service`·`repository`·`entity`·`dto`(패턴 `..<이름>..`) |
 | `allow` | controller → service·dto, service → repository·entity·dto, repository → entity, dto → entity(응답 DTO의 `from(엔티티)`) |

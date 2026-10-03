@@ -124,7 +124,8 @@ class SpringProfileTest(unittest.TestCase):
         for pattern in J8_STRICT:
             with self.subTest(strict=pattern):
                 self.assertIn(pattern, area["trigger_paths"]["strict"])
-        self.assertEqual(area["test_paths"], ["/src/test/"])
+        # PR #52 Codex: java_test를 바꿔도 테스트 파일이 경량으로 판정되게 파일 이름 패턴을 함께 둔다
+        self.assertEqual(area["test_paths"], ["/src/test/", "*Test.java", "*Tests.java"])
         self.assertEqual(len(area["triggers"]), 6)  # feelm 게이트 문장 5개 + 프로필 설정 변경
         self.assertEqual(area["triggers"][-1], harness.PROFILE_TRIGGER)
         for word in ("계약 문서", "다른 담당자", "@Transactional", "토큰", "캐시"):

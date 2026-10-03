@@ -22,7 +22,7 @@
     ],
     "standard": []
   },
-  "test_paths": ["/src/test/"],
+  "test_paths": ["/src/test/", "*Test.java", "*Tests.java"],
   "triggers": [
     "계약 문서(API·ERD·DB 스키마)의 변경, 또는 계약과 다른 구현",
     "다른 담당자 소유 도메인, `global/`·`infrastructure/`·`SecurityConfig` 같은 공통 코드의 변경",
