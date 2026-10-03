@@ -1,0 +1,112 @@
+{
+  "name": "android-konsist",
+  "description": "Android 아키텍처 테스트 전용 모듈 영역(예: android/konsist-test): Konsist 고정 규칙·feature 계층 규칙을 경로 변수로 모듈 디렉터리마다 나눠 적용한다",
+  "verify": [
+    "{{gradle_root}}/gradlew -p {{gradle_root}} :{{module}}:test"
+  ],
+  "trigger_paths": {
+    "strict": [
+      "**/build.gradle.kts",
+      "gradle.lockfile"
+    ],
+    "standard": []
+  },
+  "test_paths": ["/src/test/", "*Test.kt"],
+  "triggers": [
+    "Konsist 규칙 범위(app_dir·core_dir·feature_dir·wear_dir)나 이 모듈의 Konsist·JUnit 의존성 변경"
+  ],
+  "review_focus": [
+    "규칙 범위가 실제 모듈 디렉터리와 맞는지(범위가 비면 규칙이 거짓 통과한다)",
+    "규칙을 끈 이유(disabled_rules)가 ADR과 맞는지"
+  ],
+  "vars": {
+    "base_package": {
+      "description": "컨벤션 테스트 파일의 패키지(예: com.acme.fit.konsist)",
+      "pattern": "[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*"
+    },
+    "gradle_root": {
+      "description": "저장소 루트 기준 Gradle 빌드 루트(gradlew·settings.gradle.kts가 있는 디렉터리, 예: android). Konsist 프로젝트 루트도 이 디렉터리다. 저장소 루트면 .",
+      "pattern": "\\.|[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*",
+      "default": "android"
+    },
+    "module": {
+      "description": "Konsist 테스트 모듈의 Gradle 이름(한 단계, 영역 디렉터리 이름과 같게 둔다)",
+      "pattern": "[a-z][a-z0-9_-]*",
+      "default": "konsist-test"
+    },
+    "kotlin_test": {"description": "모듈 기준 테스트 소스 루트(JVM 모듈)", "default": "src/test/kotlin"},
+    "app_dir": {
+      "description": "Gradle 루트 기준 폰 앱 모듈 디렉터리(규칙 app-no-data-layer 범위)",
+      "pattern": "[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*",
+      "default": "app"
+    },
+    "core_dir": {
+      "description": "Gradle 루트 기준 공통 모듈 디렉터리",
+      "pattern": "[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*",
+      "default": "core"
+    },
+    "feature_dir": {
+      "description": "Gradle 루트 기준 feature 모듈들의 상위 디렉터리(규칙 feature-no-room·usecase-shared-by-two-viewmodels와 계층 규칙 범위)",
+      "pattern": "[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*",
+      "default": "feature"
+    },
+    "wear_dir": {
+      "description": "Gradle 루트 기준 Wear OS 모듈 디렉터리(규칙 wear-no-network 범위)",
+      "pattern": "[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*",
+      "default": "wear"
+    }
+  },
+  "layers": {
+    "ui": ["..ui.."],
+    "data": ["..data.."],
+    "domain": ["..domain.."]
+  },
+  "allow": {
+    "ui": ["data", "domain"],
+    "data": [],
+    "domain": ["data"]
+  },
+  "conventions": {
+    "rules": {
+      "no-global-scope": "GlobalScope 금지(수명 있는 코루틴 범위를 쓴다). 범위: app·core·feature·wear",
+      "viewmodel-no-android-context": "ViewModel 파일은 Context·Activity·View를 import하지 않는다. 범위: app·core·feature·wear",
+      "viewmodel-repository-only": "ViewModel 파일은 Retrofit·Room·*DataSource·*Dao를 import하지 않는다(Repository 인터페이스만, ADR-04). 범위: app·core·feature·wear",
+      "screen-no-viewmodel-param": "이름이 *Screen인 함수는 ViewModel 타입 매개변수를 받지 않는다. 범위: app·core·feature·wear",
+      "usecase-shared-by-two-viewmodels": "*UseCase 클래스는 domain 패키지에 두고 2개 이상 ViewModel 파일이 쓴다(ADR-04). 범위: feature",
+      "feature-no-room": "feature 모듈은 Room(androidx.room)을 import하지 않는다(ADR-03). 범위: feature",
+      "wear-no-network": "워치 모듈은 Retrofit·OkHttp·Ktor를 import하지 않는다(서버·인증 없음, ADR-02). 범위: wear",
+      "app-no-data-layer": "app 모듈에 *Repository·*DataSource·*Dao·*UseCase 선언을 두지 않는다(조립만, ADR-05). 범위: app"
+    },
+    "formats": {
+      "konsist_layers": {
+        "layer": "                \"{{layer}}\" to Layer(\"{{layer}}\", {{patterns}}),",
+        "pattern": "\"{{pattern}}\""
+      },
+      "konsist_allowed": {
+        "layer": "                \"{{layer}}\" to listOf({{allowed}}),",
+        "layer_empty": "                \"{{layer}}\" to emptyList<String>(),",
+        "allowed": "\"{{name}}\""
+      }
+    },
+    "files": [
+      {
+        "src": "conventions/HarnessFixedRulesTest.kt",
+        "dest": "{{kotlin_test}}/{{base_package_path}}/HarnessFixedRulesTest.kt",
+        "kind": "fixed"
+      },
+      {
+        "src": "conventions/HarnessLayerArchitectureTest.kt",
+        "dest": "{{kotlin_test}}/{{base_package_path}}/HarnessLayerArchitectureTest.kt",
+        "kind": "configured"
+      }
+    ]
+  },
+  "setup_notes": [
+    "{{gradle_root}}/settings.gradle.kts 에 include(\":{{module}}\")를 추가하고 {{area_dir}}/build.gradle.kts 를 JVM 모듈로 만든다: plugins { kotlin(\"jvm\") }, testImplementation(\"com.lemonappdev:konsist:<버전>\"), testImplementation(\"junit:junit:4.13.2\")",
+    "Konsist 테스트는 다른 모듈의 소스를 읽지만 Gradle은 그 소스를 입력으로 모른다. {{area_dir}}/build.gradle.kts 에 tasks.test { outputs.upToDateWhen { false } } 를 둔다(없으면 위반을 넣어도 UP-TO-DATE로 건너뛴다)",
+    "Konsist는 gradlew 가 있는 디렉터리를 프로젝트 루트로 본다. 규칙 범위 app_dir·core_dir·feature_dir·wear_dir 는 그 루트({{gradle_root}}) 기준이다. 디렉터리마다 생산 소스가 없으면 범위 확인 테스트가 실패한다",
+    "계층 규칙은 feature_dir 아래 생산 코드에만 적용한다. 계층(ui·data·domain)마다 파일이 하나 이상 있어야 한다. domain 이 없으면 harness.json 영역의 layers·allow 에서 지우고 init --area --force 로 다시 만든다",
+    "의존성 잠금이 필수다(Konsist·JUnit 의존성 감사): {{area_dir}}/build.gradle.kts 에 dependencyLocking { lockAllConfigurations() } 를 켜고 {{gradle_root}}/gradlew -p {{gradle_root}} :{{module}}:dependencies --write-locks 로 gradle.lockfile 을 만들어 커밋한다",
+    "영역 검증 명령: {{gradle_root}}/gradlew -p {{gradle_root}} :{{module}}:test (저장소 루트에서 실행)"
+  ]
+}

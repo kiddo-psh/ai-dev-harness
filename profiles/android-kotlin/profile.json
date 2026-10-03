@@ -1,8 +1,8 @@
 {
   "name": "android-kotlin",
-  "description": "Android(Kotlin·Jetpack Compose) 폰·Wear OS 모듈 영역 기본값. 계층·DI는 프로젝트 아키텍처 ADR이 정한다(M3-4b)",
+  "description": "Android(Kotlin·Jetpack Compose·Hilt) 모듈 영역(app·core·feature·wear) 기본값: 검증 명령·판정·스캐폴드. 컨벤션 테스트는 android-konsist 프로필",
   "verify": [
-    "{{gradle_root}}/gradlew -p {{gradle_root}} :{{module}}:ktlintCheck :{{module}}:lintDebug :{{module}}:testDebugUnitTest :{{module}}:assembleDebug"
+    "{{gradle_root}}/gradlew -p {{gradle_root}} {{gradle_tasks}}"
   ],
   "trigger_paths": {
     "strict": [
@@ -26,11 +26,12 @@
   "review_focus": [
     "생명주기·구성 변경에서 상태 보존(ViewModel·SavedStateHandle)",
     "메인 스레드 차단과 코루틴 범위",
+    "Hilt 바인딩 위치(feature는 자기 Repository를 di/ 패키지의 @Binds로 제공)",
     "접근성(contentDescription·터치 영역·글자 크기)"
   ],
   "vars": {
     "base_package": {
-      "description": "모듈의 기본 패키지(예: com.acme.fit, com.acme.fit.wear)",
+      "description": "앱의 기본 패키지(예: com.acme.fit). feature 영역 스캐폴드는 <base_package>.feature.<feature> 아래에 만든다. wear 영역은 워치 패키지(예: com.acme.fit.wear)",
       "pattern": "[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*"
     },
     "gradle_root": {
@@ -39,43 +40,57 @@
       "default": "android"
     },
     "module": {
-      "description": "Gradle 모듈 이름(한 단계, 예: app, wear). 검증 명령과 Konsist 범위에 쓴다",
+      "description": "Gradle 모듈 이름(한 단계, 예: app, core, wear). gradle_tasks 기본값과 안내에만 쓴다",
       "pattern": "[a-z][a-z0-9_-]*",
       "default": "app"
     },
-    "app_module": {
-      "description": "폰 앱 모듈 이름. 규칙 wear-not-depend-on-app이 이 모듈 패키지 import를 막는다",
-      "pattern": "[a-z][a-z0-9_-]*",
-      "default": "app"
+    "gradle_tasks": {
+      "description": "영역 검증 명령의 Gradle 태스크(공백으로 구분, 예: \":feature:meal:check :feature:workout:check\"). 기본은 모듈의 check(ktlintCheck·lint·단위 테스트)",
+      "pattern": ":[A-Za-z0-9_.:-]+( :[A-Za-z0-9_.:-]+)*",
+      "default": ":{{module}}:check"
     },
     "kotlin_src": {"description": "모듈 기준 생산 소스 루트", "default": "src/main/java"},
     "kotlin_test": {"description": "모듈 기준 단위 테스트 소스 루트", "default": "src/test/java"},
     "min_sdk": {"description": "minSdk(안내에만 쓴다)", "pattern": "[0-9]+", "default": "26"}
   },
-  "layers": {
-    "ui": ["..ui.."],
-    "domain": ["..domain.."],
-    "data": ["..data.."]
-  },
-  "allow": {
-    "ui": ["domain", "data"],
-    "domain": [],
-    "data": ["domain"]
-  },
   "scaffold": {
     "screen": {
-      "description": "폰 화면: 무상태 Screen·Route·ViewModel·UiState·ViewModel 테스트(DI 없는 생성자 주입)",
+      "description": "feature 영역의 폰 화면: 무상태 Screen·Route(hiltViewModel)·ViewModel(@HiltViewModel)·UiState·ViewModel 테스트(Hilt 없이 생성)",
+      "vars": {
+        "feature": {"description": "feature 모듈 디렉터리 이름(예: meal). 영역(android/feature) 아래 <feature>/ 모듈에 만든다", "pattern": "[a-z][a-z0-9_]*"}
+      },
       "files": [
-        {"src": "Screen.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}Screen.kt"},
-        {"src": "Route.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}Route.kt"},
-        {"src": "ViewModel.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}ViewModel.kt"},
-        {"src": "UiState.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}UiState.kt"},
-        {"src": "ViewModelTest.kt", "dest": "{{kotlin_test}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}ViewModelTest.kt"}
+        {"src": "Screen.kt", "dest": "{{feature}}/{{kotlin_src}}/{{base_package_path}}/feature/{{feature}}/ui/{{name_lower}}/{{name_pascal}}Screen.kt"},
+        {"src": "Route.kt", "dest": "{{feature}}/{{kotlin_src}}/{{base_package_path}}/feature/{{feature}}/ui/{{name_lower}}/{{name_pascal}}Route.kt"},
+        {"src": "ViewModel.kt", "dest": "{{feature}}/{{kotlin_src}}/{{base_package_path}}/feature/{{feature}}/ui/{{name_lower}}/{{name_pascal}}ViewModel.kt"},
+        {"src": "UiState.kt", "dest": "{{feature}}/{{kotlin_src}}/{{base_package_path}}/feature/{{feature}}/ui/{{name_lower}}/{{name_pascal}}UiState.kt"},
+        {"src": "ViewModelTest.kt", "dest": "{{feature}}/{{kotlin_test}}/{{base_package_path}}/feature/{{feature}}/ui/{{name_lower}}/{{name_pascal}}ViewModelTest.kt"}
       ],
       "snippet": "snippet.kt"
     },
+    "repository": {
+      "description": "feature 영역의 Repository: 인터페이스·Default 구현(@Inject)·Hilt 모듈(@Binds)·테스트용 Fake",
+      "vars": {
+        "feature": {"description": "feature 모듈 디렉터리 이름(예: meal)", "pattern": "[a-z][a-z0-9_]*"}
+      },
+      "files": [
+        {"src": "Repository.kt", "dest": "{{feature}}/{{kotlin_src}}/{{base_package_path}}/feature/{{feature}}/data/{{name_pascal}}Repository.kt"},
+        {"src": "DefaultRepository.kt", "dest": "{{feature}}/{{kotlin_src}}/{{base_package_path}}/feature/{{feature}}/data/Default{{name_pascal}}Repository.kt"},
+        {"src": "RepositoryModule.kt", "dest": "{{feature}}/{{kotlin_src}}/{{base_package_path}}/feature/{{feature}}/di/{{name_pascal}}RepositoryModule.kt"},
+        {"src": "FakeRepository.kt", "dest": "{{feature}}/{{kotlin_test}}/{{base_package_path}}/feature/{{feature}}/data/Fake{{name_pascal}}Repository.kt"}
+      ]
+    },
+    "usecase": {
+      "description": "feature 영역의 UseCase(domain/). 2개 이상 ViewModel이 공유할 때만 만든다(규칙 usecase-shared-by-two-viewmodels)",
+      "vars": {
+        "feature": {"description": "feature 모듈 디렉터리 이름(예: workout)", "pattern": "[a-z][a-z0-9_]*"}
+      },
+      "files": [
+        {"src": "UseCase.kt", "dest": "{{feature}}/{{kotlin_src}}/{{base_package_path}}/feature/{{feature}}/domain/{{name_pascal}}UseCase.kt"}
+      ]
+    },
     "wear-screen": {
-      "description": "Wear OS 화면: Wear Compose Material 3 Screen·Route·ViewModel·UiState·ViewModel 테스트",
+      "description": "wear 영역의 Wear OS 화면: Wear Compose Material 3 Screen·Route(hiltViewModel)·ViewModel(@HiltViewModel)·UiState·ViewModel 테스트",
       "files": [
         {"src": "Screen.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}Screen.kt"},
         {"src": "Route.kt", "dest": "{{kotlin_src}}/{{base_package_path}}/ui/{{name_lower}}/{{name_pascal}}Route.kt"},
@@ -86,42 +101,14 @@
       "snippet": "snippet.kt"
     }
   },
-  "conventions": {
-    "rules": {
-      "no-global-scope": "GlobalScope 금지(수명 있는 코루틴 범위를 쓴다)",
-      "viewmodel-no-android-context": "ViewModel 파일은 Context·Activity·View를 import하지 않는다",
-      "screen-no-viewmodel-param": "이름이 *Screen인 함수는 ViewModel 타입 매개변수를 받지 않는다",
-      "wear-not-depend-on-app": "app 모듈이 아닌 모듈(wear 등)은 app 모듈 패키지를 import하지 않는다"
-    },
-    "formats": {
-      "konsist_layers": {
-        "layer": "                val {{layer}} = Layer(\"{{layer}}\", {{patterns}})",
-        "pattern": "\"{{pattern}}\""
-      },
-      "konsist_dependencies": {
-        "layer": "                {{layer}}.dependsOn({{allowed}})",
-        "layer_empty": "                {{layer}}.dependsOnNothing()"
-      }
-    },
-    "files": [
-      {
-        "src": "conventions/HarnessFixedRulesTest.kt",
-        "dest": "{{kotlin_test}}/{{base_package_path}}/architecture/HarnessFixedRulesTest.kt",
-        "kind": "fixed"
-      },
-      {
-        "src": "conventions/HarnessLayerArchitectureTest.kt",
-        "dest": "{{kotlin_test}}/{{base_package_path}}/architecture/HarnessLayerArchitectureTest.kt",
-        "kind": "configured"
-      }
-    ]
-  },
   "setup_notes": [
-    "모듈 {{module}} 의 build.gradle.kts 에 컨벤션 테스트 의존성을 추가한다: testImplementation(\"com.lemonappdev:konsist:<버전>\"), testImplementation(\"junit:junit:4.13.2\")",
-    "scaffold 생성물 의존성: lifecycle-viewmodel-compose·lifecycle-runtime-compose, compose ui-tooling-preview(@Preview), testImplementation kotlinx-coroutines-test, 폰은 navigation-compose·androidx.compose.material3:material3, 워치는 wear compose-material3·compose-navigation",
-    "기본 계층 ui·domain·data 중 아직 패키지가 없는 계층은 Konsist 계층 검사가 실패할 수 있다. 모듈 {{module}} 에 domain·data 패키지가 생길 때까지 harness.json 영역의 layers·allow에서 지우고 init --area --force 로 다시 만든다",
-    "ktlint Gradle 플러그인(org.jlleitschuh.gradle.ktlint)과 Android Lint abortOnError 설정을 모듈 {{module}} 에 적용한다(profiles/android-kotlin/README.md)",
-    "의존성 잠금이 필수다: 모듈 {{module}} 에 dependencyLocking { lockAllConfigurations() } 를 켜고 {{gradle_root}}/gradlew -p {{gradle_root}} :{{module}}:dependencies --write-locks 로 gradle.lockfile 을 커밋한다(의존성 감사 전제)",
-    "모듈 {{module}} 의 minSdk 가정값: defaultConfig { minSdk = {{min_sdk}} } (Wear OS 모듈은 보통 30 이상, --var min_sdk=30)"
+    "영역 검증 명령: {{gradle_root}}/gradlew -p {{gradle_root}} {{gradle_tasks}} (저장소 루트에서 실행). feature 영역은 --var gradle_tasks=\":feature:<이름>:check …\"로 feature 모듈을 모두 적는다",
+    "Hilt·KSP: gradle_tasks 에 적은 모듈마다({{gradle_tasks}}, feature 영역은 :feature:<이름> 하나하나) 플러그인 com.google.dagger.hilt.android·com.google.devtools.ksp 와 implementation(\"com.google.dagger:hilt-android\"), ksp(\"com.google.dagger:hilt-android-compiler\")를 추가한다(profiles/android-kotlin/README.md)",
+    "scaffold 생성물 의존성: androidx.hilt:hilt-lifecycle-viewmodel-compose(hiltViewModel), lifecycle-viewmodel-compose·lifecycle-runtime-compose, compose ui-tooling-preview, testImplementation kotlinx-coroutines-test, 폰은 androidx.compose.material3:material3, 워치는 wear compose-material3·compose-navigation",
+    "컨벤션 테스트(Konsist)는 이 영역이 아니라 전용 모듈 영역에 둔다: init --area {{gradle_root}}/konsist-test --profile android-konsist (profiles/android-konsist/README.md)",
+    "ktlint Gradle 플러그인(org.jlleitschuh.gradle.ktlint)과 Android Lint abortOnError 설정을 gradle_tasks 에 적은 모듈마다 적용한다(check 가 ktlintCheck·lint 를 함께 돈다)",
+    "의존성 잠금이 필수다: gradle_tasks 에 적은 모듈마다({{gradle_tasks}}) dependencyLocking { lockAllConfigurations() } 를 켜고, 각 태스크의 :check 를 :dependencies 로 바꿔 {{gradle_root}}/gradlew -p {{gradle_root}} <모듈 경로>:dependencies … --write-locks 로 모듈마다 gradle.lockfile 을 만들어 커밋한다(의존성 감사 전제). feature 영역은 :feature:<이름>:dependencies 를 모듈마다 적는다(:feature 상위 프로젝트에는 잠금 파일이 생기지 않는다)",
+    "Gradle 루트 파일(libs.versions.toml·settings.gradle.kts·루트 build.gradle.kts)은 영역 밖이다. 최상위 harness.json judge.trigger_paths.strict 에 /{{gradle_root}}/gradle/libs.versions.toml 등을 직접 넣는다",
+    "gradle_tasks 에 적은 모듈의 minSdk 가정값: defaultConfig { minSdk = {{min_sdk}} } (Wear OS 모듈은 보통 30 이상, --var min_sdk=30)"
   ]
 }

@@ -34,8 +34,9 @@ harness = load("harness_rehearse_profiles", ROOT / "bin" / "harness.py")
 ROOT_COMMANDS = {
     "spring-java": [r"cd backend && \./gradlew build"],
     "react-ts": [rf"npm --prefix frontend run {script}" for script in ("lint", "format:check", "test:run", "build")],
-    "android-kotlin": [rf"android/gradlew -p android :{module}:ktlintCheck :{module}:lintDebug "
-                       rf":{module}:testDebugUnitTest :{module}:assembleDebug" for module in ("app", "wear")],
+    "android-kotlin": [r"android/gradlew -p android :app:check", r"android/gradlew -p android :core:check",
+                       r"android/gradlew -p android :feature:meal:check :feature:workout:check",
+                       r"android/gradlew -p android :wear:check", r"android/gradlew -p android :konsist-test:test"],
 }
 
 
@@ -48,17 +49,22 @@ def job_lines(body, name):
 
 class ScenarioTableTest(unittest.TestCase):
     def test_every_profile_has_scenario_and_fixture(self):
+        """모든 프로필이 어느 시나리오의 영역에 쓰인다. android-konsist는 android-kotlin 시나리오의 영역이다(#59)."""
         profiles = {path.parent.name for path in (ROOT / "profiles").glob("*/profile.json")}
         table = rp.scenarios()
-        self.assertEqual(set(table), profiles)
-        self.assertEqual({path.name for path in FIXTURES.iterdir() if path.is_dir()}, profiles)
+        used = {area.get("profile", name) for name, scenario in table.items() for area in scenario["areas"]}
+        self.assertEqual(used, profiles)
+        self.assertLessEqual(set(table), profiles)
+        self.assertEqual({path.name for path in FIXTURES.iterdir() if path.is_dir()}, set(table))
         for name, scenario in table.items():
             with self.subTest(name):
-                profile = json.loads((ROOT / "profiles" / name / "profile.json").read_text(encoding="utf-8"))
                 self.assertTrue(scenario["scaffold"])
+                area_profiles = {a["dir"]: a.get("profile", name) for a in scenario["areas"]}
                 for area, kind, _item, _vars in scenario["scaffold"]:
+                    self.assertIn(area, area_profiles)
+                    profile = json.loads((ROOT / "profiles" / area_profiles[area] / "profile.json")
+                                         .read_text(encoding="utf-8"))
                     self.assertIn(kind, profile["scaffold"])
-                    self.assertIn(area, [a["dir"] for a in scenario["areas"]])
                 self.assertTrue(scenario["negatives"])  # 음성 시나리오가 없으면 규칙이 꺼져도 모른다(H-3)
                 for negative in scenario["negatives"]:
                     self.assertTrue(negative["files"] and negative["expect"], negative["name"])
@@ -69,10 +75,63 @@ class ScenarioTableTest(unittest.TestCase):
                                         for f in ("settings.gradle", "settings.gradle.kts")), rel)
 
     def test_negative_scenarios_cover_decided_rules(self):
-        """H-3·A-12: controller→repository, mocks import, alt 없는 img, ViewModel Context, contentDescription."""
+        """H-3·A-12: controller→repository, mocks import, alt 없는 img. #59: ViewModel의 Retrofit, feature의 Room,
+        contentDescription. #59 리뷰 F2: feature domain→ui 계층 의존."""
         names = {n["name"] for scenario in rp.scenarios().values() for n in scenario["negatives"]}
         self.assertEqual(names, {"controller-calls-repository", "page-imports-mocks", "img-without-alt",
-                                 "viewmodel-holds-context", "image-without-content-description"})
+                                 "viewmodel-imports-retrofit", "feature-imports-room", "domain-imports-ui",
+                                 "image-without-content-description"})
+
+    def test_android_scenario_matches_adr_modules(self):
+        """#59 T7: 영역 5개(app·core·feature·wear + konsist-test), 스캐폴드, 음성(Konsist 3개 + Lint 1개)이 규칙·파일을 가리킨다."""
+        scenario = rp.scenarios()["android-kotlin"]
+        self.assertEqual([(a["dir"], a.get("profile", "android-kotlin")) for a in scenario["areas"]], [
+            ("android/app", "android-kotlin"), ("android/core", "android-kotlin"),
+            ("android/feature", "android-kotlin"), ("android/wear", "android-kotlin"),
+            ("android/konsist-test", "android-konsist")])
+        self.assertEqual([(area, kind) for area, kind, _item, _vars in scenario["scaffold"]],
+                         [("android/feature", "screen"), ("android/feature", "repository"),
+                          ("android/wear", "wear-screen")])
+        negatives = {n["name"]: n for n in scenario["negatives"]}
+        rules = (ROOT / "profiles/android-konsist/conventions/HarnessFixedRulesTest.kt").read_text(encoding="utf-8")
+        for name, test_name in (("viewmodel-imports-retrofit", "viewModelUsesRepositoryOnly"),
+                                ("feature-imports-room", "featureDoesNotUseRoom")):
+            with self.subTest(name):
+                negative = negatives[name]
+                self.assertEqual(negative["expect"][0], test_name)
+                self.assertIn(f"fun {test_name}()", rules)
+                (rel, _content), = negative["files"].items()
+                self.assertTrue(rel.startswith("android/feature/meal/src/main/java/"), rel)
+                self.assertIn(negative["expect"][1], rel)  # 출력에서 위반 파일 이름을 찾는다
+        self.assertIn("import retrofit2.Retrofit", rp.ANDROID_RETROFIT_VIEWMODEL)
+        self.assertIn("ViewModel()", rp.ANDROID_RETROFIT_VIEWMODEL)
+        self.assertIn("import androidx.room.Entity", rp.ANDROID_ROOM_ENTITY)
+        # 음성 import가 컴파일되어야 Konsist까지 간다: :core가 Retrofit·Room을 api로 노출하고 feature가 :core에 의존한다
+        android = FIXTURES / "android-kotlin" / "android"
+        core = (android / "core/build.gradle.kts").read_text(encoding="utf-8")
+        self.assertIn("api(libs.retrofit)", core)
+        self.assertIn("api(libs.androidx.room.runtime)", core)
+        self.assertIn('implementation(project(":core"))',
+                      (android / "feature/meal/build.gradle.kts").read_text(encoding="utf-8"))
+        # #59 리뷰 F2: allow에 없는 계층 의존(domain→ui)은 계층 규칙에서만 실패한다
+        layered = negatives["domain-imports-ui"]
+        self.assertEqual(layered["expect"], ["featureLayersDependOnlyOnAllowedLayers", "WorkoutSessionLabel"])
+        layer_test = (ROOT / "profiles/android-konsist/conventions/HarnessLayerArchitectureTest.kt").read_text(
+            encoding="utf-8")
+        self.assertIn("fun featureLayersDependOnlyOnAllowedLayers()", layer_test)
+        (rel, content), = layered["files"].items()
+        source = "android/feature/workout/src/main/java/com/example/rehearsal/feature/workout/"
+        self.assertEqual(rel, f"{source}domain/WorkoutSessionLabel.kt")
+        self.assertIn("package com.example.rehearsal.feature.workout.domain\n", content)
+        # 컴파일되는 import: 같은 모듈 fixture의 ViewModel이다. 다른 고정 규칙(이름 *ViewModel·*UseCase·*Screen)에 걸리지 않는다
+        self.assertIn("import com.example.rehearsal.feature.workout.ui.session.WorkoutSessionViewModel\n", content)
+        self.assertTrue((FIXTURES / "android-kotlin" / f"{source}ui/session/WorkoutSessionViewModel.kt").is_file())
+        self.assertIn("val volume: StateFlow<Int>", (FIXTURES / "android-kotlin" /
+                                                     f"{source}ui/session/WorkoutSessionViewModel.kt").read_text(
+            encoding="utf-8"))
+        self.assertIsNone(re.search(r"\b(class|fun) \w*(ViewModel|UseCase|Screen)\b", content))
+        self.assertEqual(negatives["image-without-content-description"]["expect"],
+                         ["[ContentDescription]", "negative_image.xml"])
 
     def test_judge_negative_needs_failure_and_reason(self):
         negative = {"name": "x", "files": {}, "expect": ["[no-mocks-import]"]}
@@ -98,6 +157,11 @@ class FixtureTest(unittest.TestCase):
                 self.assertRegex(version, r"^\d+\.\d+\.\d+$", name)
                 self.assertEqual(lock["packages"][f"node_modules/{name}"]["version"], version, name)
         self.assertEqual(lock["packages"][""]["devDependencies"], package["devDependencies"])
+        # KSP는 Kotlin 버전에 맞춘다(<kotlin>-<ksp>). Hilt 2.59+ Gradle 플러그인은 AGP 9를 요구한다
+        catalog = (FIXTURES / "android-kotlin/android/gradle/libs.versions.toml").read_text(encoding="utf-8")
+        versions = dict(re.findall(r'^([\w-]+) = "([^"]+)"$', catalog, re.M))
+        self.assertTrue(versions["ksp"].startswith(versions["kotlin"] + "-"), versions["ksp"])
+        self.assertTrue(versions["agp"].startswith("8.") and versions["hilt"].startswith("2.57."), versions)
         gradle_files = [*FIXTURES.rglob("*.gradle"), *FIXTURES.rglob("*.gradle.kts"), *FIXTURES.rglob("*.toml")]
         self.assertTrue(gradle_files)
         for path in gradle_files:
@@ -162,23 +226,45 @@ class PrepareTest(unittest.TestCase):
 
     def test_android_kotlin_pastes_nav_graphs(self):
         repo = self.prepare("android-kotlin")
-        app = repo / "android/app/src/main/java/com/example/rehearsal"
-        self.assertTrue((app / "ui/workoutsummary/WorkoutSummaryViewModel.kt").is_file())
-        host = (app / "RehearsalNavHost.kt").read_text(encoding="utf-8")
-        self.assertIn("import com.example.rehearsal.ui.workoutsummary.WorkoutSummaryRoute\n", host)
+        android = repo / "android"
+        meal = android / "feature/meal/src/main/java/com/example/rehearsal/feature/meal"
+        for rel in ("ui/mealsummary/MealSummaryViewModel.kt", "ui/mealsummary/MealSummaryRoute.kt",
+                    "data/MealLogRepository.kt", "data/DefaultMealLogRepository.kt", "di/MealLogRepositoryModule.kt"):
+            self.assertTrue((meal / rel).is_file(), rel)
+        self.assertTrue((android / "feature/meal/src/test/java/com/example/rehearsal/feature/meal/data/"
+                         "FakeMealLogRepository.kt").is_file())
+        # feature 화면 조각은 :app의 내비게이션 그래프에 붙는다(ADR-05)
+        host = (android / "app/src/main/java/com/example/rehearsal/RehearsalNavHost.kt").read_text(encoding="utf-8")
+        self.assertIn("import com.example.rehearsal.feature.meal.ui.mealsummary.MealSummaryRoute\n", host)
         self.assertEqual(host.count("import androidx.navigation.compose.composable\n"), 1)  # 있는 import는 더하지 않는다
-        self.assertIn('        composable(route = "workout-summary") {\n            WorkoutSummaryRoute()\n        }\n'
+        self.assertIn('        composable(route = "meal-summary") {\n            MealSummaryRoute()\n        }\n'
                       "        // rehearsal:destinations", host)
-        wear = (repo / "android/wear/src/main/java/com/example/rehearsal/wear/WearNavHost.kt").read_text("utf-8")
+        wear = (android / "wear/src/main/java/com/example/rehearsal/wear/WearNavHost.kt").read_text("utf-8")
         self.assertIn("import com.example.rehearsal.wear.ui.heartrate.HeartRateRoute\n", wear)
         self.assertIn('            composable(route = "heart-rate") {\n                HeartRateRoute()\n', wear)
-        for module, package in (("app", "com/example/rehearsal"), ("wear", "com/example/rehearsal/wear")):
-            arch = repo / f"android/{module}/src/test/java/{package}/architecture"
-            self.assertTrue((arch / "HarnessFixedRulesTest.kt").is_file(), module)
-            # 계층 기본값(ui·domain·data)마다 생산 소스가 있어야 Konsist 계층 검사가 빈 계층으로 실패하지 않는다
-            for layer in ("ui", "domain", "data"):
-                self.assertTrue(any((repo / f"android/{module}/src/main/java/{package}/{layer}").rglob("*.kt")),
-                                f"{module} {layer}")
+        # Konsist 컨벤션 파일은 konsist-test 한 곳에만 있다(9장 Q3 (가))
+        generated = sorted(p.relative_to(android).as_posix() for p in android.rglob("Harness*Test.kt"))
+        arch = "konsist-test/src/test/kotlin/com/example/rehearsal/konsist"
+        self.assertEqual(generated, [f"{arch}/HarnessFixedRulesTest.kt", f"{arch}/HarnessLayerArchitectureTest.kt"])
+        # 범위 확인 테스트가 통과하려면 app·core·feature·wear마다 생산 소스가 있어야 한다
+        for module in ("app", "core", "feature", "wear"):
+            self.assertTrue([p for p in (android / module).rglob("*.kt") if "/src/main/" in p.as_posix()], module)
+        # 계층 규칙(feature 생산 코드)은 계층마다 파일이 있어야 한다. domain은 두 ViewModel이 공유하는 UseCase
+        feature_main = [p for p in (android / "feature").rglob("*.kt") if "/src/main/" in p.as_posix()]
+        packages = {p.parent.name for p in feature_main} | {p.parent.parent.name for p in feature_main}
+        self.assertTrue({"ui", "data", "domain"} <= packages, packages)
+        users = [p.name for p in feature_main if p.name.endswith("ViewModel.kt")
+                 and "WorkoutVolumeUseCase" in p.read_text(encoding="utf-8")]
+        self.assertEqual(len(users), 2, users)
+        settings = (android / "settings.gradle.kts").read_text(encoding="utf-8")
+        for module in (":app", ":core", ":feature:meal", ":feature:workout", ":wear", ":konsist-test"):
+            self.assertIn(f'"{module}"', settings)
+        konsist = (android / "konsist-test/build.gradle.kts").read_text(encoding="utf-8")
+        self.assertIn("outputs.upToDateWhen { false }", konsist)  # 음성 시나리오에서 UP-TO-DATE로 건너뛰지 않게
+        for module in ("app", "feature/meal", "feature/workout", "wear"):
+            build = (android / module / "build.gradle.kts").read_text(encoding="utf-8")
+            for line in ("alias(libs.plugins.ksp)", "alias(libs.plugins.hilt)", "ksp(libs.hilt.compiler)"):
+                self.assertIn(line, build, module)
         self.assert_no_placeholders(repo)
         self.assert_check_clean(repo)
 

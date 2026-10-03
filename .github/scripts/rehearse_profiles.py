@@ -82,16 +82,41 @@ export default function PosterPage() {
 }
 """
 
-ANDROID_CONTEXT_VIEWMODEL = """\
-package com.example.rehearsal.ui.leak
+ANDROID_RETROFIT_VIEWMODEL = """package com.example.rehearsal.feature.meal.ui.remote
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
+import retrofit2.Retrofit
 
-// 음성 시나리오: ViewModel 파일이 Context를 참조한다(viewmodel-no-android-context). 필드로 잡으면 Android Lint의
-// 누수 검사(StaticFieldLeak)가 먼저 걸릴 수 있어 매개변수로만 쓴다
-class LeakyViewModel : ViewModel() {
-    fun label(context: Context): String = context.packageName
+// 음성 시나리오: ViewModel이 Repository 인터페이스를 거치지 않고 Retrofit을 직접 쓴다(viewmodel-repository-only, ADR-04).
+// Retrofit은 :core가 api로 노출하므로 컴파일은 된다. 컨벤션 테스트(Konsist)가 막아야 한다
+class MealRemoteViewModel(
+    private val retrofit: Retrofit,
+) : ViewModel() {
+    fun baseUrl(): String = retrofit.baseUrl().toString()
+}
+"""
+
+ANDROID_ROOM_ENTITY = """package com.example.rehearsal.feature.meal.data
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+// 음성 시나리오: feature 모듈이 Room을 쓴다(feature-no-room, ADR-03: Room은 :core의 Workout 테이블만).
+// Room 런타임은 :core가 api로 노출하므로 컴파일은 된다(애너테이션 처리기는 없다)
+@Entity
+data class MealCacheEntity(
+    @PrimaryKey val id: Long,
+)
+"""
+
+ANDROID_DOMAIN_IMPORTS_UI = """package com.example.rehearsal.feature.workout.domain
+
+import com.example.rehearsal.feature.workout.ui.session.WorkoutSessionViewModel
+
+// 음성 시나리오: domain 계층이 ui 계층을 import한다(allow에 없는 계층 의존, ADR-04). 같은 모듈이라 컴파일은 된다.
+// Konsist dependsOn은 빠진 계층을 막지 않으므로 생성 코드의 doesNotDependOn이 막아야 한다(#59 리뷰 F2)
+class WorkoutSessionLabel {
+    fun label(viewModel: WorkoutSessionViewModel): String = "volume=${viewModel.volume.value}"
 }
 """
 
@@ -108,7 +133,7 @@ ANDROID_IMAGE_LAYOUT = """\
 def scenarios() -> dict[str, dict]:
     """프로필 이름 → 시나리오.
 
-    areas: init --area 인자(dir, vars). scaffold: (영역, 종류, 이름, --var 목록). paste: 조각 붙이기 함수 이름.
+    areas: init --area 인자(dir, vars, profile — 생략하면 시나리오 이름의 프로필). scaffold: (영역, 종류, 이름, --var 목록). paste: 조각 붙이기 함수 이름.
     gradle_roots: wrapper를 만들 Gradle 빌드 루트. setup·format: 저장소 루트에서 실행할 셸 명령.
     negatives: name, files(저장소 기준 경로 → 내용), expect(출력에 있어야 할 문자열).
     """
@@ -145,22 +170,38 @@ def scenarios() -> dict[str, dict]:
             ],
         },
         "android-kotlin": {
+            # 냠냠코치 ADR-05 모듈 구성을 줄인 fixture. 영역은 규칙이 다른 단위 4개 + Konsist 전용 모듈(결정표 9장 Q3)
             "areas": [
                 {"dir": "android/app", "vars": {"base_package": "com.example.rehearsal"}},
+                {"dir": "android/core", "vars": {"base_package": "com.example.rehearsal.core", "module": "core"}},
+                {"dir": "android/feature", "vars": {"base_package": "com.example.rehearsal", "module": "feature",
+                                                    "gradle_tasks": ":feature:meal:check :feature:workout:check"}},
                 {"dir": "android/wear", "vars": {"base_package": "com.example.rehearsal.wear", "module": "wear",
                                                  "min_sdk": "30"}},
+                {"dir": "android/konsist-test", "profile": "android-konsist",
+                 "vars": {"base_package": "com.example.rehearsal.konsist"}},
             ],
-            "scaffold": [("android/app", "screen", "WorkoutSummary", []),
+            "scaffold": [("android/feature", "screen", "MealSummary", ["feature=meal"]),
+                         ("android/feature", "repository", "MealLog", ["feature=meal"]),
                          ("android/wear", "wear-screen", "HeartRate", [])],
             "paste": "paste_android",
             "gradle_roots": ["android"],
             "setup": [],
-            "format": ["android/gradlew -p android :app:ktlintFormat :wear:ktlintFormat"],
+            "format": ["android/gradlew -p android :app:ktlintFormat :core:ktlintFormat :feature:meal:ktlintFormat "
+                       ":feature:workout:ktlintFormat :wear:ktlintFormat :konsist-test:ktlintFormat"],
             "negatives": [
-                {"name": "viewmodel-holds-context",
-                 "files": {"android/app/src/main/java/com/example/rehearsal/ui/leak/LeakyViewModel.kt":
-                           ANDROID_CONTEXT_VIEWMODEL},
-                 "expect": ["viewModelDoesNotReferenceAndroidUi", "LeakyViewModel"]},
+                {"name": "viewmodel-imports-retrofit",
+                 "files": {"android/feature/meal/src/main/java/com/example/rehearsal/feature/meal/ui/remote/"
+                           "MealRemoteViewModel.kt": ANDROID_RETROFIT_VIEWMODEL},
+                 "expect": ["viewModelUsesRepositoryOnly", "MealRemoteViewModel"]},
+                {"name": "feature-imports-room",
+                 "files": {"android/feature/meal/src/main/java/com/example/rehearsal/feature/meal/data/"
+                           "MealCacheEntity.kt": ANDROID_ROOM_ENTITY},
+                 "expect": ["featureDoesNotUseRoom", "MealCacheEntity"]},
+                {"name": "domain-imports-ui",
+                 "files": {"android/feature/workout/src/main/java/com/example/rehearsal/feature/workout/domain/"
+                           "WorkoutSessionLabel.kt": ANDROID_DOMAIN_IMPORTS_UI},
+                 "expect": ["featureLayersDependOnlyOnAllowedLayers", "WorkoutSessionLabel"]},
                 {"name": "image-without-content-description",
                  "files": {"android/app/src/main/res/layout/negative_image.xml": ANDROID_IMAGE_LAYOUT},
                  "expect": ["[ContentDescription]", "negative_image.xml"]},
@@ -274,16 +315,19 @@ def paste_react(repo: Path, snippets: list[tuple[str, str, str]]) -> None:
 
 
 def paste_android(repo: Path, snippets: list[tuple[str, str, str]]) -> None:
-    """composable 블록을 내비게이션 그래프 표식 자리에, 주석의 import를 같은 파일에 붙인다."""
-    hosts = {"screen": "src/main/java/com/example/rehearsal/RehearsalNavHost.kt",
-             "wear-screen": "src/main/java/com/example/rehearsal/wear/WearNavHost.kt"}
-    for area, kind, snippet in snippets:
+    """composable 블록을 내비게이션 그래프 표식 자리에, 주석의 import를 같은 파일에 붙인다.
+
+    feature 영역의 화면 조각은 :app의 그래프에 붙인다(ADR-05: 화면 간 이동은 :app이 맡는다).
+    """
+    hosts = {"screen": "android/app/src/main/java/com/example/rehearsal/RehearsalNavHost.kt",
+             "wear-screen": "android/wear/src/main/java/com/example/rehearsal/wear/WearNavHost.kt"}
+    for _area, kind, snippet in snippets:
         lines = snippet.splitlines()
         imports = [line[3:].strip() for line in lines if line.startswith("// import ")]
         code = [line for line in lines if not line.startswith("//")]
         if not imports or not code:
             raise RehearsalError(f"{kind} 조각에 import 주석이나 코드가 없다: {snippet[:300]}")
-        host = repo / area / hosts[kind]
+        host = repo / hosts[kind]
         insert_at_marker(host, "rehearsal:destinations", code)
         add_imports(host, imports)
 
@@ -306,7 +350,7 @@ def prepare(name: str, repo: Path) -> dict:
             "--integration-branch", "main")
     for area in scenario["areas"]:
         var_args = [arg for key, value in area["vars"].items() for arg in ("--var", f"{key}={value}")]
-        harness("init", str(repo), "--area", area["dir"], "--profile", name, *var_args)
+        harness("init", str(repo), "--area", area["dir"], "--profile", area.get("profile", name), *var_args)
     snippets = []
     for area, kind, item, var_items in scenario["scaffold"]:
         var_args = [arg for value in var_items for arg in ("--var", value)]

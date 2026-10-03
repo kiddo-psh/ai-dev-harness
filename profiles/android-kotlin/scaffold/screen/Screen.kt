@@ -1,4 +1,4 @@
-package {{base_package}}.ui.{{name_lower}}
+package {{base_package}}.feature.{{feature}}.ui.{{name_lower}}
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * 상태와 콜백만 받는 무상태 화면. ViewModel은 받지 않는다(규칙 screen-no-viewmodel-param).
- * 상태 수집은 [{{name_pascal}}Route]가 맡는다.
+ * 상태 수집은 [{{name_pascal}}Route]가 맡는다. 다른 feature나 :app이 조립할 공개 Composable이다(ADR-05).
  */
 @Composable
 fun {{name_pascal}}Screen(

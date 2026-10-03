@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "rehearsal"
-include(":app", ":wear")
+include(":app", ":core", ":feature:meal", ":feature:workout", ":wear", ":konsist-test")
