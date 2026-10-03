@@ -36,7 +36,7 @@ profiles/<name>/
 
 - 스캐폴드: 변수, `<변수>_path`, 이름 변형 `name`(입력 그대로)·`name_pascal`·`name_camel`·`name_kebab`·`name_snake`·`name_lower`
 - 컨벤션 `fixed`: 변수와 `<변수>_path`
-- 컨벤션 `configured`: 위에 더해 `formats`의 서식 이름, `layers_json`·`allow_json`(JS 설정에 그대로 쓰는 JSON)
+- 컨벤션 `configured`: 위에 더해 `formats`의 서식 이름, `layers_json`·`allow_json`(JS 설정에 그대로 쓰는 JSON). 서식 이름으로 `layers_json`·`allow_json`은 쓸 수 없다
 
 템플릿 본문에는 자리표시자가 아닌 `{{`·`}}`를 쓸 수 없다(이스케이프 없음). JSX `style={{…}}`처럼 필요하면
 `{ {`·`} }`로 띄워 쓴다. 본문·조각·기본값의 자리표시자는 프로필을 읽을 때 검사한다.
@@ -69,7 +69,7 @@ profiles/<name>/
 
 영역 설정 `disabled_rules`에 `{"no-field-injection": "끈 이유"}`를 적으면 그 블록이 표식과 함께 빠진다. 이유는 비울 수 없다.
 선언하지 않은 ID, 짝이 맞지 않는 표식, 블록이 없는 규칙은 오류다. 프로필 영역의 엄격 트리거에는
-`layers`·`allow`·`disabled_rules` 변경 문장이 항상 들어간다.
+`layers`·`allow`·`disabled_rules` 변경 문장이 항상 들어간다. `harness.json`은 저장소 루트라 최상위 `judge.triggers`에도 문장을 넣는다.
 
 ## 템플릿 덮어쓰기
 

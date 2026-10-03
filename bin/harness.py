@@ -70,6 +70,8 @@ RULE_START = re.compile(r"harness:rule\s+(\S+)")
 RULE_END = re.compile(r"harness:end\b")
 # 계층·고정 규칙 설정은 컨벤션 테스트를 바꾸거나 끈다. 프로필 영역의 엄격 트리거에 항상 넣는다(P-12)
 PROFILE_TRIGGER = "harness.json 이 영역 설정의 layers·allow·disabled_rules 변경(컨벤션 규칙을 바꾸거나 끈다)"
+# harness.json은 저장소 루트라 영역 트리거로는 판정에 나오지 않는다. 최상위 judge.triggers에도 넣어 사람 확인으로 낸다
+PROFILE_ROOT_TRIGGER = "harness.json 의 프로필 영역 설정(layers·allow·disabled_rules) 변경이면 엄격(컨벤션 규칙을 바꾸거나 끈다)"
 
 PLATFORMS = {
     "gitlab": {
@@ -648,8 +650,8 @@ def validate_conventions(conventions, dummy: dict, base: Path, source: str) -> N
     if not isinstance(formats, dict):
         raise HarnessError(f"{where}: formats는 객체여야 한다")
     for name, spec in formats.items():
-        if not VAR_NAME.fullmatch(name) or name in dummy:
-            raise HarnessError(f"{where}: 서식 이름이 잘못됐거나 변수와 겹친다: {name!r}")
+        if not VAR_NAME.fullmatch(name) or name in dummy or name in LAYER_JSON_NAMES:
+            raise HarnessError(f"{where}: 서식 이름이 잘못됐거나 변수·예약어와 겹친다: {name!r}")
         if not isinstance(spec, dict) or "layer" not in spec or set(spec) - FORMAT_KEYS or \
                 any(not isinstance(v, str) for v in spec.values()):
             raise HarnessError(f"{where}: 서식 {name}은 layer(필수)와 {', '.join(sorted(FORMAT_KEYS - {'layer'}))}"
@@ -916,7 +918,12 @@ def cmd_init_area(args, target: Path) -> int:
     else:
         areas.append(area)
     config["areas"] = areas
+    if profile_name:
+        judge = config.setdefault("judge", {})
+        if PROFILE_ROOT_TRIGGER not in judge.get("triggers", []):
+            judge["triggers"] = [*judge.get("triggers", []), PROFILE_ROOT_TRIGGER]
     validate_config(config, "명령 인자")
+    render_all(config, False)  # 다른 영역의 생성 파일과 목적지가 겹치는지 쓰기 전에 전체 설정으로 확인한다
 
     outputs = {f"{dir_}/AGENTS.md": render_area(area, build_context(config)), **render_conventions(area)}
     try:  # 변수(패키지 등)가 바뀌면 이전 경로의 컨벤션 파일이 남는다. 지우지 않고 알린다

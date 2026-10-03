@@ -108,6 +108,9 @@ class ProfileSchemaTest(ProfileTestBase):
             "format unknown placeholder": mutate(lambda d: d["conventions"]["formats"]["layer_defs"].update(
                 layer="{{nope}}")),
             "format without layer": mutate(lambda d: d["conventions"]["formats"]["layer_defs"].pop("layer")),
+            # PR #48 Codex: 예약된 JSON 값 이름의 서식은 렌더할 때 JSON으로 조용히 덮이므로 거부한다
+            "format named layers_json": mutate(lambda d: d["conventions"]["formats"].update(
+                layers_json={"layer": "{{layer}}"})),
             "rule without block": mutate(lambda d: d["conventions"]["rules"].update({"never-used": "x"})),
         }
         for label, data in cases.items():
@@ -256,6 +259,30 @@ class InitProfileTest(ProfileTestBase):
         self.assertIn(f"이전 컨벤션 파일(관리 대상에서 빠졌다. 확인 후 지운다): {old}", out)
         self.assertTrue((self.target / old).is_file())
         self.assertTrue((self.target / "backend/test/com/other/architecture/FixedRules.txt").is_file())
+
+    def test_profile_settings_change_surfaces_in_judge(self):
+        """PR #48 Codex: harness.json은 영역 밖이라 영역 트리거로는 안 나온다. 최상위 judge.triggers로 사람 확인에 낸다."""
+        self.init_demo()
+        code, _out, err = self.init_area("--force")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.config()["judge"]["triggers"], [harness.PROFILE_ROOT_TRIGGER])
+        files = self.tmp / "changed.txt"
+        files.write_text("harness.json\n", encoding="utf-8")
+        code, out, err = run(["judge", str(self.target), "--files", str(files)])
+        self.assertEqual(code, 0, err)
+        self.assertIn(harness.PROFILE_ROOT_TRIGGER, out)
+
+    def test_nested_area_collision_aborts_before_writing(self):
+        """PR #48 Codex: 다른 영역의 컨벤션 파일과 목적지가 겹치면 쓰기 전에 중단한다(--force여도)."""
+        code, _out, err = self.init_area("--profile", "demo", "--var", "base_package=x.test.y")
+        self.assertEqual(code, 0, err)
+        config_before, files_before = self.config(), self.files()
+        code, _out, err = run(["init", str(self.target), "--area", "backend/test/x", "--profile", "demo",
+                               "--var", "base_package=y", "--force"])
+        self.assertEqual(code, 2)
+        self.assertIn("backend/test/x/test/y/architecture/FixedRules.txt", err)
+        self.assertEqual(self.config(), config_before)
+        self.assertEqual(self.files(), files_before)
 
     def test_plain_area_unchanged(self):
         """프로필 없는 영역은 예전과 같다: --verify-cmd 필수, 프로필 키 없음."""

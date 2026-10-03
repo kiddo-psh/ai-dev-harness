@@ -171,7 +171,8 @@ python bin/harness.py scaffold backend <kind> MovieReview --target ../my-project
 - 프로필의 컨벤션 파일(아키텍처 테스트, lint 설정)이 영역 아래에 렌더된다. 손으로 고치지 않는다. `check`가 드리프트를 본다.
   계층 규칙은 `harness.json` 영역의 `layers`(계층 → 패턴 목록)·`allow`(계층 → 의존 가능한 계층)를 고친 뒤
   `init --area <dir> --force`로 다시 생성한다. 고정 규칙은 `disabled_rules`에 `"규칙 ID": "이유"`를 적어야 끌 수 있다.
-  이 세 키의 변경은 영역의 엄격 트리거다
+  이 세 키의 변경은 엄격 트리거다. `harness.json`은 영역 밖이라 최상위 `judge.triggers`에도 같은 취지의 문장을 넣어
+  `harness judge`·MR 본문 lint의 사람 확인으로 나오게 한다
 - 컨벤션 테스트에 필요한 의존성은 `init`이 `안내:`로 출력한다. 키트는 소비자 빌드·lock 파일을 고치지 않으므로 직접 추가한다
 - `scaffold <영역> <종류> <이름>`은 프로필 템플릿으로 파일을 만든다. 이름은 `MovieReview`·`movie-review`처럼 주고
   템플릿이 Pascal·camel·kebab·snake 형태를 쓴다. 목적지 파일이 하나라도 있으면 아무것도 만들지 않고 중단한다(`--force` 없음).
