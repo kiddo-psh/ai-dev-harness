@@ -376,6 +376,18 @@ class ConfigTest(unittest.TestCase):
             with self.subTest(config=config), self.assertRaises(harness.HarnessError):
                 harness.validate_config(config, "test")
 
+    def test_removed_claude_review_rejected(self):
+        """#43: Claude MR 리뷰를 제거해 claude_review 블록과 매니페스트 requires는 더 이상 받지 않는다."""
+        config = {**self.BASE, "platform": "gitlab", "tracker": "jira", "issue_prefix": "DEMO",
+                  "claude_review": {"target_branch": "develop"}}
+        with self.assertRaisesRegex(harness.HarnessError, "알 수 없는 설정 키: claude_review"):
+            harness.validate_config(config, "test")
+        real = harness.read_manifest()
+        entry = {"src": "AGENTS.md", "dest": "X.md", "requires": "claude_review"}
+        with patch.object(harness, "read_manifest", return_value={**real, "files": [entry]}), \
+                self.assertRaises(harness.HarnessError):
+            harness.load_manifest()
+
     def test_invalid_areas_rejected(self):
         bad_areas = [
             "backend",
@@ -604,25 +616,33 @@ class IncludeTest(unittest.TestCase):
         return line.split("{{")[0][:30]  # 자리표시자 앞까지만 비교한다
 
     def test_sections_composed(self):
+        self.assertEqual(list(self.source_sections()), ["공통", "로컬"])  # CI 절은 #43에서 제거했다
         ctx = harness.build_context(self.CONFIG)
-        local, ci = ctx["review_perspectives"], ctx["review_perspectives_ci"]
-        for section, inside, outside in (("공통", [local, ci], []), ("로컬", [local], [ci]), ("CI", [ci], [local])):
-            for text in inside:
-                self.assertIn(self.first_bullet(section), text, section)
-            for text in outside:
-                self.assertNotIn(self.first_bullet(section), text, section)
-        for text in (local, ci):
-            self.assertNotIn("## ", text)
-            self.assertNotIn("\n\n", text)  # 절을 한 목록으로 잇는다
-            self.assertTrue(all(line.startswith("- ") for line in text.splitlines()))
+        self.assertNotIn("review_perspectives_ci", ctx)
+        local = ctx["review_perspectives"]
+        for section in ("공통", "로컬"):
+            self.assertIn(self.first_bullet(section), local, section)
+        self.assertLess(local.index(self.first_bullet("공통")), local.index(self.first_bullet("로컬")))
+        self.assertNotIn("## ", local)
+        self.assertNotIn("\n\n", local)  # 절을 한 목록으로 잇는다
+        self.assertTrue(all(line.startswith("- ") for line in local.splitlines()))
         self.assertTrue(all(line.endswith(" [사람]") for line in local.splitlines()))
-        self.assertNotIn("[사람]", ci)
+        # tag가 없는 include에는 강제 주체 표시를 붙이지 않는다
+        untagged = {"name": "x_inc", "src": "review-perspectives.md", "sections": ["공통"]}
+        real = harness.read_manifest()
+        with patch.object(harness, "read_manifest", return_value={**real, "includes": [untagged]}):
+            plain = harness.build_context(self.CONFIG)["x_inc"]
+        self.assertIn(self.first_bullet("공통"), plain)
+        self.assertNotIn("[사람]", plain)
 
     def test_include_rendered_with_context(self):
         for platform, noun in (("gitlab", "MR"), ("github", "PR")):
             ctx = harness.build_context({**self.CONFIG, "platform": platform})
-            self.assertIn(f"{noun} 설명", ctx["review_perspectives_ci"])
-            self.assertNotIn("{{", ctx["review_perspectives"] + ctx["review_perspectives_ci"])
+            self.assertNotIn("{{", ctx["review_perspectives"])
+            # 원본 절에 자리표시자가 있으면 같은 컨텍스트로 렌더한다
+            with patch.object(harness, "include_text", lambda inc: "- {{pr_noun}} 설명"):
+                ctx = harness.build_context({**self.CONFIG, "platform": platform})
+            self.assertEqual(ctx["review_perspectives"], f"- {noun} 설명")
 
     def test_invalid_includes_rejected(self):
         good = {"name": "x_inc", "src": "review-perspectives.md", "sections": ["공통"]}
@@ -669,7 +689,6 @@ class IncludeTest(unittest.TestCase):
             for text in (review, area):
                 self.assertIn(self.first_bullet("공통"), text)
                 self.assertIn(self.first_bullet("로컬"), text)
-                self.assertNotIn(self.first_bullet("CI"), text)
                 self.assertNotIn("관점: 계약 정합성 · 정확성 · 보안(입력 검증, Secret 전체 1회)", text)
             self.assertIn("이 영역에서 특히 볼 관점(공통 관점에 덧붙임): 접근성. [사람]", area)
             self.assertGreater(area.index("이 영역에서 특히 볼 관점"), area.index(self.first_bullet("로컬")))
