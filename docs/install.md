@@ -163,7 +163,8 @@ python bin/harness.py scaffold backend <kind> MovieReview --target ../my-project
 
 - `--profile`은 `--area`와 함께 쓴다. 프로필의 `verify`·`triggers`·`review_focus`·`trigger_paths`·`test_paths`·`layers`·`allow`를
   영역 설정에 굳히고 `profile`·`vars`·`disabled_rules` 키를 남긴다. 명시한 `--verify-cmd`·`--trigger`·`--review-focus`가 우선한다
-- 프로필의 검증 명령·안내에는 영역 경로 `{{area_dir}}`가 들어가 저장소 루트에서 실행할 수 있는 명령으로 굳는다
+- 프로필의 검증 명령·안내에는 영역 경로 `{{area_dir}}`가 들어가 저장소 루트에서 실행할 수 있는 명령으로 굳는다. 그래서 프로필 영역 경로는 영문자·숫자·`._/-`만 쓴다(공백·`&`·`;` 거부)
+- 이 규칙 전(#55 이전)에 프로필로 만든 영역은 `--force`로 다시 만들어도 굳힌 `verify`가 유지된다. `harness.json` 영역의 `verify`를 지우거나 `--verify-cmd`로 다시 주고 다시 만든다
 - `--var 이름=값`은 프로필이 선언한 변수만 받는다. 기본값이 없는 변수는 필수이고, 값은 프로필의 형식(정규식)에 맞아야 한다
 - 같은 영역을 `--force`로 다시 만들 때 `--profile`·`--var`를 생략하면 이전 값을 유지한다. 다른 프로필로 바꿀 수는 없다
   (영역 항목을 지우고 다시 만든다). 프로필 없이 만든 영역에 처음 프로필을 적용하면 기준 문서만 유지하고 나머지는 프로필

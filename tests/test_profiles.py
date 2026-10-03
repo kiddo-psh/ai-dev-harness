@@ -217,6 +217,13 @@ class InitProfileTest(ProfileTestBase):
         area = next(a for a in self.config()["areas"] if a["dir"] == "apps/api")
         self.assertEqual(area["verify"], ["cd apps/api && build app"])
         self.assertIn("안내: apps/api 의 빌드 파일을 고친다", out)
+        # 리뷰 F1: 셸 명령에 그대로 들어가므로 공백·명령 구분자가 있는 영역 경로는 거부한다
+        for bad in ("my app", "a&b", "x;echo INJECT"):
+            with self.subTest(area=bad):
+                code, _out, err = run(["init", str(self.target), "--area", bad, "--profile", "demo",
+                                       "--var", "base_package=com.acme.app"])
+                self.assertEqual(code, 2, err)
+                self.assertFalse((self.target / bad).exists())
 
     def test_explicit_args_override_profile(self):
         self.init_demo("--verify-cmd", "make check", "--trigger", "내 트리거", "--review-focus", "내 관점",
@@ -554,7 +561,8 @@ class DocsTest(unittest.TestCase):
                      "area_dir", "저장소 루트에서 실행"):
             with self.subTest(word=word):
                 self.assertIn(word, contract)
-        # #55: 영역 검증 명령 예시는 저장소 루트에서 실행해도 되는 형태여야 한다
+        # #55: 영역 검증 명령 예시는 저장소 루트에서 실행해도 되는 형태여야 한다(리뷰 F2: README 빠른 시작 포함)
+        self.assertIn('--verify-cmd "cd backend && ./gradlew build"', self.read("README.md"))
         area_section = install[install.index("### 3.2"):install.index("### 3.3")]
         self.assertIn('--verify-cmd "cd backend && ./gradlew test"', area_section)
         self.assertNotIn('--verify-cmd "./gradlew', area_section)
