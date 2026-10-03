@@ -55,7 +55,7 @@ kotlin {
 }
 
 ktlint {
-    version.set(libs.versions.ktlint.get())
+    version.set(libs.versions.ktlint.cli.get())
 }
 
 dependencies {

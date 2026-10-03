@@ -16,6 +16,7 @@
 사용법: python .github/scripts/rehearse_profiles.py spring-java|react-ts|android-kotlin [--keep]
 """
 
+import difflib
 import json
 import os
 import shutil
@@ -386,12 +387,39 @@ def report(name: str, step: str, problems: list[str]) -> bool:
     return not problems
 
 
+def drift_diff(repo: Path, before: dict[str, str], check_output: str) -> str:
+    """`harness check`가 불일치로 보고한 파일마다 init 직후 내용과의 차이. 형식 도구가 무엇을 바꿨는지 로그에 남긴다."""
+    lines = []
+    for line in check_output.splitlines():
+        if not line.startswith("불일치:"):
+            continue
+        rel = line.split(":", 1)[1].strip()
+        path = repo / rel
+        after = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+        lines.extend(difflib.unified_diff(before.get(rel, "").splitlines(), after.splitlines(),
+                                          f"{rel} (init 직후)", f"{rel} (현재)", lineterm=""))
+    return "\n".join(lines)
+
+
+def snapshot(repo: Path) -> dict[str, str]:
+    """init·scaffold 직후의 텍스트 파일(의존성 설치 전이라 작다)."""
+    files = {}
+    for path in repo.rglob("*"):
+        if path.is_file() and ".git" not in path.parts:
+            try:
+                files[path.relative_to(repo).as_posix()] = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+    return files
+
+
 def rehearse(name: str, keep: bool = False) -> int:
     work = Path(tempfile.mkdtemp(prefix=f"harness-profile-{name}-"))
     repo = work / "consumer"
     failed = []
     try:
         scenario = prepare(name, repo)
+        before = snapshot(repo)
         for rel in scenario["gradle_roots"]:
             ensure_wrapper(repo / rel)
         verify = area_verify(repo, scenario)
@@ -405,6 +433,9 @@ def rehearse(name: str, keep: bool = False) -> int:
                                    text=True, encoding="utf-8", errors="replace", env=child_env())
             if check.returncode != 0:
                 problems.append(f"harness check 드리프트: {(check.stdout + check.stderr).strip()[:500]}")
+                print("::group::드리프트 diff")
+                print(drift_diff(repo, before, check.stdout + check.stderr))
+                print("::endgroup::")
         if not report(name, "scaffold-verify", problems):
             failed.append("scaffold-verify")
         else:  # 양성이 통과해야 음성의 실패가 규칙 때문이라고 읽을 수 있다
