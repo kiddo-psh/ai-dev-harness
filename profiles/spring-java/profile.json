@@ -1,0 +1,130 @@
+{
+  "name": "spring-java",
+  "description": "Spring Boot 3.x 이상 · Java 21 · Gradle 백엔드. 기능 우선 패키지, ArchUnit 컨벤션 테스트",
+  "verify": ["./gradlew build"],
+  "trigger_paths": {
+    "strict": [
+      "/src/main/resources/db/migration/",
+      "/build.gradle",
+      "/build.gradle.kts",
+      "/settings.gradle",
+      "/settings.gradle.kts",
+      "/src/main/resources/application*.yml",
+      "/src/main/resources/application*.yaml",
+      "/src/main/resources/application*.properties",
+      "**/global/",
+      "**/infrastructure/",
+      "**/*SecurityConfig.java",
+      "gradle.lockfile",
+      "settings-gradle.lockfile",
+      "/gradle/libs.versions.toml",
+      "/gradle/wrapper/"
+    ],
+    "standard": []
+  },
+  "test_paths": ["/src/test/", "*Test.java", "*Tests.java"],
+  "triggers": [
+    "계약 문서(API·ERD·DB 스키마)의 변경, 또는 계약과 다른 구현",
+    "다른 담당자 소유 도메인, `global/`·`infrastructure/`·`SecurityConfig` 같은 공통 코드의 변경",
+    "`@Transactional` 경계의 신설·변경, 한 유스케이스에서 둘 이상의 Repository 쓰기",
+    "인증·인가 코드, 토큰·쿠키 처리",
+    "메시지(Kafka 등) 발행·소비, 캐시(Redis 등) 키·TTL"
+  ],
+  "review_focus": [
+    "계약 정합성",
+    "정확성(경계 조건, 실패 경로)",
+    "보안(입력 검증, Secret)",
+    "테스트 실효성(플랜 목록과 실제 테스트의 대조)",
+    "트랜잭션 경계(Service 메서드 단위, 쓰기 메서드의 @Transactional)"
+  ],
+  "vars": {
+    "base_package": {
+      "description": "기본 패키지(예: com.acme.app)",
+      "pattern": "[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*"
+    },
+    "java_src": {
+      "description": "영역 기준 Java 소스 루트",
+      "pattern": "[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*",
+      "default": "src/main/java"
+    },
+    "java_test": {
+      "description": "영역 기준 Java 테스트 루트",
+      "pattern": "[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*",
+      "default": "src/test/java"
+    },
+    "lombok": {
+      "description": "기본 템플릿의 Lombok 사용 여부(true|false). false면 .harness/templates 로 템플릿을 덮어쓴다",
+      "pattern": "true|false",
+      "default": "true"
+    },
+    "error_package": {
+      "description": "공통 오류(BusinessException·ErrorCode) 패키지. 스캐폴드는 주석 예시에만 쓴다",
+      "pattern": "[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*",
+      "default": "{{base_package}}.global.error"
+    },
+    "webmvc_test_package": {
+      "description": "@WebMvcTest·@AutoConfigureMockMvc 패키지. Boot 4.x 기본, Boot 3.x는 org.springframework.boot.test.autoconfigure.web.servlet",
+      "pattern": "[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*",
+      "default": "org.springframework.boot.webmvc.test.autoconfigure"
+    }
+  },
+  "layers": {
+    "controller": ["..controller.."],
+    "service": ["..service.."],
+    "repository": ["..repository.."],
+    "entity": ["..entity.."],
+    "dto": ["..dto.."]
+  },
+  "allow": {
+    "controller": ["service", "dto"],
+    "service": ["repository", "entity", "dto"],
+    "repository": ["entity"],
+    "dto": ["entity"]
+  },
+  "scaffold": {
+    "domain": {
+      "description": "기능 패키지 하나(Controller·Service·Repository·엔티티·요청/응답 DTO·테스트 2개)",
+      "files": [
+        {"src": "Controller.java", "dest": "{{java_src}}/{{base_package_path}}/domain/{{name_lower}}/controller/{{name_pascal}}Controller.java"},
+        {"src": "Service.java", "dest": "{{java_src}}/{{base_package_path}}/domain/{{name_lower}}/service/{{name_pascal}}Service.java"},
+        {"src": "Repository.java", "dest": "{{java_src}}/{{base_package_path}}/domain/{{name_lower}}/repository/{{name_pascal}}Repository.java"},
+        {"src": "Entity.java", "dest": "{{java_src}}/{{base_package_path}}/domain/{{name_lower}}/entity/{{name_pascal}}.java"},
+        {"src": "CreateRequest.java", "dest": "{{java_src}}/{{base_package_path}}/domain/{{name_lower}}/dto/request/{{name_pascal}}CreateRequest.java"},
+        {"src": "Response.java", "dest": "{{java_src}}/{{base_package_path}}/domain/{{name_lower}}/dto/response/{{name_pascal}}Response.java"},
+        {"src": "ControllerTest.java", "dest": "{{java_test}}/{{base_package_path}}/domain/{{name_lower}}/controller/{{name_pascal}}ControllerTest.java"},
+        {"src": "ServiceTest.java", "dest": "{{java_test}}/{{base_package_path}}/domain/{{name_lower}}/service/{{name_pascal}}ServiceTest.java"}
+      ],
+      "snippet": "snippet.txt"
+    }
+  },
+  "conventions": {
+    "rules": {
+      "transactional-in-service-only": "@Transactional(Spring·jakarta)은 service 패키지 밖의 클래스·메서드에 두지 않는다",
+      "controller-no-entity-return": "controller 공개 메서드는 @Entity 타입(제네릭 인자 포함)을 반환하지 않는다",
+      "no-field-injection": "필드 주입(@Autowired·@Inject 필드) 금지. 생성자 주입을 쓴다",
+      "service-no-web-types": "service는 jakarta.servlet·ResponseEntity에 의존하지 않는다",
+      "no-service-cycle-between-domains": "domain 기능 패키지 사이의 service 순환 의존 금지"
+    },
+    "formats": {
+      "layer_definitions": {
+        "layer": "                .layer(\"{{layer}}\")\n                .definedBy({{patterns}})",
+        "pattern": "\"{{pattern}}\""
+      },
+      "layer_access_rules": {
+        "layer": "                .whereLayer(\"{{layer}}\")\n                .mayOnlyAccessLayers({{allowed}})",
+        "layer_empty": "                .whereLayer(\"{{layer}}\")\n                .mayNotAccessAnyLayer()",
+        "allowed": "\"{{name}}\""
+      }
+    },
+    "files": [
+      {"src": "conventions/FixedRulesArchitectureTest.java", "dest": "{{java_test}}/{{base_package_path}}/architecture/FixedRulesArchitectureTest.java", "kind": "fixed"},
+      {"src": "conventions/LayerRulesArchitectureTest.java", "dest": "{{java_test}}/{{base_package_path}}/architecture/LayerRulesArchitectureTest.java", "kind": "configured"}
+    ]
+  },
+  "setup_notes": [
+    "build.gradle 에 testImplementation 'com.tngtech.archunit:archunit-junit5:<1.x 버전>' 을 추가한다(예: 1.4.1). 키트는 빌드 파일을 고치지 않는다",
+    "컨벤션 테스트는 영역의 {{java_test}}/{{base_package_path}}/architecture/ 에 있다. 손으로 고치지 않고 harness.json 의 layers·allow·disabled_rules 를 고친 뒤 --force 로 다시 생성한다",
+    "@WebMvcTest 패키지는 {{webmvc_test_package}} 이다. Spring Boot 3.x면 --var webmvc_test_package=org.springframework.boot.test.autoconfigure.web.servlet 로 다시 적용한다",
+    "스캐폴드 뒤 ./gradlew spotlessApply 로 형식을 맞춘다(google-java-format AOSP)"
+  ]
+}
