@@ -579,6 +579,9 @@ class AndroidProfileTest(unittest.TestCase):
         self.assertFalse(violates("// GlobalScope 금지\nfun f() = Unit\n"))
         self.assertFalse(violates('val message = "GlobalScope는 쓰지 않는다"\n'))
         self.assertFalse(violates('val message = "escaped \\" GlobalScope"\n'))
+        # PR #60 Codex: 여러 줄 원시 문자열 안의 언급도 사용이 아니다. 원시 문자열 뒤의 실제 사용은 잡는다
+        self.assertFalse(violates('val doc = """\n    GlobalScope 대신\n    viewModelScope\n"""\n'))
+        self.assertTrue(violates('val doc = """\nx\n"""\nfun f() = GlobalScope.launch { }\n'))
 
     def test_chain_operator_heuristic(self):
         """연쇄 연산자 근사 검사 자체: 리뷰 F1(#59)이 찾은 두 줄은 4개 이상, 나눈 형태와 별개 식은 4개 미만이다."""

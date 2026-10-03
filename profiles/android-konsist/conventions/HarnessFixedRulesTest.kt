@@ -40,7 +40,7 @@ class HarnessFixedRulesTest {
     fun noGlobalScope() {
         // 수명 없는 코루틴은 누수와 취소 누락을 만든다. viewModelScope·lifecycleScope처럼 수명 있는 범위를 쓴다
         // 주석·KDoc·문자열의 언급은 사용이 아니므로 지운 뒤 본다
-        val commentsAndStrings = Regex("/\\*[\\s\\S]*?\\*/|//[^\\n]*|\"(?:\\\\.|[^\"\\\\\\n])*\"")
+        val commentsAndStrings = Regex("/\\*[\\s\\S]*?\\*/|//[^\\n]*|\"\"\"[\\s\\S]*?\"\"\"|\"(?:\\\\.|[^\"\\\\\\n])*\"")
         val globalScope = Regex("\\bGlobalScope\\b")
         moduleFiles().assertFalse { file ->
             globalScope.containsMatchIn(commentsAndStrings.replace(file.text, ""))
