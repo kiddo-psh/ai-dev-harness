@@ -33,7 +33,9 @@
     {"iid": 41, "title": "원인 미기재 결함", "web_url": "https://gitlab.example/demo/-/issues/41",
      "created_at": "2026-09-30T00:00:00.000Z", "description": "재현 절차만 있다\n\n```\n원인: !10\n```\n"},
     {"iid": 42, "title": "기간 밖 MR 원인", "web_url": "https://gitlab.example/demo/-/issues/42",
-     "created_at": "2026-09-26T00:00:00.000Z", "description": "원인: !3"}
+     "created_at": "2026-09-26T00:00:00.000Z", "description": "원인: !3"},
+    {"iid": 43, "title": "기간 뒤에 만든 결함(원인 MR은 기간 안)", "web_url": "https://gitlab.example/demo/-/issues/43",
+     "created_at": "2026-10-06T00:00:00.000Z", "description": "원인: !11"}
   ],
   "labeled_mrs": [
     {"iid": 14, "title": "결함 수정 MR(원인 MR 없음)", "web_url": "https://gitlab.example/demo/-/merge_requests/14",

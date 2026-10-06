@@ -74,7 +74,9 @@ python core/metrics/collect.py --platform github --since 2026-09-01 --security-j
 
 - 원인 MR의 **병합 주**에 센다. 원인 MR이 기간 밖에 병합됐으면 세지 않는다(`status: out_of_window`).
 - 원인 줄이 없으면 이슈 생성 주의 `unlinked_defects`로 따로 센다(`status: unlinked`). 주석·코드 블록 안의 원인 줄은 읽지 않는다.
-- 라벨 이슈는 생성 시각이 `--since` 이후인 것만 읽는다. 원인 MR이 병합되지 않았거나 없으면 `status: cause_not_merged`.
+- 결함은 생성 시각이 기간 안(`--since` 이상 `--until` 미만)인 것만 센다. 기간 뒤에 만든 결함은 원자료에 `status: out_of_window`로만
+  남아 같은 창을 다시 수집해도 결과가 같다. 병합 뒤 늦게 발견되는 결함을 놓치지 않으려면 주간 수집은 `--until`을 생략(지금)하고
+  `--since`를 프로젝트 시작으로 고정하거나 충분히 길게 둔다. 원인 MR이 병합되지 않았거나 없으면 `status: cause_not_merged`.
 
 ### 출력 (`version` 1)
 

@@ -287,6 +287,14 @@ class DefectTest(unittest.TestCase):
         self.assertIn("/api/v4/projects/1/merge_requests/99", self.api.paths())
         self.assertEqual(sum(w["escaped_defects"] + w["unlinked_defects"] for w in self.result["weeks"]), 2)
 
+    def test_defect_created_after_until_not_counted(self):
+        """Codex P2(PR #66): --until 뒤에 만든 결함은 원인 MR(11, W39)이 기간 안이어도 세지 않고 out_of_window로만 남긴다.
+        같은 창을 다시 수집해도 결과가 같아야 한다(T4의 W39 escaped_defects 1이 이를 고정한다)."""
+        record = self.defects[43]
+        self.assertEqual((record["cause"], record["status"], record["week"]), (11, "out_of_window", None))
+        self.assertIsNone(record["cause_merged_at"])
+        self.assertEqual(week(self.result, "2026-W39")["escaped_defects"], 1)
+
 
 class GitHubCollectTest(unittest.TestCase):
     @classmethod

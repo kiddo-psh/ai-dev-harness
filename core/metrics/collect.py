@@ -634,16 +634,18 @@ def collect(adapter, judge: Judge, window: Window, defect_label: str, security_j
     defects, looked_up = [], {}
     for item in adapter.defects(defect_label, window):
         cause = judge.cause(adapter.platform, item["body"])
+        created = parse_ts(item["created_at"])
         record = {"kind": item["kind"], "number": item["number"], "title": item["title"], "url": item["url"],
                   "created_at": item["created_at"], "cause": cause, "cause_merged_at": None, "week": None,
                   "status": None}
+        if not window.contains(created):
+            # 기간 밖(특히 --until 뒤)에 만든 결함은 세지 않고 원자료에만 남긴다. 같은 창을 다시 수집해도 결과가 같다
+            record["status"] = "out_of_window"
+            defects.append(record)
+            continue
         if cause is None:
-            created = parse_ts(item["created_at"])
-            if window.contains(created):
-                record["week"], record["status"] = window.week(created), "unlinked"
-                by_week[record["week"]]["unlinked_defects"] += 1
-            else:
-                record["status"] = "out_of_window"
+            record["week"], record["status"] = window.week(created), "unlinked"
+            by_week[record["week"]]["unlinked_defects"] += 1
             defects.append(record)
             continue
         if cause in merged:
