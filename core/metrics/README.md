@@ -2,23 +2,109 @@
 
 키트의 효과를 숫자로 보이는 수집기. 로드맵 M2-6(CI 실패 분류)과 M4-1·M4-2에서 채운다.
 
-수집하는 지표 (roadmap 1장)
+수집하는 지표 (roadmap 1장). 원천은 모두 플랫폼 API다(MR lint 아티팩트는 30일에 만료되고 `plans/`는 커밋하지 않는다).
 
-| # | 지표 | 출처 |
+| # | 지표 | 출처 (`collect.py`) |
 | --- | --- | --- |
-| 1 | 병합 후 발견된 누락 수 | 리뷰 파일 측정 칸 → MR 본문 "검증" 절 |
-| 2 | 엄격 단계 MR 비율 | 플랜 상단 판정 → MR 본문 |
-| 3 | CI 실패 원인 분류 | job 로그 규칙 분류 (`classify_ci.py`, `harness classify-ci`) |
-| 4 | 판정 스크립트와 사람 판정의 불일치 수 | `harness judge` 출력과 플랜 판정 대조 |
+| 1 | 병합 후 발견된 누락 수 | `escaped-defect` 라벨 이슈·MR 본문의 `원인: !<MR>`(GitLab)·`원인: #<PR>`(GitHub) → 원인 MR의 병합 주 |
+| 2 | 엄격 단계 MR 비율 | 기간 내 병합 MR의 유효 판정(본문 `## 판정`과 변경 파일 재판정 중 높은 쪽)이 엄격인 수 / 병합 MR 수 |
+| 3 | CI 실패 원인 분류 | 기간 내 실패 job과 trace → `classify_ci.py` 범주 6개 |
+| 4 | 판정 스크립트와 사람 판정의 불일치 수 | 본문 판정 ≠ 변경 파일 재판정인 병합 MR 수(MR lint `tier.mismatch`와 같은 정의) |
 
-예정 내용: `collect.py`(MR 본문·CI API에서 JSON 추출), `notify.py`(주간 요약 webhook 발송,
-feelm Jira 일일 요약 발송 코드 이관).
+예정 내용: `metrics report`(주간 HTML 리포트, M4-6), `notify.py`(주간 요약 발송, M4-2).
+
+## 수집기 (`collect.py`, `harness metrics collect`)
+
+기간 내 병합 MR·결함 이슈·실패 CI job을 플랫폼 API로 읽어 ISO 주별 지표와 원자료를 JSON 한 파일로 쓴다.
+표준 라이브러리만 쓰며, 소비자 CI에서 `python collect.py ...`로 단독 실행할 수 있다(같은 디렉터리의 `classify_ci.py`가 필요하다).
+
+```bash
+python bin/harness.py metrics collect --platform gitlab --since 2026-09-01 [--until 2026-10-01] --out metrics.json
+python core/metrics/collect.py --platform github --since 2026-09-01 --security-jobs secret-detection,sast
+```
+
+| 옵션 | 기본 | 설명 |
+| --- | --- | --- |
+| `--platform` | (필수) | `gitlab` 또는 `github` |
+| `--since` / `--until` | (필수) / 지금 | `YYYY-MM-DD`. `--since`는 포함, `--until`은 제외. `--utc-offset` 기준 0시 |
+| `--out` | `metrics.json` | 출력 파일. 임시 파일에 쓴 뒤 교체한다(실패하면 기존 파일을 남긴다) |
+| `--api-url` | GitLab `CI_API_V4_URL`, GitHub `GITHUB_API_URL` 또는 `https://api.github.com` | https만 허용 |
+| `--project` | GitLab `CI_PROJECT_ID`, GitHub `GITHUB_REPOSITORY` | GitLab은 ID 또는 `group/project`, GitHub는 `owner/repo` |
+| `--utc-offset` | `+09:00` | 주 경계 시간대. `zoneinfo`는 Windows에 tzdata가 없어 쓰지 않는다(KST는 서머타임이 없다) |
+| `--defect-label` | `escaped-defect` | 지표 1 라벨 |
+| `--security-jobs` | 없음 | GitHub 보안 검사 job 이름(쉼표 구분). `harness-` 접두를 붙여 `security`로 분류한다 |
+| `--common` / `--config` | `.claude/hooks/harness_common.py` / `harness.json` | 재판정에 쓰는 판정 코드와 규칙(저장소 루트 기준) |
+| `--mr-lint` | 키트 `core/ci/mr-lint/mr_lint.py`, 없으면 `.harness/mr-lint/mr_lint.py` | 판정 정의(`lint_body`)를 가져올 MR lint |
+
+종료 코드: 성공 0, 입력·설정·API 오류 2. 오류는 HTTP 상태와 URL 경로만 보인다.
+
+### 토큰
+
+토큰은 환경 변수로만 받는다(CI 변수는 masked·protected). 출력 파일·오류 메시지에 쓰지 않고, 다른 호스트(또는 https → http)로
+가는 리다이렉트·다음 페이지 요청에는 인증 헤더를 붙이지 않는다(GitHub 로그는 저장소 서버로 리다이렉트된다).
+
+| 플랫폼 | 환경 변수 | 필요한 범위 |
+| --- | --- | --- |
+| GitLab | `HARNESS_METRICS_TOKEN`(필수, `PRIVATE-TOKEN` 헤더) | 프로젝트 액세스 토큰 `read_api`(Reporter 이상). CI job 토큰은 MR·파이프라인 목록 API를 읽지 못해 쓰지 않는다 |
+| GitHub | `HARNESS_METRICS_TOKEN`, 없으면 `GITHUB_TOKEN`(`Authorization: Bearer`) | fine-grained 토큰 `contents:read`·`pull-requests:read`·`issues:read`·`actions:read`. workflow에서는 `permissions`에 같은 범위를 준다 |
+
+### 수집 방식
+
+- 병합 MR: GitLab `merge_requests?state=merged&updated_after=`(병합 시각 필터는 버전마다 달라 갱신 시각으로 받고 `merged_at`으로 거른다),
+  GitHub `pulls?state=closed&sort=updated`(기간 시작보다 오래 갱신된 PR이 나오면 멈춘다). 페이지는 `Link: rel="next"`를 따른다(100개씩).
+- 판정: 변경 파일(GitLab `merge_requests/:iid/diffs`, GitHub `pulls/:n/files`의 옛·새 경로)을 `harness_common.judge`로 다시 판정하고
+  `mr_lint.lint_body(본문, 재판정)`의 `tier`를 그대로 쓴다. 통합 MR(`integration_branch` → `default_branch`)은 MR lint처럼 검사 대상이
+  아니라 원자료에 `integration: true`로만 남기고 지표에 세지 않는다.
+- **재판정 기준 주의**: 재판정은 수집 시점의 `harness.json` 규칙을 쓴다. MR이 병합될 때의 규칙과 다르면 그때 MR lint가 낸 판정과
+  달라질 수 있다(규칙을 바꾼 주 전후 비교에 유의한다).
+- 실패 job: GitLab은 `updated_after`(기간 시작)로 받은 파이프라인 → 실패 job(`scope[]=failed`, 재시도 포함) → trace. 기간 뒤에 끝났거나
+  재시도한 파이프라인도 받아 job `created_at`으로 거른다(`updated_before`로 자르면 그 job이 빠진다). GitHub는 기간 내 workflow run(결론이
+  실패·시간 초과·취소이거나 다시 실행한 run) → job(`filter=all`) → 로그. GitHub job은 위 어댑터와 같은 변환을 한다. trace는 끝 1 MiB만 읽어 분류하고, 만료(404·410)면 메타데이터만으로 분류한다. 주는 job `created_at`(GitHub는 run `created_at`).
+  GitHub는 필터를 준 run 목록을 1,000개까지만 돌려준다.
+
+### 병합 후 결함 라벨 규칙 (지표 1)
+
+병합 뒤 발견한 누락은 이슈(또는 수정 MR)를 만들고 라벨 `escaped-defect`를 붙인 뒤 본문에 원인 MR을 한 줄로 적는다.
+이슈와 수정 MR 중 하나에만 라벨을 붙인다(둘 다 붙이면 두 번 센다).
+
+```text
+원인: !12      (GitLab MR 번호)
+원인: #12      (GitHub PR 번호)
+```
+
+- 원인 MR의 **병합 주**에 센다. 원인 MR이 기간 밖에 병합됐으면 세지 않는다(`status: out_of_window`).
+- 원인 줄이 없으면 이슈 생성 주의 `unlinked_defects`로 따로 센다(`status: unlinked`). 주석·코드 블록 안의 원인 줄은 읽지 않는다.
+- 라벨 이슈는 생성 시각이 `--since` 이후인 것만 읽는다. 원인 MR이 병합되지 않았거나 없으면 `status: cause_not_merged`.
+
+### 출력 (`version` 1)
+
+```json
+{"version": 1, "platform": "gitlab", "project": "123",
+ "window": {"since": "2026-09-21T00:00:00+09:00", "until": "2026-10-05T00:00:00+09:00", "utc_offset": "+09:00"},
+ "generated_at": "2026-10-05T09:00:00+09:00",
+ "weeks": [{"week": "2026-W39", "start": "2026-09-21", "merged_mrs": 3, "strict": 1, "mismatch": 1,
+            "escaped_defects": 1, "unlinked_defects": 0,
+            "ci_failures": {"test": 1, "format": 0, "infra": 0, "timeout": 0, "security": 0, "unclassified": 0}}],
+ "mrs": [{"number": 11, "title": "...", "url": "...", "merged_at": "...", "week": "2026-W39",
+          "source_branch": "feat/11", "target_branch": "develop", "integration": false, "files": 3,
+          "tier": {"body": "lite", "judge": "strict", "effective": "strict", "mismatch": true}, "mismatch_higher": "judge"}],
+ "defects": [{"kind": "issue", "number": 40, "title": "...", "url": "...", "created_at": "...", "cause": 12,
+              "cause_merged_at": "...", "week": "2026-W39", "status": "linked"}],
+ "jobs": [{"id": 501, "name": "backend-test", "stage": "test", "failure_reason": "script_failure", "category": "test",
+           "rules": ["test.pytest"], "pipeline": 100, "url": "...", "created_at": "...", "week": "2026-W39"}]}
+```
+
+- `weeks`는 기간과 겹치는 모든 ISO 주를 빈 주까지 0으로 낸다. `ci_failures`는 범주 6개를 항상 모두 둔다.
+- 엄격 비율은 `strict / merged_mrs`(리포트가 계산한다). `mismatch_higher`는 불일치일 때 높은 쪽(`body`·`judge`).
+- 원자료는 번호·URL·제목·시각·주·판정·범주만 담는다. MR·이슈 본문과 로그 원문은 넣지 않는다.
+
+테스트는 `tests/test_metrics_collect.py`, API 응답 fixture는 `tests/fixtures/metrics/`(합성 데이터, 실제 호스트·Secret 없음)에 둔다.
 
 ## CI 실패 원인 분류 (`classify_ci.py`)
 
 이미 끝난 파이프라인의 job 메타데이터와 trace 파일을 읽어 실패 원인 범주를 정하는 순수 분류기다.
 네트워크로 수집하지 않는다. 수집은 아래 어댑터 명령으로 파일을 만든 뒤 넘긴다.
-M4-1 수집기도 이 모듈을 import해 쓴다.
+M4-1 수집기(`collect.py`)도 이 모듈을 import해 API로 받은 job·trace를 넘긴다.
 
 ```bash
 python bin/harness.py classify-ci --jobs jobs.json --trace-dir traces/ --out ci-failures.jsonl
