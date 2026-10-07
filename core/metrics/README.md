@@ -1,6 +1,6 @@
 # core/metrics
 
-키트의 효과를 숫자로 보이는 수집기. 로드맵 M2-6(CI 실패 분류)과 M4-1·M4-2에서 채운다.
+키트의 효과를 숫자로 보이는 수집기와 리포트. 로드맵 M2-6(CI 실패 분류)과 M4-1·M4-6·M4-2에서 채운다.
 
 수집하는 지표 (roadmap 1장). 원천은 모두 플랫폼 API다(MR lint 아티팩트는 30일에 만료되고 `plans/`는 커밋하지 않는다).
 
@@ -11,7 +11,7 @@
 | 3 | CI 실패 원인 분류 | 기간 내 실패 job과 trace → `classify_ci.py` 범주 6개 |
 | 4 | 판정 스크립트와 사람 판정의 불일치 수 | 본문 판정 ≠ 변경 파일 재판정인 병합 MR 수(MR lint `tier.mismatch`와 같은 정의) |
 
-예정 내용: `metrics report`(주간 HTML 리포트, M4-6), `notify.py`(주간 요약 발송, M4-2).
+예정 내용: `notify.py`(주간 요약 발송, M4-2).
 
 ## 수집기 (`collect.py`, `harness metrics collect`)
 
@@ -101,6 +101,48 @@ python core/metrics/collect.py --platform github --since 2026-09-01 --security-j
 - 원자료는 번호·URL·제목·시각·주·판정·범주만 담는다. MR·이슈 본문과 로그 원문은 넣지 않는다.
 
 테스트는 `tests/test_metrics_collect.py`, API 응답 fixture는 `tests/fixtures/metrics/`(합성 데이터, 실제 호스트·Secret 없음)에 둔다.
+
+## 리포트 (`report.py`, `harness metrics report`)
+
+수집기가 쓴 `metrics.json`(`version` 1)을 읽어 4개 지표의 주별 추세와 이번 주 요약, 원자료 표를 정적 HTML 한 파일로 쓴다.
+표준 라이브러리만 쓰고 다른 키트 모듈을 import하지 않아 소비자 CI에서 `python report.py ...`로 단독 실행할 수 있다(네트워크 없음).
+
+```bash
+python bin/harness.py metrics report --in metrics.json --out report.html
+python core/metrics/report.py --in metrics.json --out report.html --title "냠냠코치 측정 리포트"
+```
+
+| 옵션 | 기본 | 설명 |
+| --- | --- | --- |
+| `--in` | `metrics.json` | 수집기 출력(`version` 1). 50 MB 상한 |
+| `--out` | `report.html` | 출력 HTML. 임시 파일에 쓴 뒤 교체한다(실패하면 기존 파일을 남긴다) |
+| `--title` | `<project> 측정 리포트` | 문서 제목 |
+
+내용
+
+- 머리: 제목, 프로젝트·플랫폼·기간·생성 시각·주 수(시각은 `window.utc_offset` 기준)
+- 이번 주 요약: 마지막 주의 4개 지표와 직전 주 대비 증감(`+1`·`-2`·`±0`, 비율은 `%p`, 주가 하나면 `-`). 마지막 주 시작일부터
+  7일이 기간 끝(`window.until`)보다 뒤면 "(진행 중)"을 붙인다. 엄격 비율은 병합 MR이 없는 주면 `-`
+- 그래프 4개(인라인 SVG)와 바로 뒤에 같은 값의 표: 지표 1 막대(병합 후 누락·원인 미연결), 지표 2 선(엄격 비율 %,
+  점마다 `strict/merged_mrs`), 지표 3 누적 막대(범주 6개 고정 순서·고정 색·범례), 지표 4 막대(판정 불일치).
+  x축은 ISO 주와 시작일, y축은 0부터(최소 1). 값 라벨을 그려 색만으로 구분하지 않는다
+- 원자료: `<details>`로 접은 MR(번호·제목·병합 시각·주·본문/재판정/유효 판정·불일치·통합 여부)·결함·job 표. 번호·id는 링크
+- `weeks`가 비면 그래프 대신 "데이터 없음"
+
+제약과 보안
+
+- 외부 스크립트·CDN·폰트·이미지 없음(`<script>` 없음, 인라인 `<style>`만). 사내망·오프라인에서 열린다
+- XHTML 호환(모든 태그를 닫고 void 요소는 self-closing). 테스트가 `xml.etree`로 파싱해 구조를 검사한다
+- 입력 문자열은 모두 `html.escape(quote=True)`. 링크는 URL 스킴이 `http`·`https`일 때만 `<a href>`, 아니면 텍스트만
+- 숫자 필드가 없거나 숫자가 아니면 0, 문자열 필드가 아니면 빈 값. `mrs`·`defects`·`jobs`·`window`는 없어도 렌더한다
+
+종료 코드: 성공 0, 오류 2(입력 파일 없음·JSON 아님·최상위가 객체가 아님·`version`이 1이 아님·`weeks`가 목록이 아님·출력 실패).
+오류 메시지에는 파일 경로만 넣고 입력 내용은 옮기지 않는다.
+
+CI 아티팩트 게시(`expire_in` 90일·`expose_as`)와 주간 요약 메시지의 리포트 링크는 M4-2 조각(`core/ci/gitlab/metrics.yml`)에서 다룬다.
+
+테스트는 `tests/test_metrics_report.py`, 입력 fixture는 `tests/fixtures/metrics/report-sample.json`(합성 데이터, 실제 호스트 없음).
+수집기 fixture로 `collect`를 돌린 결과를 그대로 렌더하는 계약 테스트가 두 스키마를 맞춘다.
 
 ## CI 실패 원인 분류 (`classify_ci.py`)
 
