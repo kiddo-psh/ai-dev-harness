@@ -21,6 +21,8 @@
                                [--out metrics.json] [--api-url ..] [--project ..] [--utc-offset +09:00] ..
                                              # 플랫폼 API에서 병합 MR·결함 이슈·실패 job을 읽어 주별 지표 JSON 생성
                                              # (토큰은 HARNESS_METRICS_TOKEN, GitHub는 없으면 GITHUB_TOKEN)
+    python bin/harness.py metrics report [--in metrics.json] [--out report.html] [--title ..]
+                                             # 수집 JSON으로 4개 지표의 주별 추세·이번 주 요약·원자료를 담은 정적 HTML 생성(오프라인)
     python bin/harness.py lint-plans [<key>] [--target <dir> | --self]
                                              # plans/의 플랜·리뷰 파일 검사(실패 1, 경고만이면 0)
     python bin/harness.py version
@@ -156,6 +158,11 @@ _CLASSIFY_SPEC.loader.exec_module(classify_ci)
 _COLLECT_SPEC = importlib.util.spec_from_file_location("harness_metrics_collect", METRICS_DIR / "collect.py")
 metrics_collect = importlib.util.module_from_spec(_COLLECT_SPEC)
 _COLLECT_SPEC.loader.exec_module(metrics_collect)
+
+# 주간 HTML 리포트(M4-6). 수집기처럼 소비자 CI에서 단독 실행하는 스크립트라 명령은 감싸기만 한다
+_REPORT_SPEC = importlib.util.spec_from_file_location("harness_metrics_report", METRICS_DIR / "report.py")
+metrics_report = importlib.util.module_from_spec(_REPORT_SPEC)
+_REPORT_SPEC.loader.exec_module(metrics_report)
 
 # `.gitignore`의 `/plans/` 판단은 CI의 MR 본문 lint(대상에 복사되는 모듈)와 같은 규칙을 쓴다
 _MR_LINT_SPEC = importlib.util.spec_from_file_location("harness_mr_lint", CI_DIR / "mr-lint" / "mr_lint.py")
@@ -1238,6 +1245,15 @@ def cmd_metrics_collect(args) -> int:
     return 0
 
 
+def cmd_metrics_report(args) -> int:
+    try:
+        result = metrics_report.run(args)
+    except metrics_report.ReportError as exc:
+        raise HarnessError(f"리포트 생성 실패: {exc}") from None
+    print(metrics_report.summary(result, args.out), file=sys.stderr)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # 플랜·리뷰 파일 lint (M2-3). 절 목록과 자리표시자는 템플릿에서 읽어 템플릿 변경을 따라간다
 # ---------------------------------------------------------------------------
@@ -1556,11 +1572,14 @@ def main(argv: list[str] | None = None) -> int:
     classify.add_argument("--out", help="JSONL 출력 파일. 생략하면 표준 출력")
     classify.set_defaults(func=cmd_classify_ci)
 
-    metrics = sub.add_parser("metrics", help="측정 지표를 수집한다")
+    metrics = sub.add_parser("metrics", help="측정 지표를 수집하고 리포트를 만든다")
     metrics_sub = metrics.add_subparsers(dest="metrics_command", required=True)
     collect = metrics_sub.add_parser("collect", help="플랫폼 API에서 주별 지표와 원자료를 JSON으로 모은다")
     metrics_collect.add_arguments(collect)
     collect.set_defaults(func=cmd_metrics_collect)
+    report = metrics_sub.add_parser("report", help="수집 JSON으로 주간 HTML 리포트를 만든다(오프라인)")
+    metrics_report.add_arguments(report)
+    report.set_defaults(func=cmd_metrics_report)
 
     lint_plans = sub.add_parser("lint-plans", help="plans/의 플랜·리뷰 파일을 템플릿 기준으로 검사한다")
     lint_plans.add_argument("key", nargs="?", help="이 키의 플랜·리뷰만 검사(생략하면 plans/ 전체)")

@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "platform": "gitlab",
+  "project": "group/demo",
+  "window": {
+    "since": "2026-09-14T00:00:00+09:00",
+    "until": "2026-10-01T12:00:00+09:00",
+    "utc_offset": "+09:00"
+  },
+  "generated_at": "2026-10-01T12:05:00+09:00",
+  "weeks": [
+    {
+      "week": "2026-W38",
+      "start": "2026-09-14",
+      "merged_mrs": 0,
+      "strict": 0,
+      "mismatch": 0,
+      "escaped_defects": 0,
+      "unlinked_defects": 1,
+      "ci_failures": {"test": 1, "format": 0, "infra": 0, "timeout": 0, "security": 0, "unclassified": 0}
+    },
+    {
+      "week": "2026-W39",
+      "start": "2026-09-21",
+      "merged_mrs": 3,
+      "strict": 1,
+      "mismatch": 1,
+      "escaped_defects": 1,
+      "unlinked_defects": 0,
+      "ci_failures": {"test": 2, "format": 1, "infra": 0, "timeout": 1, "security": 0, "unclassified": 0}
+    },
+    {
+      "week": "2026-W40",
+      "start": "2026-09-28",
+      "merged_mrs": 1,
+      "strict": 1,
+      "mismatch": 0,
+      "escaped_defects": 1,
+      "unlinked_defects": 0,
+      "ci_failures": {"test": 0, "format": 0, "infra": 1, "timeout": 0, "security": 0, "unclassified": 1}
+    }
+  ],
+  "mrs": [
+    {
+      "number": 21,
+      "title": "feat: 로그인 화면 <script>alert(1)</script>",
+      "url": "https://gitlab.example/group/demo/-/merge_requests/21",
+      "merged_at": "2026-09-22T10:00:00+09:00",
+      "week": "2026-W39",
+      "source_branch": "feat/21-login",
+      "target_branch": "develop",
+      "integration": false,
+      "files": 4,
+      "tier": {"body": "lite", "judge": "strict", "effective": "strict", "mismatch": true},
+      "mismatch_higher": "judge"
+    },
+    {
+      "number": 22,
+      "title": "docs: 가이드 갱신",
+      "url": "javascript:alert(1)",
+      "merged_at": "2026-09-23T09:30:00+09:00",
+      "week": "2026-W39",
+      "source_branch": "docs/22-guide",
+      "target_branch": "develop",
+      "integration": false,
+      "files": 1,
+      "tier": {"body": "standard", "judge": "standard", "effective": "standard", "mismatch": false},
+      "mismatch_higher": null
+    },
+    {
+      "number": 23,
+      "title": "chore: 의존성 정리",
+      "url": null,
+      "merged_at": "2026-09-25T18:00:00+09:00",
+      "week": "2026-W39",
+      "source_branch": "chore/23-deps",
+      "target_branch": "develop",
+      "integration": false,
+      "files": 2,
+      "tier": {"body": "lite", "judge": "lite", "effective": "lite", "mismatch": false},
+      "mismatch_higher": null
+    },
+    {
+      "number": 24,
+      "title": "feat: 결제 승인 API",
+      "url": "https://gitlab.example/group/demo/-/merge_requests/24",
+      "merged_at": "2026-09-29T11:00:00+09:00",
+      "week": "2026-W40",
+      "source_branch": "feat/24-payment",
+      "target_branch": "develop",
+      "integration": false,
+      "files": 6,
+      "tier": {"body": "strict", "judge": "strict", "effective": "strict", "mismatch": false},
+      "mismatch_higher": null
+    }
+  ],
+  "defects": [
+    {
+      "kind": "issue",
+      "number": 40,
+      "title": "로그인 세션 만료 처리 누락",
+      "url": "https://gitlab.example/group/demo/-/issues/40",
+      "created_at": "2026-09-29T09:00:00+09:00",
+      "cause": 21,
+      "cause_merged_at": "2026-09-22T10:00:00+09:00",
+      "week": "2026-W39",
+      "status": "linked"
+    },
+    {
+      "kind": "issue",
+      "number": 41,
+      "title": "원인 미기재 결함",
+      "url": "https://gitlab.example/group/demo/-/issues/41",
+      "created_at": "2026-09-16T14:00:00+09:00",
+      "cause": null,
+      "cause_merged_at": null,
+      "week": "2026-W38",
+      "status": "unlinked"
+    },
+    {
+      "kind": "mr",
+      "number": 30,
+      "title": "fix: 결제 승인 알림 누락",
+      "url": "https://gitlab.example/group/demo/-/merge_requests/30",
+      "created_at": "2026-09-30T10:00:00+09:00",
+      "cause": 24,
+      "cause_merged_at": "2026-09-29T11:00:00+09:00",
+      "week": "2026-W40",
+      "status": "linked"
+    }
+  ],
+  "jobs": [
+    {
+      "id": 501,
+      "name": "backend-test",
+      "stage": "test",
+      "failure_reason": "script_failure",
+      "category": "test",
+      "rules": ["test.gradle"],
+      "pipeline": 100,
+      "url": "https://gitlab.example/group/demo/-/jobs/501",
+      "created_at": "2026-09-23T08:00:00+09:00",
+      "week": "2026-W39"
+    },
+    {
+      "id": 502,
+      "name": "frontend-lint",
+      "stage": "test",
+      "failure_reason": "script_failure",
+      "category": "format",
+      "rules": ["format.eslint"],
+      "pipeline": 101,
+      "url": "https://gitlab.example/group/demo/-/jobs/502",
+      "created_at": "2026-09-24T08:00:00+09:00",
+      "week": "2026-W39"
+    },
+    {
+      "id": 503,
+      "name": "deploy",
+      "stage": "deploy",
+      "failure_reason": "runner_system_failure",
+      "category": "infra",
+      "rules": [],
+      "pipeline": 102,
+      "url": "https://gitlab.example/group/demo/-/jobs/503",
+      "created_at": "2026-09-29T08:00:00+09:00",
+      "week": "2026-W40"
+    }
+  ]
+}
