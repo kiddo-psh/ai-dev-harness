@@ -1,0 +1,60 @@
+{
+  "merge_requests": [
+    {"iid": 10, "title": "표준 MR", "web_url": "https://gitlab.example/demo/-/merge_requests/10",
+     "merged_at": "2026-09-22T01:00:00.000Z", "source_branch": "feat/10", "target_branch": "develop",
+     "description": "## 판정\n\n- 표준 — 기능 코드\n\n## 검증\n\n- 방법: unittest\n"},
+    {"iid": 11, "title": "본문 경량, 재판정 엄격", "web_url": "https://gitlab.example/demo/-/merge_requests/11",
+     "merged_at": "2026-09-23T02:00:00.000Z", "source_branch": "feat/11", "target_branch": "develop",
+     "description": "## 판정\n\n<!-- 예시: 엄격 -->\n- 경량 — 문서만\n"},
+    {"iid": 12, "title": "판정 절 없음", "web_url": "https://gitlab.example/demo/-/merge_requests/12",
+     "merged_at": "2026-09-24T03:00:00.000Z", "source_branch": "test/12", "target_branch": "develop",
+     "description": null},
+    {"iid": 13, "title": "Release", "web_url": "https://gitlab.example/demo/-/merge_requests/13",
+     "merged_at": "2026-09-25T04:00:00.000Z", "source_branch": "develop", "target_branch": "main",
+     "description": "통합 MR"},
+    {"iid": 9, "title": "기간 전 병합(기간 안 갱신)", "web_url": "https://gitlab.example/demo/-/merge_requests/9",
+     "merged_at": "2026-09-20T14:59:59.000Z", "source_branch": "feat/9", "target_branch": "develop",
+     "description": "## 판정\n- 엄격\n"}
+  ],
+  "mr": {
+    "3": {"iid": 3, "title": "기간 밖 원인 MR", "web_url": "https://gitlab.example/demo/-/merge_requests/3",
+          "merged_at": "2026-09-10T00:00:00.000Z", "source_branch": "feat/3", "target_branch": "develop",
+          "description": "## 판정\n- 표준\n"}
+  },
+  "diffs": {
+    "10": [{"old_path": "src/app.py", "new_path": "src/app.py"}],
+    "11": [{"old_path": "docs/guide.md", "new_path": "docs/guide.md"},
+           {"old_path": "secure/token.py", "new_path": "src/token.py"}],
+    "12": [{"old_path": "tests/test_app.py", "new_path": "tests/test_app.py"}]
+  },
+  "issues": [
+    {"iid": 40, "title": "병합 후 발견 누락", "web_url": "https://gitlab.example/demo/-/issues/40",
+     "created_at": "2026-09-25T00:00:00.000Z", "description": "재현 절차\n\n원인: !12\n"},
+    {"iid": 41, "title": "원인 미기재 결함", "web_url": "https://gitlab.example/demo/-/issues/41",
+     "created_at": "2026-09-30T00:00:00.000Z", "description": "재현 절차만 있다\n\n```\n원인: !10\n```\n"},
+    {"iid": 42, "title": "기간 밖 MR 원인", "web_url": "https://gitlab.example/demo/-/issues/42",
+     "created_at": "2026-09-26T00:00:00.000Z", "description": "원인: !3"},
+    {"iid": 43, "title": "기간 뒤에 만든 결함(원인 MR은 기간 안)", "web_url": "https://gitlab.example/demo/-/issues/43",
+     "created_at": "2026-10-06T00:00:00.000Z", "description": "원인: !11"}
+  ],
+  "labeled_mrs": [
+    {"iid": 14, "title": "결함 수정 MR(원인 MR 없음)", "web_url": "https://gitlab.example/demo/-/merge_requests/14",
+     "created_at": "2026-09-30T02:00:00.000Z", "description": "원인: !99\n"}
+  ],
+  "pipelines": [{"id": 100}, {"id": 101}],
+  "jobs": {
+    "100": [{"id": 501, "name": "backend-test", "stage": "test", "status": "failed",
+             "failure_reason": "script_failure", "created_at": "2026-09-22T05:00:00.000Z",
+             "web_url": "https://gitlab.example/demo/-/jobs/501"}],
+    "101": [{"id": 502, "name": "frontend-lint", "stage": "test", "status": "failed",
+             "failure_reason": "script_failure", "created_at": "2026-09-29T05:00:00.000Z",
+             "web_url": "https://gitlab.example/demo/-/jobs/502"},
+            {"id": 503, "name": "old-job", "stage": "test", "status": "failed",
+             "failure_reason": "script_failure", "created_at": "2026-10-05T00:00:00.000Z",
+             "web_url": "https://gitlab.example/demo/-/jobs/503"}]
+  },
+  "traces": {
+    "501": "$ pytest\nFAILED tests/test_app.py::test_save - AssertionError\n=========== 1 failed, 4 passed in 0.52s ===========\n",
+    "502": "$ npx prettier --check .\n[warn] src/app.ts\n[warn] Code style issues found in the above file. Forgot to run Prettier?\n"
+  }
+}

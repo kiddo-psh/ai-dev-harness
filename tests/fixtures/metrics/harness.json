@@ -1,0 +1,13 @@
+{
+  "harness_version": "0.2.0",
+  "project_name": "demo",
+  "platform": "gitlab",
+  "tracker": "github",
+  "issue_prefix": "",
+  "default_branch": "main",
+  "integration_branch": "develop",
+  "judge": {
+    "trigger_paths": {"strict": ["/secure/"], "standard": ["/src/"]},
+    "test_paths": ["/tests/"]
+  }
+}

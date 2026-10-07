@@ -1,0 +1,59 @@
+{
+  "pulls": [
+    {"number": 7, "title": "표준 PR", "html_url": "https://github.example/owner/demo/pull/7",
+     "merged_at": "2026-09-29T01:00:00Z", "updated_at": "2026-09-29T02:00:00Z",
+     "head": {"ref": "feat/7"}, "base": {"ref": "main"}, "body": "## 판정\n\n- standard — 기능 코드\n"},
+    {"number": 6, "title": "병합 안 된 PR", "html_url": "https://github.example/owner/demo/pull/6",
+     "merged_at": null, "updated_at": "2026-09-25T00:00:00Z",
+     "head": {"ref": "feat/6"}, "base": {"ref": "main"}, "body": ""},
+    {"number": 5, "title": "기간 전 PR", "html_url": "https://github.example/owner/demo/pull/5",
+     "merged_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-02T00:00:00Z",
+     "head": {"ref": "feat/5"}, "base": {"ref": "main"}, "body": "## 판정\n- lite\n"}
+  ],
+  "files": {
+    "7": [{"filename": "src/app.py"}, {"filename": "src/new.py", "previous_filename": "src/old.py"}]
+  },
+  "issues": [
+    {"number": 20, "title": "병합 후 발견 누락", "html_url": "https://github.example/owner/demo/issues/20",
+     "created_at": "2026-09-30T00:00:00Z", "body": "원인: #7"},
+    {"number": 19, "title": "기간 전에 만든 결함(since는 갱신 시각 기준이라 목록에 나온다)",
+     "html_url": "https://github.example/owner/demo/issues/19", "created_at": "2026-09-10T00:00:00Z", "body": "원인: #7"},
+    {"number": 8, "title": "라벨 붙은 수정 PR(원인 PR 없음)", "html_url": "https://github.example/owner/demo/pull/8",
+     "pull_request": {"url": "https://api.github.example/repos/owner/demo/pulls/8"},
+     "created_at": "2026-09-30T01:00:00Z", "body": "원인: #99"}
+  ],
+  "runs": [
+    {"id": 900, "conclusion": "failure", "run_attempt": 1, "created_at": "2026-09-29T03:00:00Z"},
+    {"id": 901, "conclusion": "success", "run_attempt": 1, "created_at": "2026-09-29T04:00:00Z"},
+    {"id": 902, "conclusion": "cancelled", "run_attempt": 1, "created_at": "2026-09-30T03:00:00Z"},
+    {"id": 903, "conclusion": "success", "run_attempt": 2, "created_at": "2026-10-01T03:00:00Z"}
+  ],
+  "jobs": {
+    "900": [
+      {"id": 1, "name": "sast", "status": "completed", "conclusion": "failure",
+       "html_url": "https://github.example/owner/demo/actions/runs/900/job/1"},
+      {"id": 2, "name": "unit-test", "status": "completed", "conclusion": "timed_out",
+       "html_url": "https://github.example/owner/demo/actions/runs/900/job/2"},
+      {"id": 3, "name": "build", "status": "completed", "conclusion": "success",
+       "html_url": "https://github.example/owner/demo/actions/runs/900/job/3"}
+    ],
+    "902": [
+      {"id": 4, "name": "e2e", "status": "completed", "conclusion": "failure",
+       "html_url": "https://github.example/owner/demo/actions/runs/902/job/4"},
+      {"id": 6, "name": "lint", "status": "completed", "conclusion": "cancelled",
+       "html_url": "https://github.example/owner/demo/actions/runs/902/job/6"}
+    ],
+    "903": [
+      {"id": 5, "name": "build", "status": "completed", "conclusion": "failure",
+       "html_url": "https://github.example/owner/demo/actions/runs/903/job/5"},
+      {"id": 7, "name": "build", "status": "completed", "conclusion": "success",
+       "html_url": "https://github.example/owner/demo/actions/runs/903/job/7"}
+    ]
+  },
+  "logs": {
+    "1": "2026-09-29T03:01:00.0000000Z semgrep found 1 finding\n",
+    "2": "2026-09-29T03:01:00.0000000Z Running tests\n",
+    "4": "$ pytest\nFAILED tests/test_e2e.py::test_flow - AssertionError\n=========== 1 failed, 2 passed in 1.02s ===========\n",
+    "5": "2026-10-01T03:01:00.0000000Z Could not resolve host: registry.example\n"
+  }
+}
