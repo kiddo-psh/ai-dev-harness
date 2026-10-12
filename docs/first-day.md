@@ -135,13 +135,14 @@ python bin/harness.py judge ../my-project --base origin/main
 
 ## Runner가 없을 때
 
-Settings → CI/CD → Runners에 쓸 수 있는 Runner가 없으면 5·6·9번을 미룬다. Runner 없이 `.gitlab-ci.yml`을 넣으면 모든 MR
+Settings → CI/CD → Runners에 쓸 수 있는 Runner가 없으면 5·9번과 6번의 "Pipelines must succeed"만 미룬다. 6번의 보호 브랜치
+(기본 브랜치 직접 Push 거부)는 CI 없이도 동작하고 CI가 없는 동안 더 필요하므로 바로 설정한다. Runner 없이 `.gitlab-ci.yml`을 넣으면 모든 MR
 파이프라인이 pending으로 남고, "Pipelines must succeed"를 켜 두었다면 병합이 전부 막힌다. 키트 조각은 GitLab CI 전용이라
 Jenkins 같은 다른 CI로 가면 실행 방법을 따로 정해야 한다. 인프라가 정해질 때까지 아래로 대신한다.
 
 | CI가 하던 일 | 로컬 대체 | 확인 |
 | --- | --- | --- |
-| MR 본문 lint | MR을 올리기 전에 본문을 파일로 쓰고 `python .harness/mr-lint/mr_lint.py --body-file <본문> --base origin/main --head HEAD --no-comment` | `MR 본문 lint 통과` |
+| MR 본문 lint | MR을 올리기 전에 본문을 파일로 쓰고 `python .harness/mr-lint/mr_lint.py --body-file <본문> --base origin/main --head HEAD --no-comment --out ../mr-lint.json`(기본 출력 `mr-lint.json`은 저장소 루트에 생겨 커밋에 섞일 수 있다) | `MR 본문 lint 통과` |
 | 판정 | 키트에서 `python bin/harness.py judge ../my-project --base origin/main` | 본문 `## 판정`과 같다 |
 | 주간 측정 | 아래 명령을 주 1회 실행 | `metrics.json`·`report.html` 생성 |
 | Secret 탐지·SAST | 대체 없음. hooks의 보호 경로만 남는다 | 남은 위험으로 기록한다 |
@@ -156,7 +157,7 @@ python .harness/metrics/report.py --in ../metrics/metrics.json --out ../metrics/
 python .harness/metrics/notify.py --in ../metrics/metrics.json --dry-run
 ```
 
-Runner가 생기면 5·6·9번을 이어서 하고, 로컬 측정은 예약 파이프라인으로 넘긴다.
+Runner가 생기면 5·9번과 "Pipelines must succeed"를 이어서 하고, 로컬 측정은 예약 파이프라인으로 넘긴다.
 
 ## 첫 소비자에서 걸린 점
 
