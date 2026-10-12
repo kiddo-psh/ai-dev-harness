@@ -187,6 +187,8 @@ class GitLabCollectTest(unittest.TestCase):
                                            "mismatch": True})
         self.assertEqual(mrs[11]["mismatch_higher"], "judge")
         self.assertEqual(mrs[11]["files"], 3)  # docs/guide.md, secure/token.py(옛 경로), src/token.py
+        self.assertEqual(sorted(mrs[11]["paths"]), ["docs/guide.md", "secure/token.py", "src/token.py"])
+        self.assertNotIn("paths", mrs[13])  # 통합 MR은 변경 파일을 읽지 않는다
         self.assertEqual(mrs[10]["tier"]["effective"], "standard")
         self.assertNotIn("body", mrs[10])
         self.assertEqual(mrs[10]["hooks"], {"block": 2, "ask": 1, "verify_fail": 0})

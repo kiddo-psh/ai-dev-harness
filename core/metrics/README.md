@@ -127,6 +127,7 @@ python bin/harness.py events summary ../my-project --branch feat/ABC-12
             "hooks": {"block": 2, "ask": 1, "verify_fail": 0, "reported_mrs": 1, "unreported_mrs": 2}}],
  "mrs": [{"number": 11, "title": "...", "url": "...", "merged_at": "...", "week": "2026-W39",
           "source_branch": "feat/11", "target_branch": "develop", "integration": false, "files": 3,
+          "paths": ["docs/guide.md", "secure/token.py", "src/token.py"],
           "tier": {"body": "lite", "judge": "strict", "effective": "strict", "mismatch": true}, "mismatch_higher": "judge",
           "hooks": {"block": 2, "ask": 1, "verify_fail": 0}}],
  "defects": [{"kind": "issue", "number": 40, "title": "...", "url": "...", "created_at": "...", "cause": 12,
@@ -139,7 +140,9 @@ python bin/harness.py events summary ../my-project --branch feat/ABC-12
 - 엄격 비율은 `strict / merged_mrs`(리포트가 계산한다). `mismatch_higher`는 불일치일 때 높은 쪽(`body`·`judge`).
 - `hooks`(M4-7에서 추가, `version`은 1 그대로)는 주마다 항상 있고, MR에서는 미보고·통합 MR이면 `null`이다.
   `reported_mrs + unreported_mrs = merged_mrs`. 리포트·발송은 `hooks`가 없는 옛 JSON도 0으로 렌더한다.
-- 원자료는 번호·URL·제목·시각·주·판정·범주만 담는다. MR·이슈 본문과 로그 원문은 넣지 않는다.
+- 원자료는 번호·URL·제목·시각·주·판정·범주와 MR 변경 파일 경로(`paths`)·hooks 수만 담는다. MR·이슈 본문과 로그 원문은 넣지 않는다.
+- `paths`는 재판정에 쓴 옛·새 경로다(통합 MR에는 없다). `harness metrics cases`가 이 경로로 판정 eval 사례 후보를 만든다
+  ([`docs/install.md`](../../docs/install.md) 3.4). `paths` 이전에 수집한 파일은 사례 후보에서 빠진다.
 
 테스트는 `tests/test_metrics_collect.py`, API 응답 fixture는 `tests/fixtures/metrics/`(합성 데이터, 실제 호스트·Secret 없음)에 둔다.
 
