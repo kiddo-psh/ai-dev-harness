@@ -314,6 +314,18 @@ class MattermostTest(unittest.TestCase):
         self.assertNotIn(PASSWORD, err)
         self.assertNotIn(SESSION, err)
 
+        # 팀·채널 조회 응답에 id가 없으면 변수 이름만 안내하고 팀·채널 이름 값은 쓰지 않는다
+        for index, name in ((1, "HARNESS_MATTERMOST_TEAM"), (2, "HARNESS_MATTERMOST_CHANNEL")):
+            transport = mattermost_transport()
+            method, pattern, _handler = transport.routes[index]
+            transport.routes[index] = (method, pattern, lambda call, _name: json_response(200, {}))
+            code, _out, err = run_notify(["--in", str(SAMPLE)], MATTERMOST_ENV, transport)
+            self.assertEqual(code, 2)
+            self.assertIn(name, err)
+            self.assertNotIn(MATTERMOST_ENV["HARNESS_MATTERMOST_TEAM"], err)
+            self.assertNotIn(MATTERMOST_ENV["HARNESS_MATTERMOST_CHANNEL"], err)
+            self.assertEqual(transport.paths()[-1], "/api/v4/users/logout")
+
         transport = mattermost_transport(logout_status=500)
         code, out, err = run_notify(["--in", str(SAMPLE)], MATTERMOST_ENV, transport)
         self.assertEqual(code, 0, err)

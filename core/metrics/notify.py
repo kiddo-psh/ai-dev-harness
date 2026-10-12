@@ -307,12 +307,12 @@ class MattermostClient:
         team = self.parse(self.api("GET", f"/api/v4/teams/name/{urllib.parse.quote(team_name, safe='')}", token))
         team_id = team.get("id") if isinstance(team, dict) else None
         if not isinstance(team_id, str) or not team_id:
-            raise NotifyError(f"Mattermost 팀 ID를 확인하지 못했다: {team_name}")
+            raise NotifyError(f"Mattermost 팀 ID를 확인하지 못했다({MATTERMOST_TEAM_ENV} 값을 확인한다).")
         channel = self.parse(self.api("GET", f"/api/v4/teams/{urllib.parse.quote(team_id, safe='')}/channels/name/"
                                              f"{urllib.parse.quote(channel_name, safe='')}", token))
         channel_id = channel.get("id") if isinstance(channel, dict) else None
         if not isinstance(channel_id, str) or not channel_id:
-            raise NotifyError(f"Mattermost 채널 ID를 확인하지 못했다: {channel_name}")
+            raise NotifyError(f"Mattermost 채널 ID를 확인하지 못했다({MATTERMOST_CHANNEL_ENV} 값을 확인한다).")
         return channel_id
 
     def post(self, token: str, channel_id: str, message: str) -> str:
