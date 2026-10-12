@@ -129,7 +129,7 @@ class KitSeedEvalTest(unittest.TestCase):
         ids = [int(case["id"].removeprefix("pr-")) for case in cases]
         self.assertEqual(ids, sorted(set(ids)))  # PR 번호 순, 중복 없음
         for case in cases:
-            self.assertLessEqual(set(case), {"id", "paths", "expected", "source"})
+            self.assertLessEqual(set(case), {"id", "paths", "expected", "source", "note"})
             self.assertIn(case["expected"], ("lite", "standard"))
 
 
