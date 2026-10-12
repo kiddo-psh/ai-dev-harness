@@ -462,7 +462,7 @@ Claude Code는 저장소의 `.claude/settings.json`·`.claude/settings.local.jso
 | hooks가 막은 횟수 | `hook_execution_complete` 이벤트의 `num_blocking` | hooks 기록 `.git/harness/events.jsonl`(worktree별, [hooks](../core/hooks/README.md)) |
 | hooks가 켜져 있는지 | 세션 시작 때 hook마다 `hook_registered` 이벤트. 키트 hook(`protect-paths`·`stop-verify`)의 등록이 없는 세션은 hooks가 꺼졌거나 설치되지 않은 세션으로 본다 | 직접 알 수 없다(9절의 `friction` 이슈) |
 | 도구 사용을 누가 허용·거부했나 | `tool_decision` 이벤트의 `decision`(accept·reject)과 `source`(`config`·`hook`·`user_*`) | 없음 |
-| 비용·토큰·변경 줄 수·커밋·PR 수 | `claude_code.cost.usage`·`token.usage`·`lines_of_code.count`·`commit.count`·`pull_request.count` 지표 | 없음 |
+| 비용·토큰·변경 줄 수·커밋·PR 수 | `claude_code.cost.usage`·`claude_code.token.usage`·`claude_code.lines_of_code.count`·`claude_code.commit.count`·`claude_code.pull_request.count` 지표 | 없음 |
 | 병합 후 누락, 엄격 비율, CI 실패, 판정 불일치 | 없음 | `harness metrics`(플랫폼 API) |
 
 텔레메트리는 세션 단위 사실(무엇이 실행되고 막혔나)을, 키트 지표는 병합 단위 결과(무엇이 새어 나갔나)를 본다.
@@ -476,10 +476,11 @@ Claude Code는 저장소의 `.claude/settings.json`·`.claude/settings.local.jso
 | 변수 | 켜면 추가되는 것 |
 | --- | --- |
 | `OTEL_LOG_USER_PROMPTS` | 프롬프트 원문 |
-| `OTEL_LOG_ASSISTANT_RESPONSES` | 응답 원문 |
+| `OTEL_LOG_ASSISTANT_RESPONSES` | 응답 원문. **지정하지 않으면 `OTEL_LOG_USER_PROMPTS`를 따른다** |
 | `OTEL_LOG_TOOL_DETAILS` | Bash 명령, 파일 경로, 도구 입력, hook matcher |
 | `OTEL_LOG_RAW_API_BODIES` | API 요청·응답 전체 |
 
+프롬프트만 승인받았으면 `OTEL_LOG_ASSISTANT_RESPONSES=0`을 함께 둔다. 그러지 않으면 응답 원문(응답이 옮긴 코드·Secret 포함)도 나간다.
 프롬프트와 명령에는 붙여 넣은 Secret이 섞일 수 있다. 켠 상태에서 Secret이 노출되면 Secret 규칙의 노출 대응 절차를 따른다.
 OAuth로 로그인하면 사용자 이메일이 속성으로 붙는다(설정한 수집기로만 간다). 수집기 접근 권한을 팀 밖으로 넓히지 않는다.
 
