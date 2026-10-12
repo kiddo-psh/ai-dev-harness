@@ -50,6 +50,8 @@ git switch -c <type>/<KEY>-<description>
 3. 최신 `origin/{{integration_branch}}`을 rebase로 반영하고 충돌 여부를 확인한다.
 4. 불필요한 디버깅 코드와 생성 파일이 포함되지 않았는지 확인한다.
 5. {{pr_noun}}이 하나의 목적을 가지며 [Git 컨벤션의 크기 기준](./git-convention.md)을 충족하는지 확인한다.
+6. 작업한 worktree에서 키트의 `harness events summary`를 실행해 출력을 {{pr_noun}} 본문 `## hooks 기록` 절에 붙인다.
+   hooks가 이 브랜치에서 막은 편집과 종료 검증 실패 수이며, 측정 수집기가 읽는다.
 
 ```bash
 git fetch origin
