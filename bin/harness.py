@@ -1395,7 +1395,10 @@ def cmd_metrics_cases(args) -> int:
     cases, skipped = metrics_cases(data)
     output = "".join(json.dumps(case, ensure_ascii=False) + "\n" for case in cases)
     if args.out:
-        write_text(Path(args.out), output)
+        try:
+            metrics_collect.write_atomic(Path(args.out), output)  # 실패하면 기존 파일을 남긴다
+        except OSError as exc:
+            raise HarnessError(f"사례 파일을 쓸 수 없다: {args.out}: {exc.strerror or exc}") from None
     else:
         sys.stdout.write(output)
     unlabeled = sum(case["expected"] is None for case in cases)

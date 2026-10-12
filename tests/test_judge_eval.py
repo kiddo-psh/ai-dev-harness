@@ -180,6 +180,17 @@ class MetricsCasesTest(EvalTestBase):
         self.assertEqual(code, 2)
         self.assertIn("JSON이 아니다", err)
 
+    def test_out_failure_keeps_existing_file(self):
+        existing = self.tmp / "cases.jsonl"
+        existing.write_text("old\n", encoding="utf-8")
+        blocker = self.tmp / "file"
+        blocker.write_text("", encoding="utf-8")
+        code, _, err = run(["metrics", "cases", "--in", str(self.metrics([])), "--out", str(blocker / "x.jsonl")])
+        self.assertEqual(code, 2)  # 트레이스백 대신 harness 오류
+        self.assertIn("사례 파일을 쓸 수 없다", err)
+        code, _, _ = run(["metrics", "cases", "--in", str(self.metrics([])), "--out", str(existing)])
+        self.assertEqual((code, existing.read_text(encoding="utf-8")), (0, ""))  # 교체로 쓴다
+
 
 if __name__ == "__main__":
     unittest.main()
