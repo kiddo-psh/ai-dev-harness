@@ -304,6 +304,10 @@ class HooksTest(unittest.TestCase):
         self.assertIsNone(j.hooks(body("## 검증", "", *full)))  # 다른 절
         self.assertIsNone(j.hooks(body("## hooks 기록", "- 차단(block): 많음", *full[1:])))
         self.assertEqual(j.hooks(body("## hooks 기록", *full, "- 차단(block): 9"))["block"], 3)  # 처음 값
+        huge = "- 차단(block): " + "9" * 5000  # int 자릿수 상한(4300)을 넘는 값도 예외 없이 미보고
+        self.assertIsNone(j.hooks(body("## hooks 기록", huge, *full[1:])))
+        self.assertEqual(j.hooks(body("## hooks 기록", "- 차단(block): 999999", *full[1:]))["block"], 999999)
+        self.assertIsNone(j.hooks(body("## hooks 기록", "- 차단(block): 1000000", *full[1:])))
 
 
 class DefectTest(unittest.TestCase):

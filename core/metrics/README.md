@@ -87,6 +87,7 @@ python core/metrics/collect.py --platform github --since 2026-09-01 --security-j
 hooks는 보호 경로 판정(`block`·`ask`)과 종료 검증 실패를 각 worktree의 `.git/harness/events.jsonl`에 남긴다
 ([`core/hooks/README.md`](../hooks/README.md)). 이 파일은 개인 PC에만 있으므로 MR을 만들기 전에 작업한 worktree에서
 요약을 만들어 MR 본문에 붙이고, 수집기는 병합 MR 본문에서 그 수를 읽는다.
+수집기는 병합된 본문만 읽으므로, 리뷰를 반영한 뒤 병합 직전에 다시 실행해 절을 바꾼다(MR을 연 뒤의 개입이 빠지지 않게).
 
 ```bash
 python bin/harness.py events summary ../my-project            # 현재 브랜치. 키트 자신은 --self
@@ -109,7 +110,7 @@ python bin/harness.py events summary ../my-project --branch feat/ABC-12
 - 종료 검증 실패는 `stop-verify`의 `fail` 기록 수다(보류 뒤 다시 실패한 기록 포함)
 - 수집기는 주석·코드 블록을 지운 `## hooks 기록` 절에서 `차단(block): N`·`확인(ask): N`·`종료 검증 실패: N` 세 줄을 모두 찾아야
   보고로 본다(목록 기호·전각 쌍점 허용, 같은 줄이 또 나오면 처음 값). 절이 없거나, 템플릿의 "기록 없음"이거나, 세 줄 중 하나라도
-  없으면 미보고다. 규칙 줄은 읽지 않는다
+  없으면 미보고다. 수는 6자리(999999)까지만 읽고 그보다 긴 값은 미보고로 본다(본문은 신뢰할 수 없는 입력). 규칙 줄은 읽지 않는다
 - 미보고 MR 수는 hooks를 끄고 작업했거나 절차를 건너뛴 MR의 대리 지표다. hooks를 끈 사실 자체는 기록이 없어 알 수 없다
 - 본문에 손으로 쓴 수도 그대로 센다. 요약은 자기 신고이며 검증하지 않는다
 - 통합 MR은 다른 지표처럼 읽지 않는다. MR lint는 이 절을 검사하지 않는다(필수가 아니다)

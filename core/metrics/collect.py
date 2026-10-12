@@ -69,7 +69,8 @@ DATE_FORMAT = re.compile(r"^\d{4}-\d\d-\d\d$")
 GITHUB_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HOOKS_SECTION = "hooks 기록"
 HOOKS_LABELS = {"block": "차단(block)", "ask": "확인(ask)", "verify_fail": "종료 검증 실패"}  # 본문 줄 순서
-HOOKS_LINE = re.compile(r"^(차단\(block\)|확인\(ask\)|종료 검증 실패)\s*[:：]\s*(\d+)\s*$")
+# 본문은 신뢰할 수 없는 입력이다. 자릿수를 제한해 int 변환 오류(자릿수 상한)와 그래프 계산 넘침을 막는다
+HOOKS_LINE = re.compile(r"^(차단\(block\)|확인\(ask\)|종료 검증 실패)\s*[:：]\s*(\d{1,6})\s*$")
 
 _CLASSIFY_SPEC = importlib.util.spec_from_file_location("harness_metrics_classify_ci",
                                                         Path(__file__).resolve().parent / "classify_ci.py")
