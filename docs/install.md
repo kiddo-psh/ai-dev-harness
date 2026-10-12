@@ -359,7 +359,9 @@ GitLab이면 다음도 걷어낸다.
 - `.harness/mr-lint/`, `.harness/metrics/`(키트가 복사한 실행 코드). `.harness/templates/`는 팀이 만든 템플릿이라 따로 판단한다
 - 측정 예약 파이프라인: Build → Pipeline schedules의 스케줄을 지운다. `include`만 빼고 스케줄을 남기면 job 없는 파이프라인이 매주 실패한다
 - CI 변수: Settings → CI/CD → Variables의 `HARNESS_*` 변수를 지우고, 그 변수에 넣은 프로젝트 액세스 토큰을 폐기한다
-- 이미 만들어진 `metrics.json`·`report.html` 아티팩트는 90일 뒤 만료된다. 바로 지우려면 Build → Artifacts에서 지운다
+- 이미 만들어진 `metrics.json`·`report.html` 아티팩트를 지운다. 대부분 90일 뒤 만료되지만, GitLab 기본 설정(Settings → CI/CD →
+  Artifacts의 "Keep artifacts from most recent successful jobs")은 브랜치의 마지막 성공 파이프라인 아티팩트를 `expire_in`과 무관하게
+  남긴다. 마지막 예약 실행의 아티팩트는 Build → Artifacts에서 직접 지우거나 이 설정을 끈다
 
 `.gitignore`의 `/plans/` 줄은 남겨 둬도 된다.
 

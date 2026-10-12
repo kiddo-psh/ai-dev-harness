@@ -6,7 +6,8 @@
 명령은 clone한 키트 디렉터리에서 실행하고 대상 저장소 경로를 인자로 준다(설치 가이드 1장). 예시의 대상 경로는
 `../my-project`다.
 
-GitLab 프로젝트를 기준으로 썼다. GitHub 저장소는 1~4번과 8번만 해당한다(CI 조각은 GitLab 전용, 설치 가이드 5장).
+GitLab 프로젝트를 기준으로 썼다. GitHub 저장소는 1~4번과 8번의 로컬 `harness judge`만 해당한다. CI 조각과 MR 본문 lint는
+GitLab 전용이고 GitHub용 workflow는 키트가 만들지 않는다(설치 가이드 5장).
 
 ## 체크리스트
 
@@ -60,9 +61,13 @@ python3 --version
 
 ```bash
 cd ../my-project
+git status --short
 git add .
 git commit -m "chore: ai-dev-harness 적용"
 ```
+
+- `git add .` 전에 `git status`를 본다. `.claude/settings.local.json`(개인 권한·설정)이 보이면 먼저 `.gitignore`에 넣는다.
+  `init`은 `.gitignore`에 `/plans/`만 추가한다
 
 - `.claude/settings.json`과 `.claude/hooks/`는 커밋한다. 개인 설정 `.claude/settings.local.json`은 커밋하지 않는다
 - `docs/README.md`·`AGENTS.md` 같은 생성 파일에 프로젝트 내용을 직접 쓰지 않는다. 다음 `init --force`가 덮어쓴다.
