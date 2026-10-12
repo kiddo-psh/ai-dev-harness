@@ -441,10 +441,13 @@ def git_state_path(project: Path, name: str) -> Path | None:
 
 
 def current_branch(project: Path) -> str | None:
-    """현재 브랜치 이름. detached HEAD나 git 오류면 None."""
-    out = git(project, "rev-parse", "--abbrev-ref", "HEAD")
+    """현재 브랜치 이름. detached HEAD나 git 오류면 None.
+
+    첫 커밋 전(unborn HEAD)에도 이름을 내도록 `rev-parse --abbrev-ref` 대신 `symbolic-ref`를 쓴다.
+    """
+    out = git(project, "symbolic-ref", "-q", "--short", "HEAD")
     name = out.strip() if out else ""
-    return name if name and name != "HEAD" else None
+    return name or None
 
 
 def log_event(project: Path, record: dict) -> None:

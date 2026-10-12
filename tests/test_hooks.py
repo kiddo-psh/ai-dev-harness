@@ -242,6 +242,14 @@ class ProtectPathsTest(ProtectPathsCase):
         self.assertEqual(detached.returncode, 2)
         self.assertIn("--branch", detached.stderr.decode("utf-8"))
 
+    def test_event_branch_before_first_commit(self):
+        """첫 커밋 전(unborn HEAD)에도 기록에 초기 브랜치가 남는다(빈 저장소 부트스트랩)."""
+        git(self.project, "init", "-q", "-b", "main")
+        self.assertEqual(common.current_branch(self.project), "main")
+        self.edit(self.project / "package-lock.json")
+        event = json.loads(git_path(self.project, "events.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(event["branch"], "main")
+
     def test_log_failure_does_not_change_decision(self):
         self.init_git()
         blocker = git_path(self.project, "events.jsonl").parent
