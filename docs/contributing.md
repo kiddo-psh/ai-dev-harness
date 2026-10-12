@@ -67,7 +67,9 @@ Conventional Commits를 쓴다. Scope는 변경 영역이다.
 한 번에 본다.
 
 이 표를 경로 규칙으로 옮긴 것이 `harness.json`의 `judge`다(`harness judge --self`). 표를 고치면 `judge`와
-`tests/test_judge.py`의 `KitSelfJudgeTest` 기대값을 같이 고친다. 이 테스트는 대표 경로의 판정, 모든 엄격 규칙의 사용,
+`tests/test_judge.py`의 `KitSelfJudgeTest` 기대값을 같이 고친다. 키트 PR 이력에서 본문 판정과 재판정이 일치한 사례
+(`tests/fixtures/judge-eval/kit.jsonl`, `python bin/harness.py judge --self --eval tests/fixtures/judge-eval/kit.jsonl`)도
+다시 돌린다. 판정이 바뀐 사례는 다시 생성해 덮지 말고 사례마다 새 판정이 맞는지 검토한 뒤 고친다. 이 테스트는 대표 경로의 판정, 모든 엄격 규칙의 사용,
 엄격 대상 디렉터리(`core/hooks/`, `core/ci/gitlab/`, `.github/`)의 새 파일에 판정이 적혀 있는지를 본다. 표 문구 자체의
 변경은 잡지 못하므로 사람이 맞춘다. 경로로 판정할 수 없는 조건(hooks 공통 코드의 차단 로직 여부, `ci.yml`의 보안 리허설 단계,
 소비자 계약 파괴)은 사람 확인 목록으로 나온다.
