@@ -8,6 +8,7 @@ AI 코딩 세션(Claude Code)에 거는 하드 가드레일. `init`이 대상 �
 | `settings.template.json` | `.claude/settings.json` | hook 등록. `{{hook_python}}`만 치환한다 |
 | `protect-paths.py` | `.claude/hooks/` | PreToolUse. 보호 경로를 고치려는 `Edit`·`Write`·`MultiEdit`·`NotebookEdit`를 거부하거나 사용자 확인으로 돌린다 |
 | `stop-verify.py` | `.claude/hooks/` | Stop. 응답을 끝내기 전에 바뀐 영역의 검증 명령을 실행한다 |
+| `session-start.py` | `.claude/hooks/` | SessionStart. 세션 시작 `HEAD`를 종료 검증 기준선으로 남긴다. 아무것도 출력하지 않는다 |
 | `harness_common.py` | `.claude/hooks/` | 공통 코드. 키트의 `bin/harness.py`도 이 파일로 `hooks` 설정을 검사한다 |
 
 `.claude/settings.json`은 키트가 생성하는 파일이다. 손으로 고치면 `check`가 불일치로 보고한다.
@@ -53,7 +54,12 @@ AI 코딩 세션(Claude Code)에 거는 하드 가드레일. `init`이 대상 �
   더 강한 결정을 따른다. 보호 대상 이름이 링크여도, 링크된 디렉터리를 거쳐 보호 파일에 닿아도 걸린다.
   자기 보호 경로는 실제 위치와도 비교한다. `.claude`나 `.claude/hooks`가 링크이면 그 대상 경로로 직접 써도 걸리고,
   보호 파일의 하드링크를 다른 이름으로 써도 걸린다. 그 밖의 규칙에는 하드링크 판정을 하지 않는다.
-- 종료 검증은 작업 트리에 변경이 없으면 아무것도 하지 않는다. 프로젝트가 git 최상위의 하위 디렉터리면 프로젝트 안의
+- 종료 검증 대상은 작업 트리의 미커밋 변경과, 세션 시작 기준선 이후 커밋된 변경(이름 변경은 옛·새 경로 둘 다)이다.
+  세션이 커밋하고 끝나도 검증이 돈다(#82). 기준선은 SessionStart가 `session_id`별 시작 `HEAD`를 `.git/harness/sessions.json`
+  (worktree마다 따로)에 남긴 것이고, resume·compact는 기준선을 덮지 않는다. 30일 지나거나 200개를 넘는 항목은 지운다.
+  기준선이 없으면(이 기능 전 설치, `session_id` 없음, git이 모르는 커밋) 미커밋 변경만 본다. 동시에 시작한 세션의 기록이
+  경합으로 빠지면 그 세션도 같다. 세션 중 브랜치를 바꾸거나 rebase하면 기준선과의 차이가 커져 더 많은 영역을 검증한다.
+  둘 다 없으면 아무것도 하지 않는다. 프로젝트가 git 최상위의 하위 디렉터리면 프로젝트 안의
   변경만 본다. 직전 확인과 변경 상태가 같으면 다시 실행하지 않는다. 중첩 저장소·하위 모듈은 그 저장소의 `HEAD`와
   변경 파일만 해시하고(ignore된 파일은 읽지 않는다), 해시 계산도 840초 예산 안에 넣는다.
 - 종료 검증이 실패하면 한 번 종료를 보류하고 실패한 명령과 출력 끝 40줄을 모델에 넘긴다. 모델이 고친 뒤에도
@@ -100,4 +106,4 @@ hooks는 실수를 막는 장치이지 보안 경계가 아니다. 최종 방어
 - 판정을 hook에 연결(#22). 판정 함수 `judge`·`changed_files`는 이미 `harness_common.py`에 있고 CLI
   `harness judge`가 같은 코드를 쓴다(M2-1). 지금은 어떤 hook도 판정 결과로 막거나 묻지 않는다
 - 플랜·리뷰 파일 lint, 엄격 판정 플랜 승인에 따른 `block` 해제(M2-3)
-- 세션 시작 시점 기준선(SessionStart)으로 기존 변경을 종료 검증에서 빼기
+- 세션 시작 기준선(SessionStart, #82)을 확장해 세션 전부터 있던 미커밋 변경을 종료 검증에서 빼기(#8)
