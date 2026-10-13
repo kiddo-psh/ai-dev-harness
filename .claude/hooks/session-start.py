@@ -18,11 +18,11 @@ import harness_common as common  # noqa: E402
 def main() -> int:
     try:
         payload = common.read_payload()
-    except Exception:  # noqa: BLE001 - 입력이 깨져도 세션을 막지 않는다
-        return 0
-    session = payload.get("session_id")
-    if isinstance(session, str) and session:
-        common.record_baseline(common.project_dir(payload), session)
+        session = payload.get("session_id")
+        if isinstance(session, str) and session:
+            common.record_baseline(common.project_dir(payload), session)
+    except Exception:  # noqa: BLE001 - 입력·경로가 깨져도 세션을 막지 않는다
+        pass
     return 0
 
 

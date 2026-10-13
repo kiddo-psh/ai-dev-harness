@@ -513,8 +513,11 @@ def record_baseline(project: Path, session: str, now: datetime.datetime | None =
                       key=lambda item: _baseline_time(item[1]), reverse=True)[:BASELINE_MAX_ENTRIES]
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(dict(kept), ensure_ascii=False), encoding="utf-8")
-        os.replace(temp, path)
+        try:
+            temp.write_text(json.dumps(dict(kept), ensure_ascii=False), encoding="utf-8")
+            os.replace(temp, path)  # Windows에서는 다른 프로세스가 읽는 중이면 실패한다
+        finally:
+            temp.unlink(missing_ok=True)  # 교체에 실패한 임시 파일이 쌓이지 않게
     except Exception:  # noqa: BLE001 - 기준선은 최선 노력
         pass
 
