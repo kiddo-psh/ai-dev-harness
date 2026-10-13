@@ -51,7 +51,7 @@ gitlab.com 개인 프로젝트로 시작하려 했으나 `glab` 인증이 비대
 | F8 | 생성 Java 파일(LF)과 Windows Spotless 기본 줄끝(CRLF) 충돌. `init --force`가 `spotlessApply` 결과를 되돌린다 | `lineEndings 'UNIX'` + `*.java text eol=lf`(#83) |
 | F9 | Windows 첫 커밋에서 `gradlew` 실행 비트가 빠져 Linux CI에서 실패할 상태 | `git update-index --chmod=+x`. 체크리스트 4번에 안내 추가 검토 |
 | F10 | 생성 `frontend/AGENTS.md`가 Prettier `format:check` 위반 | `.prettierignore`에 추가(#84) |
-| F11 | hooks가 만든 `.claude/hooks/__pycache__/`가 untracked로 남아 판정·종료 검증 변경 목록에 섞인다 | 후속(#85) |
+| F11 | (정정) `.claude/hooks/__pycache__/`가 untracked로 남았다. 처음에는 hooks 탓으로 기록했으나, 생성 시각(20:28:07)이 리허설 진행자가 보호 경로 규칙을 보려고 `harness_common.py`를 `importlib`로 직접 import한 시각과 같다. hooks·`mr_lint.py`·`collect.py`는 `sys.dont_write_bytecode`를 켜 만들지 않는다 | 키트 결함 아님. 진행자 조작 흔적 |
 | F12 | 종료 검증은 미커밋 변경만 본다. 깨진 코드를 커밋하고 끝난 세션은 검증되지 않는다 | 후속(#82, #8 관련) |
 
 ## 4. 실제로 막은 사례
@@ -107,5 +107,5 @@ gitlab.com 개인 프로젝트로 시작하려 했으나 `glab` 인증이 비대
 - [#82](https://github.com/kiddo-psh/ai-dev-harness/issues/82) 커밋 후 종료에서 종료 검증이 돌지 않음(F12)
 - [#83](https://github.com/kiddo-psh/ai-dev-harness/issues/83) Windows Spotless 줄끝(F8)
 - [#84](https://github.com/kiddo-psh/ai-dev-harness/issues/84) 생성 `AGENTS.md` Prettier(F10)
-- [#85](https://github.com/kiddo-psh/ai-dev-harness/issues/85) `__pycache__`·`settings.local.json` 무시 목록(F7, F11)
+- [#85](https://github.com/kiddo-psh/ai-dev-harness/issues/85) `settings.local.json` 무시 목록(F7)
 - 이슈로 올리지 않은 것: F1 트래커(다음 프로젝트 결정 뒤), F2·F9 첫날 체크리스트 보강(Java 확인, 실행 비트), Secret·SAST 자연 검출 사례는 실제 프로젝트에서 계속 기록
