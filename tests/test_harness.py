@@ -4,7 +4,6 @@ import importlib.util
 import io
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,6 +11,9 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tempdirs import remove_tree  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("harness", ROOT / "bin" / "harness.py")
@@ -99,7 +101,7 @@ class InitAndCheckTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="harness-test-"))
 
     def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        remove_tree(self.tmp)
 
     def test_init_then_check_is_clean_for_gitlab_jira(self):
         target = self.tmp / "consumer"
@@ -157,7 +159,7 @@ class GitignoreInitTest(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="harness-gitignore-"))
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(remove_tree, self.tmp)
 
     def init(self, target, *extra):
         return run(["init", str(target), "--platform", "github", "--tracker", "github", *extra])
@@ -224,7 +226,7 @@ class AreaTestBase(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        remove_tree(self.tmp)
 
     def init_area(self, *extra):
         return run(["init", str(self.target), "--area", "backend", *extra])
@@ -466,7 +468,7 @@ class HookInstallTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="harness-hook-install-"))
 
     def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        remove_tree(self.tmp)
 
     def init(self, name, *extra):
         target = self.tmp / name
@@ -697,7 +699,7 @@ class IncludeTest(unittest.TestCase):
             self.assertIn("이 영역에서 특히 볼 관점(공통 관점에 덧붙임): 접근성. [사람]", area)
             self.assertGreater(area.index("이 영역에서 특히 볼 관점"), area.index(self.first_bullet("로컬")))
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            remove_tree(tmp)
 
     def test_source_change_is_drift(self):
         tmp = Path(tempfile.mkdtemp(prefix="harness-include-"))
@@ -711,7 +713,7 @@ class IncludeTest(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("불일치: docs/templates/review.md", out)
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            remove_tree(tmp)
 
 
 class TierNameTest(unittest.TestCase):
@@ -756,7 +758,7 @@ class BranchModelTest(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="harness-branch-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(remove_tree, self.tmp)
 
     def init(self, name, integration):
         target = self.tmp / name
@@ -821,7 +823,7 @@ class SeedFileTest(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="harness-seed-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(remove_tree, self.tmp)
         self.target = self.tmp / "consumer"
         code, out = run(["init", str(self.target), "--platform", "github", "--tracker", "github"])
         self.assertEqual(code, 0, out)
