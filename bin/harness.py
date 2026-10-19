@@ -1666,11 +1666,17 @@ def numbered_heading(spec: dict, number: str, source: str) -> str:
     raise HarnessError(f"{source}: 템플릿에 {number}장 절이 없다")
 
 
+# 리뷰 7장(처리)은 리뷰 세션이 아니라 작성자가 반영 뒤 채우고, M5-4(#99) 전의 리뷰 파일에는 없다. 없어도 실패로 보지 않는다
+# (형식은 `harness review summary`가 검사한다).
+OPTIONAL_REVIEW_HEADINGS = {"7. 처리"}
+
+
 def lint_document(text: str, spec: dict, kind: str) -> tuple[list[str], list[str]]:
     """(실패, 경고) 메시지 목록. kind는 plan 또는 review."""
     lines = strip_fences(text)
     head, sections = lint_sections(lines)
-    failures = [f"절 누락: ## {h}" for h in spec["headings"] if h not in sections]
+    optional = OPTIONAL_REVIEW_HEADINGS if kind == "review" else set()
+    failures = [f"절 누락: ## {h}" for h in spec["headings"] if h not in sections and h not in optional]
     if kind == "plan":
         tier_lines = [line for line in head if "판정:" in line]
         if not tier_lines:
