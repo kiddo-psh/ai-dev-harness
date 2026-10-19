@@ -228,6 +228,27 @@ class PricingTest(unittest.TestCase):
         self.assertIn("토큰을 다 읽지 못한 세션: 1", only_errors)
         self.assertIn("- 토큰: 기록 없음", only_errors)
 
+    def test_partial_snapshot_is_not_a_reset(self):
+        """#107 Codex 리뷰: 서브에이전트를 못 읽어 줄어든 스냅숏을 새 transcript로 보아 다시 세지 않는다"""
+        main_only = {"claude-opus-5-5": {"input": 0, "output": 10, "cache_write_5m": 0, "cache_write_1h": 0,
+                                         "cache_read": 0}}
+        both = {"claude-opus-5-5": {**main_only["claude-opus-5-5"], "output": 110}}
+        recovered = {"claude-opus-5-5": {**main_only["claude-opus-5-5"], "output": 115}}
+
+        def stop(ts, value, error=None):
+            record = json.loads(line("a", ts, branch="feat/x"))
+            record["usage"] = value
+            if error:
+                record["usage_error"] = error
+            return json.dumps(record)
+
+        lines = [stop("2026-10-20T01:00:00+00:00", both),
+                 stop("2026-10-20T01:05:00+00:00", main_only, "too_large_subagent"),  # 일부만: 다시 세지 않는다
+                 stop("2026-10-20T01:10:00+00:00", recovered)]  # 회복: 늘어난 5만
+        self.assertEqual(collect.summarize_sessions(lines, "feat/x")["usage"]["claude-opus-5-5"]["output"], 115)
+        reset = [stop("2026-10-20T01:00:00+00:00", both), stop("2026-10-20T01:05:00+00:00", main_only)]  # 오류 없음
+        self.assertEqual(collect.summarize_sessions(reset, "feat/x")["usage"]["claude-opus-5-5"]["output"], 120)
+
     def test_usage_split_by_branch_and_reset(self):
         """누적 차를 사건의 브랜치에 주고, 누적이 줄면 새 transcript로 본다"""
         lines = [line("a", "2026-10-20T01:00:00+00:00", "start", branch="feat/a"),

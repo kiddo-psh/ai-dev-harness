@@ -580,15 +580,26 @@ def add_usage(total: dict, delta: dict) -> None:
             bucket[field] += counts.get(field, 0)
 
 
-def usage_delta(current: dict, previous: dict) -> dict:
-    """누적 usage 두 개의 차(음수는 0). 세션 사건마다 누적값이 기록되므로 차를 그 사건의 브랜치에 준다."""
-    if sum(map(sum, (c.values() for c in current.values()))) < sum(map(sum, (c.values() for c in previous.values()))):
-        previous = {}  # 누적이 줄었으면 새 transcript(다시 시작)로 본다
-    delta = {}
-    for model, counts in current.items():
-        before = previous.get(model, {})
-        delta[model] = {field: max(counts.get(field, 0) - before.get(field, 0), 0) for field in USAGE_FIELDS}
-    return delta
+def usage_delta(current: dict, previous: dict, partial: bool = False) -> tuple[dict, dict]:
+    """(차, 다음 기준). 세션 사건마다 누적값이 기록되므로 차를 그 사건의 브랜치에 준다.
+
+    누적이 줄면 새 transcript(다시 시작)로 본다. 다만 일부 파일을 못 읽은 스냅숏(`partial`, `usage_error`가 함께 있는 기록)은
+    줄어도 다시 시작으로 보지 않고 필드마다 늘어난 만큼만 세며, 기준은 둘 중 큰 값을 남긴다. 그러지 않으면 못 읽은 파일이
+    빠져 줄어든 합을 새 transcript로 보아 남은 토큰을 다시 센다(#107 Codex 리뷰).
+    """
+    if not partial and _usage_total(current) < _usage_total(previous):
+        previous = {}
+    delta, following = {}, {}
+    for model in set(current) | set(previous):
+        now, before = current.get(model, {}), previous.get(model, {})
+        delta[model] = {field: max(now.get(field, 0) - before.get(field, 0), 0) for field in USAGE_FIELDS}
+        following[model] = ({field: max(now.get(field, 0), before.get(field, 0)) for field in USAGE_FIELDS}
+                            if partial else {field: now.get(field, 0) for field in USAGE_FIELDS})
+    return delta, following
+
+
+def _usage_total(usage: dict) -> int:
+    return sum(sum(counts.values()) for counts in usage.values())
 
 
 def clean_usage(value) -> dict | None:
@@ -675,7 +686,8 @@ def summarize_sessions(lines, branch: str) -> dict:
         if parsed is None:
             continue
         session, moment, event, record_branch, record = parsed
-        events.setdefault(session, []).append((moment, event, record_branch, clean_usage(record.get("usage"))))
+        partial = isinstance(record.get("usage_error"), str)
+        events.setdefault(session, []).append((moment, event, record_branch, clean_usage(record.get("usage")), partial))
         if record_branch != branch:
             continue
         on_branch.add(session)
@@ -691,16 +703,16 @@ def summarize_sessions(lines, branch: str) -> dict:
     usage: dict = {}
     for session in on_branch:
         ordered = sorted(events[session], key=lambda item: item[0])
-        for (previous, *_), (moment, event, record_branch, _) in zip(ordered, ordered[1:]):
+        for (previous, *_), (moment, event, record_branch, *_) in zip(ordered, ordered[1:]):
             if record_branch == branch and continues(previous, moment, event):
                 active += (moment - previous).total_seconds()
         cumulative: dict = {}
-        for _, _, record_branch, current in ordered:  # 누적 usage의 차를 그 사건의 브랜치에 준다(#97)
+        for _, _, record_branch, current, partial in ordered:  # 누적 usage의 차를 그 사건의 브랜치에 준다(#97)
             if current is None:
                 continue
+            delta, cumulative = usage_delta(current, cumulative, partial)
             if record_branch == branch:
-                add_usage(usage, usage_delta(current, cumulative))
-            cumulative = current
+                add_usage(usage, delta)
     by_tool: dict[str, int] = {}
     for tool in tools.values():
         by_tool[tool] = by_tool.get(tool, 0) + 1
