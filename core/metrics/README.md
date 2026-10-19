@@ -161,7 +161,7 @@ python bin/harness.py agent summary ../my-project     # 키트 자신은 --self.
 - 처리 값은 채택·기각·후속·판단 필요로 시작해야 한다. 표가 없거나 값이 틀리면 명령이 종료 2로 거절한다(잘못 세지 않는다)
 - 독립 중복 발견: 엄격(W2) 종합 표의 A·B 열 모두에 `F<번호>`가 있는 행, 또는 발견 열에 `A F…`와 `B F…`가 함께 있는 행
 - 주별 `review`: 요약을 붙인 MR 수(`reported_mrs`)와 그중 엄격 MR 수(`strict_reported_mrs`), 발견·처리별 합, 독립 중복 합.
-  엄격 MR당 채택 결함은 `adopted / strict_reported_mrs`다. 리뷰 발견 줄이 없으면 미보고로 보고 세지 않는다
+  엄격 MR이 받은 채택 수(`strict_adopted`)도 따로 센다. 엄격 MR당 채택 결함은 `strict_adopted / strict_reported_mrs`다. 리뷰 발견 줄이 없으면 미보고로 보고 세지 않는다
 
 ### 출력 (`version` 1)
 

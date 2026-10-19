@@ -963,8 +963,9 @@ def parse_review_lines(lines: list[str]) -> dict | None:
 
 
 def empty_week_review() -> dict:
-    """주별 지표 8(#99). 엄격 MR 중 리뷰 요약을 붙인 수도 센다."""
-    return {"reported_mrs": 0, "strict_reported_mrs": 0, "findings": 0,
+    """주별 지표 8(#99). 엄격 MR 중 리뷰 요약을 붙인 수와 그 MR들의 채택 수(`strict_adopted`)도 센다.
+    엄격 MR당 채택 결함은 분모·분자가 같은 엄격 MR이어야 한다(#110 Codex 리뷰)."""
+    return {"reported_mrs": 0, "strict_reported_mrs": 0, "strict_adopted": 0, "findings": 0,
             **{key: 0 for key in REVIEW_OUTCOMES.values()}, "duplicates": 0}
 
 
@@ -973,6 +974,7 @@ def add_week_review(week: dict, review: dict | None, strict: bool) -> None:
         return
     week["reported_mrs"] += 1
     week["strict_reported_mrs"] += strict
+    week["strict_adopted"] += review["adopted"] if strict else 0
     for key in ("findings", *REVIEW_OUTCOMES.values(), "duplicates"):
         week[key] += review[key]
 

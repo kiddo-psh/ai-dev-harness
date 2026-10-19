@@ -107,7 +107,8 @@ class ReviewSectionTest(unittest.TestCase):
         code, result, _, err = run_collect("gitlab", gitlab_api(data))
         self.assertEqual(code, 0, err)
         first = next(w for w in result["weeks"] if w["week"] == "2026-W39")
-        self.assertEqual(first["review"], {"reported_mrs": 1, "strict_reported_mrs": 1, "findings": 3, "adopted": 2,
+        self.assertEqual(first["review"], {"reported_mrs": 1, "strict_reported_mrs": 1, "strict_adopted": 2, "findings": 3,
+                                           "adopted": 2,
                                            "rejected": 1, "followup": 0, "pending": 0, "duplicates": 1})
         self.assertEqual(next(m for m in result["mrs"] if m["number"] == 11)["review"]["adopted"], 2)
 
@@ -118,8 +119,8 @@ class ReviewSectionTest(unittest.TestCase):
         collect.add_week_review(week, {"findings": 1, "adopted": 1, "rejected": 0, "followup": 0, "pending": 0,
                                        "duplicates": 0}, False)
         collect.add_week_review(week, None, True)
-        self.assertEqual(week, {"reported_mrs": 2, "strict_reported_mrs": 1, "findings": 6, "adopted": 3, "rejected": 1,
-                                "followup": 1, "pending": 1, "duplicates": 1})
+        self.assertEqual(week, {"reported_mrs": 2, "strict_reported_mrs": 1, "strict_adopted": 2, "findings": 6,
+                                "adopted": 3, "rejected": 1, "followup": 1, "pending": 1, "duplicates": 1})
 
 
 class ReviewCliTest(unittest.TestCase):
