@@ -19,7 +19,7 @@ python bin/harness.py dashboard ../my-project --once   # 서버 없이 지금 �
 
 - 데이터: 공용 git 디렉터리의 `harness/`와 `worktrees/*/harness/`의 `sessions.jsonl`·`events.jsonl`
   ([`core/hooks/README.md`](../hooks/README.md) "세션 기록"). 진행 중 세션은 `end`가 없고 마지막 기록이 2시간 안인 세션이다.
-- 진행 중 세션의 토큰은 세션 시작 기록의 transcript에서 바로 센다(파일 크기·수정 시각이 같으면 캐시). 그래서 응답이 끝나기 전에도
+- 진행 중 세션의 토큰은 세션 시작 기록의 transcript와 서브에이전트 transcript에서 바로 센다(모든 파일의 크기·수정 시각이 같으면 캐시. 일부 파일을 못 읽으면 줄어든 합을 다시 시작으로 보지 않는다). 그래서 응답이 끝나기 전에도
   늘어난다. 끝난 세션은 마지막 기록의 누적값을 쓴다. 비용은 `sessions summary`와 같은 단가(키트 기본값 + `harness.json` `pricing`)로
   계산한 **추정**이다.
 - 오늘·이번 주 비용과 응답 수는 사건 단위로 센다. 사건마다 직전 누적과의 차(`sessions summary`와 같은 계산)를 그 사건의 날짜와

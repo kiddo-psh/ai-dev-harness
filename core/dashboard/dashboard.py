@@ -85,27 +85,41 @@ def session_rows(records: list[tuple[str, dict]], collect) -> dict[str, dict]:
 
 
 class UsageCache:
-    """transcript 토큰 수 캐시. 파일 크기·수정 시각이 같으면 다시 읽지 않는다."""
+    """transcript 토큰 수 캐시. 본 transcript와 서브에이전트 transcript(`<transcript>/subagents/*.jsonl`)의 크기·수정 시각이
+    모두 같으면 다시 읽지 않는다(서브에이전트만 쓰는 동안에도 갱신, #113 Codex 리뷰). (usage, 읽기 오류)를 돌려준다."""
 
     def __init__(self, transcript_usage):
         self.transcript_usage, self.cache, self.lock = transcript_usage, {}, threading.Lock()
 
-    def get(self, path: str | None):
+    @staticmethod
+    def stamp(path: Path) -> tuple:
+        stat = path.stat()
+        subagents = path.with_suffix("") / "subagents"
+        children = []
+        if subagents.is_dir():
+            for child in sorted(subagents.glob("*.jsonl")):
+                try:
+                    child_stat = child.stat()
+                except OSError:
+                    continue
+                children.append((child.name, child_stat.st_size, child_stat.st_mtime_ns))
+        return stat.st_size, stat.st_mtime_ns, tuple(children)
+
+    def get(self, path: str | None) -> tuple[dict | None, str | None]:
         if not path:
-            return None
+            return None, None
         try:
-            stat = Path(path).stat()
+            key = self.stamp(Path(path))
         except OSError:
-            return None
-        key = (stat.st_size, stat.st_mtime_ns)
+            return None, None
         with self.lock:
             cached = self.cache.get(path)
             if cached and cached[0] == key:
                 return cached[1]
-        usage, _error = self.transcript_usage(path)
+        result = self.transcript_usage(path)
         with self.lock:
-            self.cache[path] = (key, usage)
-        return usage
+            self.cache[path] = (key, result)
+        return result
 
 
 def build_state(session_records, event_records, now: dt.datetime, tz: dt.timezone, collect, pricing: dict,
@@ -145,10 +159,12 @@ def build_state(session_records, event_records, now: dt.datetime, tz: dt.timezon
         if row["event"] == "end" or now - row["last"] > ACTIVE_WINDOW:
             continue
         usage = row["usage"]
-        live = live_usage(row["transcript"]) if live_usage is not None else None
+        live, live_error = live_usage(row["transcript"]) if live_usage is not None else (None, None)
+        usage_error = row["usage_error"]
         if live:
-            spend(now, row["branch"], collect.usage_delta(live, usage)[0])
-            usage = live
+            # 일부 파일을 못 읽은 스냅숏은 줄어도 다시 시작으로 보지 않는다(같은 계산, #113 Codex 리뷰)
+            spend(now, row["branch"], collect.usage_delta(live, usage, live_error is not None)[0])
+            usage, usage_error = live, live_error
         cost, unpriced = collect.estimate_cost(usage, pricing)
         tokens = {field: sum(counts[field] for counts in usage.values()) for field in collect.USAGE_FIELDS}
         active.append({"session": row["session"][:8], "worktree": row["worktree"], "branch": row["branch"],
@@ -157,7 +173,7 @@ def build_state(session_records, event_records, now: dt.datetime, tz: dt.timezon
                        "elapsed_min": int((now - row["segment"]).total_seconds() // 60),
                        "idle_min": int((now - row["last"]).total_seconds() // 60), "turns": len(row["stops"]),
                        "verify": row["verify"], "tokens": tokens, "cost": round(cost, 4), "unpriced": unpriced,
-                       "usage_error": row["usage_error"]})
+                       "usage_error": usage_error})
     events = []
     for worktree, record in event_records:
         moment = collect.parse_ts(record["ts"])
@@ -170,10 +186,14 @@ def build_state(session_records, event_records, now: dt.datetime, tz: dt.timezon
                        "hook": _str(record.get("hook")), "decision": decision,
                        "rule": _str(record.get("rule")), "path": _str(record.get("path"))})
     events.sort(key=lambda item: item["ts"], reverse=True)
+    # 브랜치는 이번 주 비용 상위 TOP_BRANCHES개를 고르고 오늘 값은 같은 브랜치로 맞춘다(따로 자르면 이번 주 목록의
+    # 브랜치가 오늘 목록에서 빠져 0으로 보인다, #113 Codex 리뷰). 오늘은 이번 주 안이므로 오늘 브랜치는 모두 이번 주에 있다
+    week_top = [branch for branch, _ in sorted(totals["week"]["branches"].items(),
+                                               key=lambda item: (-item[1], item[0]))[:TOP_BRANCHES]]
     for bucket in totals.values():
         bucket["cost"] = round(bucket["cost"], 4)
-        ranked = sorted(bucket["branches"].items(), key=lambda item: (-item[1], item[0]))[:TOP_BRANCHES]
-        bucket["branches"] = [{"branch": branch, "cost": round(cost, 4)} for branch, cost in ranked]
+        bucket["branches"] = [{"branch": branch, "cost": round(bucket["branches"][branch], 4)}
+                              for branch in week_top if branch in bucket["branches"]]
     active.sort(key=lambda item: item["last"], reverse=True)
     return {"now": now.isoformat(), "currency": pricing["currency"], "pricing_as_of": pricing["as_of"],
             "active": active, "events": events[:RECENT_EVENTS], "totals": totals, "unrecorded": unrecorded or []}

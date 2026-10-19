@@ -60,9 +60,34 @@ class BuildStateTest(unittest.TestCase):
 
     def test_live_usage_overrides_recorded(self):
         sessions = [rec("a", 10, "start", transcript="t.jsonl"), rec("a", 5, usage=usage(10))]
-        state = self.state(sessions, live=lambda path: usage(1_000_000) if path == "t.jsonl" else None)
+        state = self.state(sessions, live=lambda path: (usage(1_000_000), None) if path == "t.jsonl" else (None, None))
         self.assertEqual(state["active"][0]["tokens"]["output"], 1_000_000)
         self.assertEqual(state["totals"]["today"]["cost"], 20.0)  # 기록 뒤 transcript에 더 쓴 토큰도 오늘에 든다
+
+    def test_partial_live_snapshot_is_not_a_reset(self):
+        """#113 Codex 리뷰: 서브에이전트를 못 읽어 줄어든 실시간 합은 다시 시작이 아니다(20 → 일부 10이면 오늘 20, 30이 아님)"""
+        sessions = [rec("a", 10, "start", transcript="t.jsonl"), rec("a", 5, usage=usage(1_000_000))]
+        state = self.state(sessions, live=lambda path: (usage(500_000), "too_large_subagent"))
+        self.assertEqual(state["totals"]["today"]["cost"], 20.0)
+        self.assertEqual(state["active"][0]["usage_error"], "too_large_subagent")
+
+    def test_today_branches_follow_weekly_list(self):
+        """#113 Codex 리뷰: 이번 주 상위 브랜치의 오늘 값은 오늘 상위 10개 밖이어도 남는다"""
+        def at(day, hour):
+            return int((NOW - dt.datetime(2026, 10, day, hour, 0, tzinfo=KST)).total_seconds() // 60)
+        sessions = [rec("big", at(19, 9), "start", branch="feat/big"),
+                    rec("big", at(19, 10), branch="feat/big", usage=usage(5_000_000)),  # 어제 100
+                    rec("big", at(20, 9), branch="feat/big", usage=usage(5_050_000))]  # 오늘 +1
+        for i in range(10):
+            sessions += [rec(f"s{i}", at(20, 8), "start", branch=f"feat/b{i}"),
+                         rec(f"s{i}", at(20, 10), branch=f"feat/b{i}", usage=usage(100_000))]  # 오늘 2씩
+        totals = self.state(sessions)["totals"]
+        week = [b["branch"] for b in totals["week"]["branches"]]
+        self.assertEqual(len(week), dashboard.TOP_BRANCHES)
+        self.assertEqual(week[0], "feat/big")
+        today = {b["branch"]: b["cost"] for b in totals["today"]["branches"]}
+        self.assertEqual(today["feat/big"], 1.0)
+        self.assertLessEqual(set(today), set(week))
 
     def test_costs_and_turns_follow_event_dates(self):
         """자정·월요일을 넘는 세션은 그날 쓴 만큼만, 브랜치별로 나눠 센다(sessions summary와 같은 사건별 차)"""
@@ -105,6 +130,25 @@ class BuildStateTest(unittest.TestCase):
                                          json.dumps({"ts": "2026-13-01T00:00:00Z", "session": "a"}),
                                          json.dumps({"ts": "2026-10-20T00:00:00+99:99", "session": "a"})], collect)
         self.assertEqual(len(records), 1)
+
+    def test_usage_cache_follows_subagent_files(self):
+        """#113 Codex 리뷰: 본 transcript가 그대로여도 서브에이전트 파일이 바뀌면 다시 센다"""
+        import tempfile
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, root, ignore_errors=True)
+        main = root / "s.jsonl"
+        main.write_text("{}\n", encoding="utf-8")
+        calls = []
+        cache = dashboard.UsageCache(lambda path: (calls.append(path) or (usage(len(calls)), None)))
+        self.assertEqual(cache.get(str(main))[0], usage(1))
+        self.assertEqual(cache.get(str(main))[0], usage(1))  # 바뀐 것이 없으면 캐시
+        (root / "s" / "subagents").mkdir(parents=True)
+        (root / "s" / "subagents" / "agent-1.jsonl").write_text("{}\n", encoding="utf-8")
+        self.assertEqual(cache.get(str(main))[0], usage(2))
+        with open(root / "s" / "subagents" / "agent-1.jsonl", "a", encoding="utf-8") as handle:
+            handle.write("{}\n")
+        self.assertEqual(cache.get(str(main))[0], usage(3))
+        self.assertEqual(cache.get(None), (None, None))
 
     def test_host_allowed(self):
         for ok in ("127.0.0.1:8765", "localhost:1", "LOCALHOST", "127.0.0.1"):
