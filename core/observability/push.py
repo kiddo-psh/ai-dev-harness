@@ -162,19 +162,30 @@ def payload(res: dict, logs: list[dict], version: str) -> dict:
     return {"resourceLogs": resource_logs}
 
 
-def send(url: str, headers: dict, body: dict) -> None:
+def send(url: str, headers: dict, body: dict) -> tuple[int, str]:
+    """보낸다. (수집기가 거절한 줄 수, 거절 사유). OTLP 부분 성공은 200과 함께 `partialSuccess.rejectedLogRecords`로
+    알린다(#109 Codex 리뷰). 거절된 줄은 다시 보내도 받지 않으므로 다시 보내지 않고 알리기만 한다."""
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(url, data=data, method="POST",
                                      headers={**headers, "Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as response:  # noqa: S310 - http(s)만 허용(endpoint_from)
         if not 200 <= response.status < 300:
             raise urllib.error.HTTPError(url, response.status, "unexpected status", response.headers, None)
+        raw = response.read(1_000_000)
+    try:
+        partial = json.loads(raw or b"{}").get("partialSuccess") or {}
+        rejected = int(partial.get("rejectedLogRecords") or 0)
+        message = str(partial.get("errorMessage") or "")[:200]
+    except (ValueError, TypeError, AttributeError):
+        return 0, ""
+    return max(rejected, 0), message
 
 
 def push(repo: str, dirs: list[tuple[str, Path]], state_path: Path, collect, pricing: dict, version: str,
          lock, endpoint: str | None = None, env=None, dry_run: bool = False, from_start: bool = False,
          out=print) -> int:
-    """새 기록을 보낸다. 종료 코드: 0(보낼 것이 없어도), 1(전송 실패, 보낸 묶음까지만 기록), 2(설정 오류)."""
+    """새 기록을 보낸다. 종료 코드: 0(보낼 것이 없어도), 1(전송 실패·다른 push 실행 중, 보낸 묶음까지만 기록),
+    2(설정 오류), 3(수집기가 일부를 거절, 거절된 줄은 다시 보내지 않음)."""
     env = os.environ if env is None else env
     try:
         url = None if dry_run and not (endpoint or env.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
@@ -247,11 +258,12 @@ def _push_locked(dirs, state_path, collect, pricing, version, url, headers, res,
                            indent=1))
         return 0
     pending.sort(key=lambda item: int(item[2]["timeUnixNano"]))
-    sent = 0
+    sent = rejected = 0
+    reasons: list[str] = []
     for index in range(0, len(pending), BATCH):
         batch = pending[index:index + BATCH]
         try:
-            send(url, headers, payload(res, [log for _, _, log in batch], version))
+            batch_rejected, reason = send(url, headers, payload(res, [log for _, _, log in batch], version))
         except (urllib.error.URLError, OSError, ValueError) as exc:
             reason = exc.code if isinstance(exc, urllib.error.HTTPError) else type(exc).__name__
             out(f"harness telemetry: 전송 실패({reason}). {sent}개까지 보냈고 나머지는 다음에 다시 보낸다")
@@ -261,10 +273,17 @@ def _push_locked(dirs, state_path, collect, pricing, version, url, headers, res,
         for _, entry, _ in batch:
             entry[1] = True
         sent += len(batch)
+        rejected += batch_rejected
+        if batch_rejected and reason and reason not in reasons:
+            reasons.append(reason)
         advance()
         save(state_path, offsets)
     advance()
     save(state_path, offsets)
+    if rejected:
+        detail = f": {'; '.join(reasons)}" if reasons else ""
+        out(f"harness telemetry: {sent}개 중 {rejected}개를 수집기가 거절했다{detail}. 거절된 줄은 다시 보내지 않는다")
+        return 3
     out(f"harness telemetry: {sent}개 보냄({summary})")
     return 0
 

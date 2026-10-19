@@ -70,6 +70,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example:4318 python bin/harness.py
 | 보내는 필드 | 세션: 사건(`start`·`stop`·`end`)·세션 ID·브랜치·도구·모델·시작 종류·종료 검증 결과·바뀐 파일 수·재시도·토큰 수·추정 비용(세션 누적). hooks: hook·결정·규칙·경로·도구 이름·세션 ID·브랜치 |
 | 보내지 않는 것 | transcript 경로, 종료 검증 명령, HEAD 커밋, 프롬프트·코드 내용 |
 | 위치 | 공용 git 디렉터리의 `harness/telemetry.json`. 파일마다 앞에서부터 끊김 없이 보낸 줄까지만 전진하므로 실패하면(종료 1) 다음 실행이 나머지를 보낸다. 쓰는 중인 마지막 줄은 다음에 보낸다. 다른 push가 실행 중이면 종료 1로 알린다 |
+| 부분 거절 | 수집기가 일부 줄을 거절하면(OTLP `partialSuccess`) 거절 수와 사유를 알리고 종료 3. 거절된 줄은 다시 받지 않으므로 다시 보내지 않는다 |
 | 스트림 | 세션마다 리소스 속성 `session.id`를 두고, Loki는 이것을 색인 레이블로 둔다(세션마다 스트림). Loki는 한 스트림의 가장 새 줄보다 1시간 넘게 오래된 줄을 버리므로, 팀원 여러 명의 기록이나 지난 기록을 늦게 보내도 버려지지 않게 한다. 수집기는 Loki에 넣기 전에 200으로 답하므로 Loki가 거절한 줄은 push가 알 수 없다(수집기 로그에 남는다) |
 | 다시 보내기 | `--from-start`. Loki는 보관 기간(30일)보다 오래된 줄을 받지 않는다 |
 
@@ -93,8 +94,9 @@ Grafana `harness` 폴더에 프로비저닝된다(화면에서 고칠 수 없다
 | 사람·도구별 세션 | Prometheus | `user_email`·`service_name`(claude-code, claude-code-desktop) |
 
 Prometheus 이름은 수집기가 바꾼 이름(`claude_code_cost_usage_USD_total` 등)이라 쿼리는 `{__name__=~"claude_code_cost_usage.*"}`로 쓴다.
-Claude Code는 세션마다 새 시계열(`session_id`)을 만들어 `increase()`가 첫 내보내기를 세지 않으므로, 증가분은 "기간 끝 값 − 기간 시작
-전 값(없으면 0)"으로, 세션 수는 기간 안 `session_id` 수로 센다. 기간보다 오래 조용했다가 이어진 세션은 앞선 비용까지 더해질 수 있다.
+Claude Code는 세션마다 새 시계열(`session_id`)을 만들어 `increase()`가 첫 내보내기를 세지 않으므로, 증가분은 `increase()`(수집기
+재시작 등으로 누적이 0으로 돌아가도 이어 센다)에 기간 안에 처음 생긴 시계열의 첫 값을 더하고, 세션 수는 기간 안 `session_id` 수로
+센다. `increase()`는 기간 끝으로 외삽하므로 짧은 기간에서는 조금 다를 수 있다. 수집기는 조용한 시계열의 누적을 24시간 유지한다.
 Loki에서 속성은 점이 밑줄로 바뀐 구조화 메타데이터다(`event.name` → `event_name`, `harness.kind` → `harness_kind`).
 
 ### 주간 지표와의 대응

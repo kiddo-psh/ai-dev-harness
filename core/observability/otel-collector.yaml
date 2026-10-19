@@ -10,7 +10,8 @@ receivers:
 
 processors:
   batch: {}
-  deltatocumulative: {}   # Claude Code 지표 기본 temporality는 delta. Prometheus에는 누적으로 넣는다
+  deltatocumulative:   # Claude Code 지표 기본 temporality는 delta. Prometheus에는 누적으로 넣는다
+    max_stale: 24h      # 기본 5분이면 잠시 조용한 세션의 누적이 0부터 다시 시작한다. 대시보드는 다시 시작도 이어 센다
   memory_limiter:
     check_interval: 5s
     limit_percentage: 75

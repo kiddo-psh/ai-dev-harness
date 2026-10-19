@@ -23,7 +23,7 @@ class Collector:
     """OTLP/HTTP 로그를 받는 가짜 수집기. fail이 참이면 500."""
 
     def __init__(self):
-        self.bodies, self.headers, self.fail = [], [], False
+        self.bodies, self.headers, self.fail, self.reply = [], [], False, b"{}"
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -41,7 +41,7 @@ class Collector:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b"{}")
+                self.wfile.write(owner.reply)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -139,6 +139,17 @@ class PushTest(unittest.TestCase):
         self.collector.fail = False
         self.assertEqual(self.push(), 0)
         self.assertEqual(len(self.collector.records()), 1)
+
+    def test_partial_success_is_reported(self):
+        """#109 Codex 리뷰: OTLP 부분 성공(200 + rejectedLogRecords)은 완료로 보고하지 않고, 거절된 줄은 다시 보내지 않는다"""
+        self.write("events.jsonl", [{"ts": ts(1), "hook": "protect-paths", "decision": "ask"},
+                                    {"ts": ts(1), "hook": "protect-paths", "decision": "block"}])
+        self.collector.reply = b'{"partialSuccess": {"rejectedLogRecords": "1", "errorMessage": "too old"}}'
+        self.assertEqual(self.push(), 3)
+        self.assertIn("2개 중 1개를 수집기가 거절했다: too old", self.out[-1])
+        self.collector.reply = b"{}"
+        self.assertEqual(self.push(), 0)
+        self.assertEqual(len(self.collector.records()), 2)  # 다시 보내지 않았다
 
     def test_batches_advance_independently(self):
         self.write("sessions.jsonl", [{"ts": ts(1), "event": "stop", "session": f"s{i}"}
