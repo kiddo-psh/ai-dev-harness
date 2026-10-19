@@ -165,6 +165,8 @@ def build_state(session_records, event_records, now: dt.datetime, tz: dt.timezon
             # 일부 파일을 못 읽은 스냅숏은 줄어도 다시 시작으로 보지 않는다(같은 계산, #113 Codex 리뷰)
             spend(now, row["branch"], collect.usage_delta(live, usage, live_error is not None)[0])
             usage, usage_error = live, live_error
+        elif live_error:  # 본 transcript를 못 읽으면 기록된 누적을 보이되 읽기 오류를 함께 낸다(#113 Codex 리뷰)
+            usage_error = live_error
         cost, unpriced = collect.estimate_cost(usage, pricing)
         tokens = {field: sum(counts[field] for counts in usage.values()) for field in collect.USAGE_FIELDS}
         active.append({"session": row["session"][:8], "worktree": row["worktree"], "branch": row["branch"],

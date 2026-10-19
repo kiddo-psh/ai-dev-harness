@@ -70,6 +70,8 @@ class BuildStateTest(unittest.TestCase):
         state = self.state(sessions, live=lambda path: (usage(500_000), "too_large_subagent"))
         self.assertEqual(state["totals"]["today"]["cost"], 20.0)
         self.assertEqual(state["active"][0]["usage_error"], "too_large_subagent")
+        unreadable = self.state(sessions, live=lambda path: (None, "too_large"))  # 본 transcript를 못 읽음
+        self.assertEqual((unreadable["active"][0]["usage_error"], unreadable["active"][0]["cost"]), ("too_large", 20.0))
 
     def test_today_branches_follow_weekly_list(self):
         """#113 Codex 리뷰: 이번 주 상위 브랜치의 오늘 값은 오늘 상위 10개 밖이어도 남는다"""
