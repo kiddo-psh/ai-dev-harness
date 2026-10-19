@@ -808,15 +808,19 @@ def agent_markdown(summary: dict, unrecorded: int | None, total: int | None, pri
     usage = summary.get("usage", {})
     totals = {field: sum(counts[field] for counts in usage.values()) for field in USAGE_FIELDS}
     lines = [f"## {AGENT_SECTION}", "", f"- 도구: {tools}", f"- 응답: {summary['turns']}",
-             f"- 작업 시간(분): {summary['active_sec'] // 60}",
-             f"- 토큰: 입력 {totals['input']:,} · 출력 {totals['output']:,} · 캐시 쓰기 "
-             f"{totals['cache_write_5m'] + totals['cache_write_1h']:,} · 캐시 읽기 {totals['cache_read']:,}"]
-    if any(totals.values()):
+             f"- 작업 시간(분): {summary['active_sec'] // 60}"]
+    notes = []
+    if usage:
+        lines.append(f"- 토큰: 입력 {totals['input']:,} · 출력 {totals['output']:,} · 캐시 쓰기 "
+                     f"{totals['cache_write_5m'] + totals['cache_write_1h']:,} · 캐시 읽기 {totals['cache_read']:,}")
         cost, unpriced = estimate_cost(usage, pricing)
         lines.append(f"- 추정 비용({pricing['currency']}): {cost:.2f}")
         notes = [f"단가 기준 {pricing['as_of']}"] + ([f"단가 없는 모델 {', '.join(unpriced)}"] if unpriced else [])
-        if summary.get("usage_errors"):
-            notes.append(f"토큰을 다 읽지 못한 세션 {len(summary['usage_errors'])}개(합은 일부)")
+    else:  # 토큰 기록이 하나도 없으면 0이 아니라 "기록 없음"(수집기가 측정하지 않은 MR로 센다, #108 Codex 리뷰)
+        lines.append("- 토큰: 기록 없음")
+    if summary.get("usage_errors"):
+        notes.append(f"토큰을 다 읽지 못한 세션 {len(summary['usage_errors'])}개" + ("(합은 일부)" if usage else ""))
+    if notes:
         lines.append(f"- 참고: {'; '.join(notes)}")
     if total is not None:
         lines.append(f"- 기록 없는 커밋: {unrecorded}/{total}")

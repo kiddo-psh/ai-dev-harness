@@ -31,6 +31,20 @@ class AgentSectionTest(unittest.TestCase):
         self.assertEqual((parsed["cost"], parsed["currency"]), (40.0, "USD"))
         self.assertEqual((parsed["unrecorded"], parsed["commits"]), (1, 3))
 
+    def test_missing_usage_is_not_zero(self):
+        """#108 Codex 리뷰: 토큰 기록이 없으면 0이 아니라 "기록 없음"이고, 읽지 못한 세션 경고는 따로 남는다"""
+        lines = [line("a", "2026-10-20T01:00:00+00:00", "start"),
+                 line("a", "2026-10-20T01:30:00+00:00", usage_error="too_large")]
+        section = collect.agent_markdown(collect.summarize_sessions(lines, "feat/x"), 0, 1)
+        self.assertIn("- 토큰: 기록 없음", section)
+        self.assertNotIn("추정 비용", section)
+        self.assertIn("- 참고: 토큰을 다 읽지 못한 세션 1개\n", section)
+        parsed = judge().agent(body(section))
+        self.assertEqual((parsed["tools"], parsed["tokens"], parsed["cost"]), ({"claude-code": 1}, None, None))
+        partial = lines + [usage_line("b", "2026-10-20T02:00:00+00:00", 10)]
+        self.assertIn("토큰을 다 읽지 못한 세션 1개(합은 일부)",
+                      collect.agent_markdown(collect.summarize_sessions(partial, "feat/x"), 0, 1))
+
     def test_manual_tool_line_only(self):
         """T2: 다른 도구는 도구 줄만 적어도 보고다"""
         parsed = judge().agent(body("## 에이전트 기록", "", "- 도구: codex 1"))
