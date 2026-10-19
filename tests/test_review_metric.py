@@ -70,6 +70,17 @@ class SummarizeReviewTest(unittest.TestCase):
         _, errors = collect.summarize_review(FOUND_TABLE.replace("| U2 | b | F3 | 기각 | |", "| U2 | b |"))
         self.assertEqual(errors, ["칸이 모자란 행: U2"])
 
+    def test_fenced_example_table_is_ignored(self):
+        """#110 Codex 리뷰: 발견 사항이 인용한 표 예시(코드 블록, 7장 앞)를 처리 표로 읽지 않는다"""
+        text = "\n".join([
+            "## 3. 발견 사항", "", "```markdown", "| # | 결함 | 발견 | 처리 | 근거 |", "| --- | --- | --- | --- | --- |",
+            "| U1 | | | | |", "```", "", "| # | 결함 | 발견 | 처리 | 근거 |", "| --- | --- | --- | --- | --- |",
+            "| U9 | 예시 | F9 | 기각 | 7장 앞의 표 |", "",
+            "## 7. 처리", "", "| # | 결함 | 발견 | 처리 | 근거 |", "| --- | --- | --- | --- | --- |",
+            "| U1 | 실제 결함 | F1 | 채택·수정 | 고침 |"])
+        summary, errors = collect.summarize_review(text)
+        self.assertEqual((summary["findings"], summary["adopted"], summary["rejected"], errors), (1, 1, 0, []))
+
     def test_template_has_disposition_table(self):
         template = (ROOT / "core" / "templates" / "docs" / "templates" / "review.md").read_text(encoding="utf-8")
         summary, errors = collect.summarize_review(template)

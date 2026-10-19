@@ -891,16 +891,38 @@ def _found(cell: str) -> bool:
     return not NO_FINDING.match(cell)
 
 
+REVIEW_SECTION_HEADING = re.compile(r"^##\s*7\.\s*처리")
+FENCE_LINE = re.compile(r"^\s*(`{3,}|~{3,})")
+
+
+def _unfenced(lines: list[str]) -> list[str]:
+    """코드 블록 안의 줄을 빈 줄로 바꾼다(줄 번호는 그대로). 발견 사항이 인용한 표 예시를 처리 표로 읽지 않게(#110 Codex 리뷰)."""
+    result, fence = [], None
+    for line in lines:
+        match = FENCE_LINE.match(line)
+        if fence is None and match:
+            fence = match.group(1)[0] * 3
+            result.append("")
+        elif fence is not None:
+            result.append("")
+            if line.strip().startswith(fence):
+                fence = None
+        else:
+            result.append(line)
+    return result
+
+
 def summarize_review(text: str) -> tuple[dict | None, list[str]]:
-    """리뷰 파일 7장(처리) 표를 센다(#99). (요약, 오류). 처리 열이 있는 첫 표를 읽는다.
+    """리뷰 파일 7장(처리) 표를 센다(#99). (요약, 오류). 7장 제목이 있으면 그 뒤에서, 코드 블록 밖의 처리 열이 있는 첫 표를 읽는다.
 
     모든 칸이 빈 행(템플릿 빈 행)은 건너뛰고, 다른 칸에 내용이 있는데 처리가 비었거나 칸이 모자라면 오류다.
     A·B 열이 따로 있으면(엄격 종합 표) 두 열 모두 발견 기록(빈 칸·대시·"해소…"가 아님)인 행을, `발견` 열이면
     `A`와 `B` 표기(`A F1`·`A-1`)가 함께 있는 행을 독립 중복 발견으로 센다.
     """
-    lines = text.splitlines()
+    lines = _unfenced(text.splitlines())
+    section = next((index for index, line in enumerate(lines) if REVIEW_SECTION_HEADING.match(line)), 0)
     for start, line in enumerate(lines):
-        if not line.lstrip().startswith("|"):
+        if start < section or not line.lstrip().startswith("|"):
             continue
         header = _cells(line)
         if "처리" not in header or start + 1 >= len(lines) or not re.match(r"^\s*\|[\s:|-]+\|\s*$", lines[start + 1]):
