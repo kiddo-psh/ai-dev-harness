@@ -191,6 +191,10 @@ class CodexRecordsTest(unittest.TestCase):
         renamed = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=20)).isoformat()
         timeline = collect.branch_timeline([f"HEAD@{{{renamed}}}\tBranch: renamed refs/heads/main to refs/heads/feat/new"])
         self.assertEqual(collect.branch_at(timeline, dt.datetime.now(dt.timezone.utc), "main"), "feat/new")
+        # 같은 초에 main → a → b: reflog는 최신부터(a→b, main→a). 마지막 이동(b)이 이긴다(#118 Codex 리뷰)
+        same = collect.branch_timeline([f"HEAD@{{{renamed}}}\tcheckout: moving from a to b",
+                                        f"HEAD@{{{renamed}}}\tcheckout: moving from main to a"])
+        self.assertEqual(collect.branch_at(same, dt.datetime.now(dt.timezone.utc), "main"), "b")
 
     def test_codex_home_variable(self):
         self.assertEqual(collect.codex_home({"CODEX_HOME": str(self.home)}), self.home)

@@ -822,7 +822,8 @@ def branch_timeline(lines) -> list[tuple[dt.datetime, str | None]]:
         if moment and moved:
             target = moved.group(1)
             timeline.append((moment, None if re.fullmatch(r"[0-9a-f]{7,40}", target) else target))
-    return sorted(timeline, key=lambda item: item[0])
+    # reflog는 최신부터 나온다. 같은 초의 이동이 시간순을 지키게 뒤집은 뒤 안정 정렬한다(#118 Codex 리뷰)
+    return sorted(reversed(timeline), key=lambda item: item[0])
 
 
 def branch_at(timeline, moment: dt.datetime, default: str | None) -> str | None:
