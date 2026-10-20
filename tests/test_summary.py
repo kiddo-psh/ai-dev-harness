@@ -108,6 +108,26 @@ class InRepoSummaryTest(SessionRecordCase):
         self.assertIn("기본값(기준 origin/main, 키트 단가)으로 요약한다", result.stderr)
         self.assertIn("기본값(기준 origin/main, 키트 단가)으로 요약한다", err)
 
+    def test_config_checks_match_kit(self):
+        """#123 리뷰 F3: 키트와 저장소 안이 같은 설정 검사를 쓴다(알 수 없는 키는 둘 다 무시, 틀린 기준 브랜치는 둘 다 기본값)"""
+        self.prepare()
+        self.commit("a.txt")
+        git(self.project, "update-ref", "refs/remotes/origin/main", "HEAD~1")
+        git(self.project, "update-ref", "refs/remotes/origin/develop", "HEAD")
+        path = self.project / "harness.json"
+        base = json.loads(path.read_text(encoding="utf-8"))
+        for change, expect, warned in (({"foo": 1, "integration_branch": "develop"}, "- 기록 없는 커밋: 0/0", False),
+                                       ({"integration_branch": 5}, "- 기록 없는 커밋: 1/1", True)):
+            with self.subTest(change=change):
+                path.write_text(json.dumps({**base, **change}), encoding="utf-8")
+                result = self.in_repo("agent")
+                code, out, err = run_cli(["agent", "summary", str(self.project)])
+                self.assertEqual((result.returncode, code), (0, 0), result.stderr + err)
+                self.assertIn(expect, out)
+                self.assertEqual(result.stdout, out)
+                self.assertEqual(result.stderr, err)
+                self.assertEqual("기본값(기준 origin/main, 키트 단가)으로 요약한다" in err, warned)
+
     def test_review_matches_kit(self):
         """T4: review는 리뷰 파일만 읽고 키트 `review summary`와 같은 두 줄, 오류는 종료 2"""
         self.prepare()
@@ -132,6 +152,15 @@ class InRepoSummaryTest(SessionRecordCase):
                 self.assertEqual((result.returncode, result.stdout), (2, ""))
                 self.assertIn("collect.py", result.stderr)
                 self.assertIn("init <저장소> --force", result.stderr)
+
+    def test_missing_sibling_exits_2(self):
+        """#123 리뷰 F6: collect.py가 함께 읽는 classify_ci.py가 없어도 같은 안내와 종료 2"""
+        self.prepare()
+        (self.project / ".harness" / "metrics" / "classify_ci.py").unlink()
+        result = self.in_repo("agent")
+        self.assertEqual((result.returncode, result.stdout), (2, ""))
+        self.assertIn("classify_ci.py", result.stderr)
+        self.assertIn("init <저장소> --force", result.stderr)
 
 
 if __name__ == "__main__":

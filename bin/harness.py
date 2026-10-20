@@ -1372,13 +1372,11 @@ def cmd_events_summary(args) -> int:
 def session_report(args) -> tuple[dict, int | None, int | None, dict]:
     """(요약, 기록 없는 커밋 수, 비교한 커밋 수, 단가). `sessions summary`와 `agent summary`가 같이 쓴다."""
     target = summary_target(args)
+    warn = lambda text: print(text, file=sys.stderr)  # noqa: E731
+    # 설정은 저장소 안 `.harness/summary.py`와 같은 검사로 읽는다(설정이 깨져도 요약은 낸다, #96 리뷰 B F3·#123 리뷰 F3)
+    config = metrics_summary.repo_config(hooks_common, metrics_collect, target, warn)
     try:
-        config = load_config(target / CONFIG_NAME) if (target / CONFIG_NAME).is_file() else {}
-    except HarnessError as exc:  # 설정이 깨져도 요약은 낸다(#96 리뷰 B F3)
-        print(f"{CONFIG_NAME}를 읽지 못해 기본값(기준 origin/main, 키트 단가)으로 요약한다: {exc}", file=sys.stderr)
-        config = {}
-    try:
-        return metrics_summary.session_report(hooks_common, metrics_collect, target, args.branch, args.base, config)
+        return metrics_summary.session_report(hooks_common, metrics_collect, target, args.branch, args.base, config, warn)
     except metrics_summary.SummaryError as exc:
         raise HarnessError(str(exc)) from exc
 

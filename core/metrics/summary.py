@@ -157,16 +157,22 @@ def load_module(path: Path, name: str):
     try:
         spec.loader.exec_module(module)
     except Exception as exc:  # noqa: BLE001 - 복사본이 깨졌으면 원인을 보이고 종료 2
-        raise SummaryError(f"{path} 을 읽을 수 없다: {exc}") from exc
+        # 복사본이 깨졌거나 함께 읽는 파일(collect.py의 classify_ci.py 등)이 없다(#123 리뷰 F6)
+        raise SummaryError(f"{path} 을 읽을 수 없다: {exc}. 키트 `harness init <저장소> --force`로 다시 생성한다") from exc
     return module
 
 
 def repo_config(common, collect, target: Path, warn) -> dict:
-    """`harness.json`. 깨졌거나 단가 설정이 틀리면 알리고 기본값(기준 origin/main, 키트 단가)으로 요약한다(#96 리뷰 B F3).
-    키트 명령처럼 설정 전체를 버린다. 키트의 나머지 설정 검사(키·플랫폼 등)는 하지 않는다."""
+    """`harness.json`. 깨졌거나 요약에 쓰는 값(기준 브랜치·단가)이 틀리면 알리고 설정 전체를 버려 기본값(기준 origin/main,
+    키트 단가)으로 요약한다(#96 리뷰 B F3). 키트 명령도 이 함수를 써서 같은 수치를 낸다(#123 리뷰 F3). 요약에 쓰지 않는
+    키·플랫폼 등은 보지 않는다(키트의 다른 명령이 검사한다)."""
+    source = target / CONFIG_NAME
     try:
         config = common.load_config(target)
-        errors = collect.validate_pricing(config["pricing"], target / CONFIG_NAME) if "pricing" in config else []
+        errors = collect.validate_pricing(config["pricing"], source) if "pricing" in config else []
+        errors += [f"{source}: {key}는 비어 있지 않은 문자열이어야 한다"
+                   for key in ("integration_branch", "default_branch")
+                   if key in config and not (isinstance(config[key], str) and config[key].strip())]
     except common.ConfigError as exc:
         errors = [str(exc)]
     if errors:

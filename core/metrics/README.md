@@ -130,7 +130,7 @@ python bin/harness.py agent summary ../my-project     # 같은 출력. 키트 �
 - `init`이 넣는 `.harness/summary.py`(#123)는 키트의 `events`·`sessions`·`agent`·`review summary`와 같은 코드(`summary.py`)다.
   `agent`·`events`·`sessions`·`review <리뷰 파일>`을 받고, 현재 디렉터리를 대상 worktree로 본다(`--branch`·`--base`는 키트와 같다).
   `.harness/metrics/collect.py`(`classify_ci.py`를 읽는다)와 `.claude/hooks/harness_common.py`를 읽으며 없으면 종료 2다. MR을 만드는 쪽(AI 도구 포함)이
-  실행해 절을 채운다(생성 `AGENTS.md` 7절). `harness.json`은 hooks·pricing만 검사한다(틀리면 키트처럼 기본값으로 요약)
+  실행해 절을 채운다(생성 `AGENTS.md` 7절). `harness.json`은 키트 명령과 같이 hooks·기준 브랜치·pricing만 검사한다(틀리면 경고하고 기본값으로 요약)
 
 ```text
 ## 에이전트 기록
@@ -153,8 +153,9 @@ python bin/harness.py agent summary ../my-project     # 같은 출력. 키트 �
   (Codex 승인 검토)는 비용에서 빼고 참고 줄에 토큰 수를 적는다. 그 밖의 단가 없는 모델이 있으면 비용 줄을 내지 않는다(일부 모델만 센
   비용이 지표 6을 낮추지 않게). 키트 단가와 다르게 계산하려면 `pricing.models`로 덮어쓴다. 세션 로그는
   PC마다 있으므로 그 PC에서 작업한 사람이 절을 만든다
-- 보고로 보는 조건은 처음 나온 `도구:` 줄에 `이름 세션수` 항목(이름은 쉼표 없는 40자 이하)이 하나 이상 있는 것이다. 다른 줄은 없어도 된다. hooks가 없는 도구(Codex 등)로
-  작업했으면 그 줄에 손으로 더한다(`- 도구: claude-code 2, codex 1`). 절이 없거나 "기록 없음"이면 미보고다
+- 보고로 보는 조건은 처음 나온 `도구:` 줄에 `이름 세션수` 항목(이름은 쉼표 없는 40자 이하)이 하나 이상 있는 것이다. 다른 줄은 없어도 된다. Codex는 위처럼
+  자동으로 세므로 더하지 않는다. 기록을 남기지 않는 도구로 작업했으면 그 줄에 손으로 더한다(`- 도구: claude-code 2, 기타도구 1`).
+  절이 없거나 "기록 없음"이면 미보고다
 - 수집기는 주석·코드 블록을 지운 절에서 라벨이 붙은 줄만 읽고 같은 라벨은 처음 값만 쓴다(`참고:` 줄은 읽지 않는다). 토큰은
   15자리, 비용은 정수 9자리·소수 6자리까지만 읽고 형식이 틀린 줄은 건너뛴다. 도구 이름은 글자·숫자·공백·`._-`, 통화는 영문 3자
   또는 원·₩·$·€·¥·£만 받는다(주간 요약 메시지에 들어가므로 `@channel` 같은 멘션 문법을 막는다). 본문은 자기 신고이며 검증하지 않는다
@@ -167,7 +168,7 @@ python bin/harness.py agent summary ../my-project     # 같은 출력. 키트 �
 
 ### 리뷰 결과 (지표 8, M5-4)
 
-리뷰 템플릿 7장(처리) 표를 작성자가 채운 뒤 `harness review summary <리뷰 파일>`의 두 줄을 MR 본문 `## 리뷰 결과`에 붙인다.
+리뷰 템플릿 7장(처리) 표를 작성자가 채운 뒤 `python .harness/summary.py review <리뷰 파일>`(키트는 `harness review summary`)의 두 줄을 MR 본문 `## 리뷰 결과`에 붙인다.
 `plans/`는 커밋하지 않으므로 수집기는 본문의 두 줄만 읽는다.
 
 ```text
