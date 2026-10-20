@@ -14,7 +14,8 @@
 | 5 | hooks 개입 수와 보고 MR 수 | 병합 MR 본문 `## hooks 기록`의 차단·확인·종료 검증 실패 수 합계, 절을 채운 MR 수 / 집계 MR 수(아래 "hooks 기록") |
 
 네 스크립트(`collect.py`·`report.py`·`notify.py`·`classify_ci.py`)는 표준 라이브러리만 쓰고, `harness init`이 GitLab 대상 저장소의
-`.harness/metrics/`에 그대로 복사한다(`check`가 드리프트를 본다). 소비자 CI에서는 예약 파이프라인 조각 `core/ci/gitlab/metrics.yml`이
+`.harness/metrics/`에 그대로 복사한다(`check`가 드리프트를 본다). MR 본문 기록 요약 `summary.py`는 모든 플랫폼의
+`.harness/summary.py`로, 그것이 쓰는 `collect.py`·`classify_ci.py`는 GitHub 대상에도 복사한다(아래 "에이전트 기록"). 소비자 CI에서는 예약 파이프라인 조각 `core/ci/gitlab/metrics.yml`이
 주 1회 수집 → 리포트 → 발송을 실행하고 아티팩트를 게시한다([`core/ci/README.md`](../ci/README.md) "측정 예약 파이프라인").
 
 ## 수집기 (`collect.py`, `harness metrics collect`)
@@ -90,7 +91,8 @@ hooks는 보호 경로 판정(`block`·`ask`)과 종료 검증 실패를 각 wor
 수집기는 병합된 본문만 읽으므로, 리뷰를 반영한 뒤 병합 직전에 다시 실행해 절을 바꾼다(MR을 연 뒤의 개입이 빠지지 않게).
 
 ```bash
-python bin/harness.py events summary ../my-project            # 현재 브랜치. 키트 자신은 --self
+python .harness/summary.py events                              # 대상 저장소의 작업한 worktree에서(키트 없이)
+python bin/harness.py events summary ../my-project            # 같은 출력. 키트 자신은 --self
 python bin/harness.py events summary ../my-project --branch feat/ABC-12
 ```
 
@@ -121,8 +123,14 @@ python bin/harness.py events summary ../my-project --branch feat/ABC-12
 MR 본문 `## 에이전트 기록` 절을 거친다. 병합 직전에 작업한 worktree에서 만든다.
 
 ```bash
-python bin/harness.py agent summary ../my-project     # 키트 자신은 --self. --branch·--base는 sessions summary와 같다
+python .harness/summary.py agent                     # 대상 저장소의 작업한 worktree에서(키트 없이)
+python bin/harness.py agent summary ../my-project     # 같은 출력. 키트 자신은 --self. --branch·--base는 sessions summary와 같다
 ```
+
+- `init`이 넣는 `.harness/summary.py`(#123)는 키트의 `events`·`sessions`·`agent`·`review summary`와 같은 코드(`summary.py`)다.
+  `agent`·`events`·`sessions`·`review <리뷰 파일>`을 받고, 현재 디렉터리를 대상 worktree로 본다(`--branch`·`--base`는 키트와 같다).
+  `.harness/metrics/collect.py`(`classify_ci.py`를 읽는다)와 `.claude/hooks/harness_common.py`를 읽으며 없으면 종료 2다. MR을 만드는 쪽(AI 도구 포함)이
+  실행해 절을 채운다(생성 `AGENTS.md` 7절). `harness.json`은 hooks·pricing만 검사한다(틀리면 키트처럼 기본값으로 요약)
 
 ```text
 ## 에이전트 기록
