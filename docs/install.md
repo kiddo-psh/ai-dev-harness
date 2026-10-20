@@ -459,8 +459,10 @@ CLI 명령은 `init`, `check`, `scaffold`, `judge`(`--eval` 포함), `lint-plans
 
 0.2.0 이후 M2~M5의 기능이 들어왔다(판정·lint, 프로필·스캐폴드, 측정·리포트, 세션 기록·추정 비용·실시간 대시보드, hooks 없는
 도구의 보호 경로 확인). 설정 키는 추가만 했고 기존 키의 뜻은 바꾸지 않았다. 예외: 10월 2~3일의 키트(같은 0.2.0으로 기록됨)로
-`claude_review` 키를 켰다면 그 키는 없어졌다. `init`·`check`가 알 수 없는 키 오류를 내면 `harness.json`에서 지우고
-`.harness/claude-review/`도 지운다.
+`claude_review` 키를 켰다면 그 기능은 없어졌다. `harness.json`의 `claude_review` 키와 `.harness/claude-review/`를 지우고,
+`.gitlab-ci.yml`에서 `claude-review.yml` include와 그 템플릿을 쓰는 로컬 job(`harness-claude-auth-check`,
+`harness-claude-review`)도 지운다. include만 0.3.0으로 올리면 없어진 조각을 가리켜 파이프라인 설정이 깨지고, 옛 고정값으로
+두면 job이 지운 스크립트를 부른다.
 
 1. 작업 브랜치를 만든다(생성 파일이 한꺼번에 바뀌므로 다른 작업과 섞지 않는다).
 2. 키트를 0.3.0(`v0.3.0` 태그)으로 받고 `python bin/harness.py init <target> --force`를 실행한다. 루트 `init`이 `harness.json`에
