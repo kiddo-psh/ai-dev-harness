@@ -486,6 +486,17 @@ class InRepoTelemetryTest(SessionRecordCase):
         self.assertEqual((code, len(collector.records())), (0, 4))
         self.assertIn("0개 보냄", out)
 
+    def test_subdirectory_reads_root_config(self):
+        """#127 리뷰 F2: 하위 디렉터리에서 실행해도 worktree 루트의 harness.json(키트 버전·단가)을 쓴다"""
+        self.prepare()
+        sub = self.project / "docs"
+        result = self.in_repo("push", "--dry-run", cwd=sub)
+        root = self.in_repo("push", "--dry-run")
+        self.assertEqual((result.returncode, root.returncode), (0, 0), result.stderr)
+        self.assertIn(f'"stringValue": "{harness.VERSION}"', result.stdout)
+        observed = re.compile(r'"observedTimeUnixNano": "\d+"')
+        self.assertEqual(observed.sub("", result.stdout), observed.sub("", root.stdout))
+
     def test_missing_copy_exits_2(self):
         """복사본(summary.py·collect.py)이 없으면 종료 2와 다시 생성하라는 안내"""
         self.prepare()

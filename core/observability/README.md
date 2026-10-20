@@ -135,7 +135,8 @@ service:
 
 프록시 조각(Caddy 2 예시). OTLP/HTTP(`/v1/*`, `telemetry push`·HTTP로 보내는 Claude Code)는 4318로, 나머지 gRPC(Claude Code
 `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`)는 h2c로 4317에 넘긴다. 클라이언트 엔드포인트는 둘 다 `https://collector.example.com`(포트 443)이다.
-토큰은 Caddy를 띄우는 환경 변수로 넣고 이 파일에 쓰지 않는다. 적용 전에 `caddy validate`로 확인한다.
+토큰은 Caddy를 띄우는 환경 변수로 넣고 이 파일에 쓰지 않는다. 키트 CI는 이 조각을 실행하지 않는다. `caddy validate`는 문법만 보므로
+적용한 뒤 맞는 토큰·틀린 토큰으로 한 번씩 보내(예: `telemetry push`, 401 여부) 수집기에 `member`가 붙는지 확인한다.
 
 ```caddyfile
 collector.example.com {
@@ -147,15 +148,19 @@ collector.example.com {
 		default                        "-"
 	}
 	@unknown vars {harness_member} "-"
-	respond @unknown 401
-
-	# 클라이언트가 보낸 X-Harness-Member는 덮어쓴다(위조 방지). 토큰은 수집기로 넘기지 않는다
-	request_header X-Harness-Member {harness_member}
-	request_header -Authorization
-
 	@otlphttp path /v1/*
-	reverse_proxy @otlphttp 127.0.0.1:4318
-	reverse_proxy h2c://127.0.0.1:4317
+
+	# route 안은 적은 순서대로 실행한다. map은 값을 읽을 때 Authorization을 다시 보므로(지연 평가) 토큰 확인과
+	# member 헤더 설정을 Authorization 삭제보다 먼저 둔다. route 없이 두면 Caddy 기본 순서(request_header가
+	# respond보다 먼저)로 Authorization이 먼저 지워져 맞는 토큰도 모두 401이 된다(#127 리뷰 F1)
+	route {
+		respond @unknown 401
+		# 클라이언트가 보낸 X-Harness-Member는 덮어쓴다(위조 방지). 토큰은 수집기로 넘기지 않는다
+		request_header X-Harness-Member {harness_member}
+		request_header -Authorization
+		reverse_proxy @otlphttp 127.0.0.1:4318
+		reverse_proxy h2c://127.0.0.1:4317
+	}
 }
 ```
 

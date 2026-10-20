@@ -448,7 +448,10 @@ def main(argv: list[str] | None = None) -> int:
     except summary.SummaryError as exc:
         print(f"오류: {exc}", file=sys.stderr)
         return 2
-    return run(common, collect, summary, Path.cwd(), endpoint=args.endpoint, dry_run=args.dry_run,
+    # 하위 디렉터리에서 실행해도 worktree 루트의 harness.json(단가·키트 버전)을 읽는다(#127 리뷰 F2)
+    top = common.git(Path.cwd(), "rev-parse", "--show-toplevel")
+    target = Path(top.strip()) if top and top.strip() else Path.cwd()
+    return run(common, collect, summary, target, endpoint=args.endpoint, dry_run=args.dry_run,
                from_start=args.from_start, out=lambda text: print(text, flush=True))
 
 
