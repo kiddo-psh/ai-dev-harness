@@ -691,7 +691,7 @@ def read_session_record(line: str):
 
 CODEX_TOOL = "codex"
 # 줄 전체를 JSON으로 읽기 전에 이 표지가 있는 줄만 본다. 대화 내용(response_item)은 읽지 않는다
-CODEX_MARKERS = ('"turn_context"', '"token_usage_record"', '"task_complete"', '"token_count"')
+CODEX_MARKERS = ('"turn_context"', '"token_usage_record"', '"task_complete"', '"token_count"', '"task_started"')
 
 
 def codex_home(env=None) -> Path:
@@ -794,6 +794,10 @@ def codex_session_records(path: Path, roots: list[str]) -> tuple[str | None, lis
                         legacy = counts
                         add_usage(usage, {model or "codex-unknown": delta})
                         last_usage_ts = record["timestamp"] if moment else last_usage_ts
+                elif kind == "event_msg" and payload.get("type") == "task_started" and moment:
+                    # 턴 시작. 하루 뒤 재개한 턴도 작업 구간이 시작 시각부터 잡히게 한다(#118 Codex 리뷰).
+                    # 응답 수에는 들지 않는다(응답은 턴 완료만)
+                    events.append({"ts": record["timestamp"], "event": "usage" if parent else "turn", **base})
                 elif kind == "event_msg" and payload.get("type") == "task_complete" and moment:
                     emitted = {name: dict(counts) for name, counts in usage.items()}
                     events.append({"ts": record["timestamp"], "event": turn_event, **base, "usage": emitted})
@@ -812,7 +816,8 @@ def branch_timeline(lines) -> list[tuple[dt.datetime, str | None]]:
     for line in lines:
         selector, _, subject = line.partition("\t")
         match = re.search(r"@\{([^}]+)\}", selector)
-        moved = re.match(r"checkout: moving from .+ to (\S+)$", subject.strip())
+        moved = re.match(r"checkout: moving from .+ to (\S+)$", subject.strip()) \
+            or re.match(r"Branch: renamed refs/heads/.+ to refs/heads/(\S+)$", subject.strip())  # 체크아웃한 브랜치 이름 변경
         moment = _safe_ts(match.group(1)) if match else None
         if moment and moved:
             target = moved.group(1)

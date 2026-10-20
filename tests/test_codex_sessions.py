@@ -174,6 +174,24 @@ class CodexRecordsTest(unittest.TestCase):
         summary = collect.summarize_sessions([json.dumps(e) for e in events], "main")
         self.assertEqual(sum(c["input"] for c in summary["usage"].values()), 1800)
 
+    def test_resumed_turn_and_branch_rename(self):
+        """#118 Codex 리뷰: 오래 쉰 뒤 재개한 턴은 시작 시각부터 작업 구간, 체크아웃한 브랜치 이름 변경을 따른다"""
+        path = self.write("resumed", [
+            self.meta("resumed"),
+            {"timestamp": ts(300), "type": "event_msg", "payload": {"type": "task_started"}},
+            {"timestamp": ts(290), "type": "event_msg", "payload": {"type": "task_complete"}},
+            {"timestamp": ts(40), "type": "event_msg", "payload": {"type": "task_started"}},  # 4시간 뒤 재개
+            {"timestamp": ts(10), "type": "event_msg", "payload": {"type": "task_complete"}},
+        ])
+        path.write_text(path.read_text(encoding="utf-8").replace(ts(30), ts(310), 1), encoding="utf-8")
+        _, events = collect.codex_session_records(path, [str(self.repo)])
+        self.assertEqual([e["event"] for e in events], ["start", "turn", "stop", "turn", "stop"])
+        summary = collect.summarize_sessions([json.dumps(e) for e in events], "main")
+        self.assertEqual((summary["turns"], summary["active_sec"] // 60), (2, 50))  # 시작~첫 턴 20분 + 재개 뒤 30분(없으면 20)
+        renamed = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=20)).isoformat()
+        timeline = collect.branch_timeline([f"HEAD@{{{renamed}}}\tBranch: renamed refs/heads/main to refs/heads/feat/new"])
+        self.assertEqual(collect.branch_at(timeline, dt.datetime.now(dt.timezone.utc), "main"), "feat/new")
+
     def test_codex_home_variable(self):
         self.assertEqual(collect.codex_home({"CODEX_HOME": str(self.home)}), self.home)
         self.assertEqual(collect.codex_home({}), Path.home() / ".codex")
