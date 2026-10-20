@@ -148,6 +148,32 @@ class CodexRecordsTest(unittest.TestCase):
         self.assertEqual(events[2]["usage"]["gpt-5.6-sol"], {"input": 800, "output": 40, "cache_write_5m": 0,
                                                              "cache_write_1h": 0, "cache_read": 100})
 
+    def test_legacy_totals_split_by_model_and_survive_format_change(self):
+        """#118 Codex 리뷰: 옛 누적은 늘어난 만큼만 그때의 모델에, 새 형식으로 바뀌어도 옛 몫을 잃지 않는다"""
+        def count(seconds_ago, total):
+            return {"timestamp": ts(seconds_ago), "type": "event_msg", "payload": {"type": "token_count", "info": {
+                "total_token_usage": {"input_tokens": total, "cached_input_tokens": 0, "output_tokens": 0}}}}
+
+        def turn(model, minutes_ago):
+            return {"timestamp": ts(minutes_ago), "type": "turn_context", "payload": {"model": model}}
+
+        def done(minutes_ago):
+            return {"timestamp": ts(minutes_ago), "type": "event_msg", "payload": {"type": "task_complete"}}
+
+        path = self.write("mixed", [
+            self.meta("mixed"), turn("model-a", 28), count(27, 500), done(26),
+            turn("model-b", 25), count(24, 1000), done(23),  # 누적 1000 = a 500 + b 500
+            turn("model-b", 22),  # 재개 뒤 새 형식: 응답별 기록이 먼저, 그 뒤 누적(옛 몫 포함)은 무시
+            {"timestamp": ts(21), "type": "token_usage_record", "payload": {"usage": {
+                "input_tokens": 800, "cached_input_tokens": 0, "output_tokens": 0}}},
+            count(21, 1800), done(20),
+        ])
+        _, events = collect.codex_session_records(path, [str(self.repo)])
+        last = events[-1]["usage"]
+        self.assertEqual((last["model-a"]["input"], last["model-b"]["input"]), (500, 1300))
+        summary = collect.summarize_sessions([json.dumps(e) for e in events], "main")
+        self.assertEqual(sum(c["input"] for c in summary["usage"].values()), 1800)
+
     def test_codex_home_variable(self):
         self.assertEqual(collect.codex_home({"CODEX_HOME": str(self.home)}), self.home)
         self.assertEqual(collect.codex_home({}), Path.home() / ".codex")

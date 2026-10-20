@@ -759,7 +759,8 @@ def codex_session_records(path: Path, roots: list[str]) -> tuple[str | None, lis
             base = {"session": session, "tool": CODEX_TOOL, "branch": branch, **({"parent": parent} if parent else {})}
             turn_event = "usage" if parent else "stop"
             events: list[dict] = [{"ts": started, "event": "usage" if parent else "start", "source": "codex", **base}]
-            model, usage, totals = None, {}, None  # totals: token_count 누적(옛 로그용)
+            model, usage = None, {}
+            legacy = {}  # 옛 로그 token_count 누적의 직전 값. 늘어난 만큼만 그때의 모델에 더한다(#118 Codex 리뷰)
             per_record = False
             last_usage_ts, emitted = None, None
             for line in handle:
@@ -784,19 +785,21 @@ def codex_session_records(path: Path, roots: list[str]) -> tuple[str | None, lis
                         add_usage(usage, {model or "codex-unknown": counts})
                         last_usage_ts = record["timestamp"] if moment else last_usage_ts
                 elif kind == "event_msg" and payload.get("type") == "token_count" and not per_record:
+                    # 응답별 기록이 나오기 전까지만 쓴다. 새 형식은 같은 응답의 token_usage_record가 늘 먼저 나오므로
+                    # 형식이 바뀐 뒤(재개)에도 옛 누적은 usage에 남고 새 기록만 더해진다
                     info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
                     counts = _codex_usage(info.get("total_token_usage"))
                     if counts:
-                        totals = {model or "codex-unknown": counts}
+                        delta = {field: max(counts[field] - legacy.get(field, 0), 0) for field in USAGE_FIELDS}
+                        legacy = counts
+                        add_usage(usage, {model or "codex-unknown": delta})
                         last_usage_ts = record["timestamp"] if moment else last_usage_ts
                 elif kind == "event_msg" and payload.get("type") == "task_complete" and moment:
-                    current = usage if per_record else (totals or {})
-                    emitted = {name: dict(counts) for name, counts in current.items()}
+                    emitted = {name: dict(counts) for name, counts in usage.items()}
                     events.append({"ts": record["timestamp"], "event": turn_event, **base, "usage": emitted})
-            current = usage if per_record else (totals or {})
-            if current and current != emitted and last_usage_ts:
+            if usage and usage != emitted and last_usage_ts:
                 events.append({"ts": last_usage_ts, "event": "usage", **base,
-                               "usage": {name: dict(counts) for name, counts in current.items()}})
+                               "usage": {name: dict(counts) for name, counts in usage.items()}})
             return root, events
     except (OSError, ValueError, OverflowError, AttributeError, TypeError):
         return None, []
