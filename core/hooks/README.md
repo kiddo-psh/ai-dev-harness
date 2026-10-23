@@ -147,8 +147,9 @@ hooks는 실수를 막는 장치이지 보안 경계가 아니다. 최종 방어
 - hook 스크립트 파일이 없으면 Python이 종료 코드 2를 내서 모든 편집이 거부된다. `init --force`로 다시 설치한다.
 - Claude Code 외의 도구(Codex, IDE 확장 등)에는 적용되지 않는다. MR 단계에서 같은 규칙을 MR lint의 보호 경로 확인과
   변경 영역 검증 조각(`core/ci/gitlab/verify.yml`)이 다시 건다(M5-5, [`core/ci/README.md`](../ci/README.md)).
-  Codex는 `AGENTS.md`를 읽으므로 규칙 문서는 같이 적용되지만, Codex 자체의 hook 기능으로 같은 보호를 걸 수 있는지는
-  확인하지 않았다(2026-10-20, 이 PC의 Codex 설정에 hook 항목 없음).
+  Codex는 `AGENTS.md`를 읽으므로 규칙 문서는 같이 적용된다. Codex에도 프로젝트 hook(`.codex/hooks.json`)이 있지만
+  키트는 텔레메트리 전송 계기(`codex-hook.py`, Stop·SessionEnd)로만 쓰고 보호 경로·종료 검증은 걸지 않는다(#140,
+  [`docs/telemetry-v2.md`](../../docs/telemetry-v2.md) "전송 계기"). 대화형 세션에서만 돌고 사람이 hook마다 승인해야 한다.
 - 종료 검증은 종료 시점의 체크아웃에서 돈다. 세션이 다른 브랜치에 깨진 커밋을 만들고 원래 브랜치로 돌아와 끝나면
   그 커밋은 작업 트리에 없어 검증되지 않는다. 그 브랜치의 MR 파이프라인이 잡는다.
 - 사람이 편집기로 고치는 파일은 막지 않는다.

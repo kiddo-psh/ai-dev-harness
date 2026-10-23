@@ -18,7 +18,7 @@
   "panels": [
     {
       "id": 101,
-      "title": "관측 끊김 · 사람·저장소",
+      "title": "24시간 전송 없음 · 사람·저장소",
       "type": "stat",
       "datasource": {
         "type": "loki",
@@ -27,7 +27,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum (max by (person_name, repo_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"exporter\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | unwrap harness_event_unix | __error__=\"\" [7d])) < bool (${__to:date:seconds} - 180))",
+          "expr": "sum (max by (person_name, repo_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"exporter\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | unwrap harness_event_unix | __error__=\"\" [7d])) < bool (${__to:date:seconds} - 86400))",
           "datasource": {
             "type": "loki",
             "uid": "${DS_LOKI}"
@@ -56,7 +56,7 @@
         "graphMode": "none",
         "textMode": "value"
       },
-      "description": "관측된 사람·저장소별 수집기 신호. 최근 7일 내 수신 이력 기준, 180초 이상 무신호는 관측 끊김. 미설치 PC 목록·도구별 실행 상태는 알 수 없습니다.",
+      "description": "키트 공통 텔레메트리(v2)의 사람·저장소별 마지막 전송. 최근 7일 내 수신 이력 기준. 전송은 Codex 응답 종료(최소 5분 간격)와 세션 종료 때만 하므로 24시간 전송 없음은 도구를 쓰지 않은 경우도 포함합니다. 실시간 사용 여부는 도구 내장 텔레메트리 행에서 봅니다. 미설치 PC 목록은 알 수 없습니다.",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -247,7 +247,7 @@
         },
         {
           "refId": "B",
-          "expr": "max by (person_name, repo_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"exporter\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | unwrap harness_event_unix | __error__=\"\" [7d])) < bool (${__to:date:seconds} - 180)",
+          "expr": "max by (person_name, repo_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"exporter\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | unwrap harness_event_unix | __error__=\"\" [7d])) < bool (${__to:date:seconds} - 86400)",
           "datasource": {
             "type": "loki",
             "uid": "${DS_LOKI}"
@@ -260,7 +260,7 @@
         "type": "loki",
         "uid": "${DS_LOKI}"
       },
-      "description": "관측된 사람·저장소별 수집기 신호. 최근 7일 내 수신 이력 기준, 180초 이상 무신호는 관측 끊김. 미설치 PC 목록·도구별 실행 상태는 알 수 없습니다.",
+      "description": "키트 공통 텔레메트리(v2)의 사람·저장소별 마지막 전송. 최근 7일 내 수신 이력 기준. 전송은 Codex 응답 종료(최소 5분 간격)와 세션 종료 때만 하므로 24시간 전송 없음은 도구를 쓰지 않은 경우도 포함합니다. 실시간 사용 여부는 도구 내장 텔레메트리 행에서 봅니다. 미설치 PC 목록은 알 수 없습니다.",
       "fieldConfig": {
         "defaults": {
           "noValue": "기록 없음",
@@ -270,7 +270,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "마지막 수신"
+              "options": "마지막 전송"
             },
             "properties": [
               {
@@ -282,7 +282,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "관측 상태"
+              "options": "전송 상태"
             },
             "properties": [
               {
@@ -292,11 +292,11 @@
                     "type": "value",
                     "options": {
                       "0": {
-                        "text": "최근 수신",
+                        "text": "24시간 내 전송",
                         "color": "green"
                       },
                       "1": {
-                        "text": "관측 끊김",
+                        "text": "24시간 전송 없음",
                         "color": "orange"
                       }
                     }
@@ -325,8 +325,8 @@
             "renameByName": {
               "person_name": "사람",
               "repo_name": "저장소",
-              "Value #A": "마지막 수신",
-              "Value #B": "관측 상태"
+              "Value #A": "마지막 전송",
+              "Value #B": "전송 상태"
             }
           }
         }
@@ -2815,7 +2815,7 @@
           },
           "options": {
             "mode": "markdown",
-            "content": "- **0**: 관측된 0. **기록 없음**: 선택 범위에 해당 기록이 없음. **미지원·미수집**: 0과 구분합니다.\n- **조회 실패**: 패널 오류를 유지합니다.\n- **필터**: 사람·저장소는 새 진단과 hooks에 적용합니다. 기존 원천 진단 행은 필터 미적용입니다.\n- **관측 끊김**: 180초 무신호이며 에이전트 실행 상태가 아닙니다. 미설치 PC는 알 수 없습니다.\n- **비용**: 기존 원천의 부분 추정이며 공통 사용량과 합산하지 않습니다."
+            "content": "- **0**: 관측된 0. **기록 없음**: 선택 범위에 해당 기록이 없음. **미지원·미수집**: 0과 구분합니다.\n- **조회 실패**: 패널 오류를 유지합니다.\n- **필터**: 사람·저장소는 새 진단과 hooks에 적용합니다. 기존 원천 진단 행은 필터 미적용입니다.\n- **24시간 전송 없음**: 키트는 세션·응답이 끝날 때만 보내므로 도구를 쓰지 않은 경우도 포함합니다. 에이전트 실행 상태가 아니며 미설치 PC는 알 수 없습니다.\n- **비용**: 기존 원천의 부분 추정이며 공통 사용량과 합산하지 않습니다."
           },
           "targets": []
         }

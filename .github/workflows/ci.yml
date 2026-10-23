@@ -136,6 +136,9 @@ jobs:
       - name: 스모크 검사
         run: python3 .github/scripts/observability_smoke.py
 
+      - name: 공통 텔레메트리 v2 스모크 검사
+        run: python3 .github/scripts/normalized_smoke.py
+
       - name: 실패 시 로그
         if: failure()
         run: docker compose logs --no-color --tail 200

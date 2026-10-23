@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/codex-hook.py\" stop"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/codex-hook.py\" session-end"
+          }
+        ]
+      }
+    ]
+  }
+}

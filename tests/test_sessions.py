@@ -38,8 +38,10 @@ def run_cli(args, cwd=None):
 class SessionRecordCase(SessionBaselineCase):
     def setUp(self):
         super().setUp()
-        # 요약이 이 PC의 실제 Codex 로그(~/.codex)를 읽지 않게 빈 위치를 준다(#116 리뷰 F7)
-        patcher = mock.patch.dict(os.environ, {"CODEX_HOME": str(self.tmp / "no-codex")})
+        # 요약이 이 PC의 실제 Codex 로그(~/.codex)를 읽지 않게 빈 위치를 준다(#116 리뷰 F7). 공통 텔레메트리 v2(#140)가
+        # 읽는 Claude Code 설정 홈(~/.claude)도 같다
+        patcher = mock.patch.dict(os.environ, {"CODEX_HOME": str(self.tmp / "no-codex"),
+                                               "CLAUDE_CONFIG_DIR": str(self.tmp / "no-claude")})
         patcher.start()
         self.addCleanup(patcher.stop)
 

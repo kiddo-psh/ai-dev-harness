@@ -587,7 +587,9 @@ OAuth로 로그인하면 사용자 이메일이 속성으로 붙는다(설정한
   켤 수 없다). 점검은 `telemetry doctor`([`core/observability/`](../core/observability/README.md#팀원-pc-설정-telemetry-setupdoctor-145))
 - 키트 기록: hooks의 세션·개입 기록과 이 저장소의 Codex 세션은 대상 저장소 안에서 `python .harness/telemetry.py push`(키트에서는
   `harness telemetry push`)가 보낸다. `telemetry` 블록이 있는 저장소는 Claude Code SessionEnd에서 자동으로 백그라운드 전송한다
-  (Claude Code는 설정 파일의 OTEL 변수를 hook에 넘기지 않으므로 환경변수만으로는 켜지지 않는다). Codex만 쓰는 PC는 수동·스케줄러로 실행한다.
+  (Claude Code는 설정 파일의 OTEL 변수를 hook에 넘기지 않으므로 환경변수만으로는 켜지지 않는다). Codex는 프로젝트 hook
+  (`.codex/hooks.json`)의 Stop(최소 5분 간격)·SessionEnd에서 보낸다. 저장소를 처음 열 때 프로젝트 신뢰와 hook 승인이 필요하고,
+  `codex exec`만 쓰는 PC는 수동으로 실행한다(#140, [`docs/telemetry-v2.md`](telemetry-v2.md)).
   자세한 설정·재시도·끄는 법은 [`core/observability/`](../core/observability/README.md#키트-기록과-codex-세션-telemetry-push).
   내용과 transcript 경로는 보내지 않는다
 - 사람 구분: 한 Claude 계정을 여러 명이 쓰면 수집기 앞 인증 프록시가 팀원별 토큰으로 `member`를 정한다. 대시보드의 "사람 구분"
