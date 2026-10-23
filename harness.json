@@ -1,5 +1,5 @@
 {
-  "harness_version": "0.3.6",
+  "harness_version": "0.4.0",
   "project_name": "ai-dev-harness",
   "platform": "github",
   "tracker": "github",
