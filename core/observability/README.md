@@ -100,6 +100,9 @@ hooks가 남긴 `sessions.jsonl`·`events.jsonl`(모든 worktree)에서 지난�
 worktree에서 연 Codex 세션의 새 사건을 OTLP/HTTP(JSON) 로그로 보낸다. 기본으로 아무것도 보내지 않으며, 팀이 정한 주기로 실행한다
 (cron·작업 스케줄러, 또는 세션을 마친 뒤 손으로). 수집기 주소가 정해진 저장소에서는 Claude Code의 SessionEnd hook이
 종료 기록 뒤 `.harness/telemetry.py push`를 자동으로 백그라운드 실행한다. 별도 스케줄러 없이 이 저장소의 Codex 기록도 같이 보낸다.
+Codex만 쓰는 PC는 Codex 프로젝트 hook(`.codex/hooks.json`)의 Stop(최소 5분 간격)·SessionEnd가 같은 push를 띄운다. 저장소를
+처음 열 때 프로젝트 신뢰와 hook 승인이 필요하고 대화형 세션에서만 돈다(#140, [`docs/telemetry-v2.md`](../../docs/telemetry-v2.md)).
+같은 push가 공통 텔레메트리 v2(대시보드 "harness 팀 사용량")도 보낸다.
 
 - 활성 조건: `harness.json`에 `telemetry` 블록이 있거나 hook 프로세스 환경에 OTLP 엔드포인트 변수가 있고, 저장소에
   `.harness/telemetry.py`가 설치돼 있어야 한다. **Claude Code는 설정 파일 `env`의 `OTEL_*` 변수를 hook에 넘기지 않으므로**(#145 실측)
@@ -241,8 +244,8 @@ Grafana `harness` 폴더에 프로비저닝된다. UID는 `harness-agentops`를 
 
 | 위치 | 표시 내용 | 표현 |
 | --- | --- | --- |
-| 상단 | 관측 끊김, 전송·읽기 오류 이력, Claude 보호 규칙 개입, Claude 검증 실패 | 숫자 카드 4개 |
-| 수집 상태 | 사람·저장소별 마지막 수신 시각과 180초 무신호 | 표 |
+| 상단 | 24시간 전송 없음, 전송·읽기 오류 이력, Claude 보호 규칙 개입, Claude 검증 실패 | 숫자 카드 4개 |
+| 수집 상태 | 사람·저장소별 공통 텔레메트리(v2) 마지막 전송 시각과 24시간 전송 없음 | 표 |
 | 문제 사건 | 시간대별 Claude 차단·확인 요청, 최근 차단·검증 실패 | 막대와 로그 |
 | 오류 이력 | 선택 기간 보고된 전송 실패·원천 읽기 오류 최대값 | 표 |
 | 접힌 상세 | 관측 지연, Claude hooks, 기존 원천 진단, 수집 범위·정의 | 상세 패널 |
@@ -253,8 +256,10 @@ Grafana `harness` 폴더에 프로비저닝된다. UID는 `harness-agentops`를 
 `DS_PROMETHEUS`·`DS_LOKI`는 숨긴 데이터소스 변수다. 기존 Grafana에서는 `current.value`를 실제 UID에 맞춘다.
 상단 대시보드 링크는 기간·사람·저장소 변수를 전달한다. 작업 ID는 근거 화면에서만 사용한다.
 
-관측 끊김은 최근 7일 안에 관측된 사람·저장소의 수집기 신호 기준이다. 미설치 PC 목록이나
-Claude/Codex 각각의 실행 상태를 알려 주지 않는다. 전송 실패·읽기 오류 이력은 기간 중 보고된
+수집 상태는 최근 7일 안에 관측된 사람·저장소의 공통 텔레메트리(v2) 전송 기준이다. 키트는 Claude Code 세션 종료와
+Codex 응답 종료(최소 5분 간격)·세션 종료 때만 보내므로([공통 텔레메트리 v2](../../docs/telemetry-v2.md)), 24시간 전송
+없음은 도구를 쓰지 않은 경우도 포함하며 수집 끊김으로 단정하지 않는다. 지금 쓰고 있는지는 도구 내장 텔레메트리 행에서
+본다. 미설치 PC 목록이나 Claude/Codex 각각의 실행 상태를 알려 주지 않는다. 전송 실패·읽기 오류 이력은 기간 중 보고된
 최대값이며 현재 미해결 건수가 아니다. 아래 표의 기존 비용·토큰 계산은 접힌 원천 진단에만 해당한다.
 
 | 패널 | 원천 | 쿼리 요지 |

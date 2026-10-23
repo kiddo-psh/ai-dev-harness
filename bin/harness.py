@@ -1448,7 +1448,7 @@ def load_telemetry():
 def cmd_telemetry_push(args) -> int:
     target, _self_mode = resolve_target(args) if args.self or args.target else (Path.cwd(), False)
     return load_telemetry().run(hooks_common, metrics_collect, metrics_summary, target, VERSION, endpoint=args.endpoint,
-                                dry_run=args.dry_run, from_start=args.from_start,
+                                dry_run=args.dry_run, from_start=args.from_start, claude_home=args.claude_home,
                                 out=lambda text: print(text, flush=True))
 
 
@@ -1941,6 +1941,7 @@ def main(argv: list[str] | None = None) -> int:
                                          "생략하면 OTEL_EXPORTER_OTLP_ENDPOINT, 그다음 harness.json telemetry.endpoint")
     push.add_argument("--dry-run", action="store_true", help="보내지 않고 보낼 내용을 출력한다(위치도 전진하지 않는다)")
     push.add_argument("--from-start", action="store_true", help="보낸 위치를 무시하고 처음부터 다시 보낸다")
+    push.add_argument("--claude-home", type=Path, help="공통 텔레메트리 v2가 읽는 Claude Code 설정 홈(기본 ~/.claude)")
     push.set_defaults(func=cmd_telemetry_push)
     for command in telemetry_setup.add_arguments(telemetry_sub):
         command.add_argument("target", nargs="?", help="대상 저장소(기본 현재 디렉터리)")

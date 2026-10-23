@@ -1,0 +1,1053 @@
+{
+  "uid": "harness-agentops-normalized",
+  "title": "harness 팀 사용량",
+  "tags": [
+    "harness",
+    "agentops"
+  ],
+  "description": "사람별 공통 토큰 사용량. 단가 미등록 포함, 사건 시각 기준 최근 7일. 추정 비용은 보조 지표이며 청구액이 아닙니다.",
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 6,
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timezone": "Asia/Seoul",
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_LOKI",
+        "label": "Loki",
+        "type": "datasource",
+        "query": "loki",
+        "current": {
+          "text": "Loki",
+          "value": "harness-loki"
+        },
+        "regex": "",
+        "hide": 2,
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false
+      },
+      {
+        "name": "member",
+        "type": "textbox",
+        "label": "사람",
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 0,
+        "description": "전체: .* · 미식별: 미식별"
+      },
+      {
+        "name": "repo",
+        "type": "textbox",
+        "label": "저장소",
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 0,
+        "description": "전체: .* · 미식별: 미식별"
+      },
+      {
+        "name": "tool",
+        "type": "textbox",
+        "label": "도구",
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 0,
+        "description": "전체: .* · 미식별: 미식별"
+      },
+      {
+        "name": "model",
+        "type": "textbox",
+        "label": "모델",
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 0,
+        "description": "전체: .* · 미식별: 미식별"
+      },
+      {
+        "name": "measure",
+        "label": "그래프 지표",
+        "type": "custom",
+        "query": "토큰 · 개 : tokens,추정 비용 · USD : cost",
+        "current": {
+          "text": "토큰 · 개",
+          "value": "tokens"
+        },
+        "options": [
+          {
+            "text": "토큰 · 개",
+            "value": "tokens",
+            "selected": true
+          },
+          {
+            "text": "추정 비용 · USD",
+            "value": "cost",
+            "selected": false
+          }
+        ],
+        "hide": 0,
+        "multi": false,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 13,
+      "title": "관측 토큰",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | label_format token_total=`{{add .harness_tokens_input .harness_tokens_output .harness_tokens_cache_read .harness_tokens_cache_write_5m .harness_tokens_cache_write_1h}}` | unwrap token_total | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "기록 없음",
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "description": "캐시 제외 입력 + 출력 + 캐시 읽기 + 캐시 쓰기의 합. 단가 미등록 모델도 포함. 토큰 수는 생산성·성과 지표가 아닙니다.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "id": 2,
+      "title": "관측 완료 응답",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"completion\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_completed | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "description": "키트 Stop 기록과 Codex task_complete를 센 관측값입니다. Claude Stop hook 설치 전 완료·검증은 미수집이며 추정하거나 0으로 채우지 않습니다.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "기록 없음",
+          "unit": "short",
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 1,
+      "title": "추정 비용 · USD",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | harness_currency=\"USD\" | unwrap harness_cost_estimate | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "기록 없음",
+          "unit": "currencyUSD",
+          "min": 0,
+          "decimals": 4
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "title": "단가 미등록 토큰",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_unpriced_tokens | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "기록 없음",
+          "unit": "short",
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "title": "사람별 ${measure:text}",
+      "type": "barchart",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "description": "사람·도구·모델 필터와 사건 시각 기준. 토큰에는 단가 미등록 포함. 비용은 등록된 USD 단가만 포함. 그래프 지표에서 전환합니다.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (person_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | harness_tool=\"claude-code\" | label_format display_value=`{{if eq \"${measure:raw}\" \"tokens\"}}{{add .harness_tokens_input .harness_tokens_output .harness_tokens_cache_read .harness_tokens_cache_write_5m .harness_tokens_cache_write_1h}}{{else}}{{if eq .harness_currency \"USD\"}}{{.harness_cost_estimate}}{{end}}{{end}}` | display_value!=\"\" | unwrap display_value | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (person_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | harness_tool=\"codex\" | label_format display_value=`{{if eq \"${measure:raw}\" \"tokens\"}}{{add .harness_tokens_input .harness_tokens_output .harness_tokens_cache_read .harness_tokens_cache_write_5m .harness_tokens_cache_write_1h}}{{else}}{{if eq .harness_currency \"USD\"}}{{.harness_cost_estimate}}{{end}}{{end}}` | display_value!=\"\" | unwrap display_value | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "기록 없음",
+          "custom": {
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "fillOpacity": 90,
+            "lineWidth": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Codex"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Claude Code"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xField": "사람",
+        "stacking": "normal",
+        "showValue": "auto",
+        "groupWidth": 0.65,
+        "barWidth": 0.9,
+        "barRadius": 0.1,
+        "fullHighlight": true,
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "xTickLabelRotation": 0
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "person_name",
+                "Value #A",
+                "Value #B",
+                "Value"
+              ]
+            }
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^Value #A$",
+            "renamePattern": "Claude Code"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^Value #B$",
+            "renamePattern": "Codex"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^Value$",
+            "renamePattern": "Claude Code"
+          }
+        },
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "person_name",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum"
+            },
+            "alias": "Total"
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Total",
+                "desc": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Total": true,
+              "Time": true
+            },
+            "indexByName": {
+              "person_name": 0,
+              "Codex": 1,
+              "Claude Code": 2
+            },
+            "renameByName": {
+              "person_name": "사람"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "일별 ${measure:text}",
+      "type": "barchart",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (harness_day) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | harness_tool=\"claude-code\" | label_format display_value=`{{if eq \"${measure:raw}\" \"tokens\"}}{{add .harness_tokens_input .harness_tokens_output .harness_tokens_cache_read .harness_tokens_cache_write_5m .harness_tokens_cache_write_1h}}{{else}}{{if eq .harness_currency \"USD\"}}{{.harness_cost_estimate}}{{end}}{{end}}` | display_value!=\"\" | unwrap display_value | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (harness_day) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | harness_tool=\"codex\" | label_format display_value=`{{if eq \"${measure:raw}\" \"tokens\"}}{{add .harness_tokens_input .harness_tokens_output .harness_tokens_cache_read .harness_tokens_cache_write_5m .harness_tokens_cache_write_1h}}{{else}}{{if eq .harness_currency \"USD\"}}{{.harness_cost_estimate}}{{end}}{{end}}` | display_value!=\"\" | unwrap display_value | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "description": "사람·도구·모델 필터와 사건 시각 기준. 토큰에는 단가 미등록 포함. 비용은 등록된 USD 단가만 포함. 그래프 지표에서 전환합니다.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "기록 없음",
+          "custom": {
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "fillOpacity": 90,
+            "lineWidth": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Codex"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Claude Code"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "vertical",
+        "xField": "날짜",
+        "stacking": "normal",
+        "showValue": "auto",
+        "groupWidth": 0.65,
+        "barWidth": 0.9,
+        "barRadius": 0.1,
+        "fullHighlight": true,
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "xTickLabelRotation": -45
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "harness_day",
+                "Value #A",
+                "Value #B",
+                "Value"
+              ]
+            }
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^Value #A$",
+            "renamePattern": "Claude Code"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^Value #B$",
+            "renamePattern": "Codex"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^Value$",
+            "renamePattern": "Claude Code"
+          }
+        },
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "harness_day",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "reduceRow",
+            "reduce": {
+              "reducer": "sum"
+            },
+            "alias": "Total"
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "harness_day",
+                "desc": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Total": true,
+              "Time": true
+            },
+            "indexByName": {
+              "harness_day": 0,
+              "Codex": 1,
+              "Claude Code": 2
+            },
+            "renameByName": {
+              "harness_day": "날짜"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "사람별 사용 내역",
+      "type": "table",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (person_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | label_format token_total=`{{add .harness_tokens_input .harness_tokens_output .harness_tokens_cache_read .harness_tokens_cache_write_5m .harness_tokens_cache_write_1h}}` | unwrap token_total | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (person_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"completion\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_completed | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (person_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | harness_currency=\"USD\" | unwrap harness_cost_estimate | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        },
+        {
+          "refId": "D",
+          "expr": "sum by (person_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_unpriced_tokens | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "기록 없음",
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "추정 비용 · USD"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "사람"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "이 사람의 작업 근거",
+                    "url": "/d/harness-evidence?${__url_time_range}&var-member=${__value.raw}&var-repo=${repo:percentencode}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "person_name",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "person_name": "사람",
+              "Value #A": "관측 토큰",
+              "Value #B": "완료 응답",
+              "Value #C": "추정 비용 · USD",
+              "Value #D": "단가 미등록 토큰"
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "id": 15,
+      "title": "모델·토큰 상세와 가격 기준",
+      "type": "row",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 7,
+          "title": "토큰 · 사람·도구·모델별",
+          "type": "table",
+          "gridPos": {
+            "x": 0,
+            "y": 23,
+            "w": 24,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (person_name, tool_name, model_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_tokens_input | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+              "datasource": {
+                "type": "loki",
+                "uid": "${DS_LOKI}"
+              },
+              "queryType": "instant",
+              "editorMode": "code"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (person_name, tool_name, model_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_tokens_output | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+              "datasource": {
+                "type": "loki",
+                "uid": "${DS_LOKI}"
+              },
+              "queryType": "instant",
+              "editorMode": "code"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (person_name, tool_name, model_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_tokens_cache_read | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+              "datasource": {
+                "type": "loki",
+                "uid": "${DS_LOKI}"
+              },
+              "queryType": "instant",
+              "editorMode": "code"
+            },
+            {
+              "refId": "D",
+              "expr": "sum by (person_name, tool_name, model_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_tokens_cache_write_5m | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+              "datasource": {
+                "type": "loki",
+                "uid": "${DS_LOKI}"
+              },
+              "queryType": "instant",
+              "editorMode": "code"
+            },
+            {
+              "refId": "E",
+              "expr": "sum by (person_name, tool_name, model_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_tokens_cache_write_1h | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+              "datasource": {
+                "type": "loki",
+                "uid": "${DS_LOKI}"
+              },
+              "queryType": "instant",
+              "editorMode": "code"
+            }
+          ],
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "description": "입력은 캐시 제외. 입력·출력·캐시 읽기·캐시 쓰기의 공통 분류이며 Codex 캐시 쓰기는 실제 TTL 미상입니다.",
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "기록 없음",
+              "unit": "none",
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "person_name": "사람",
+                  "tool_name": "도구",
+                  "model_name": "모델",
+                  "Value #A": "입력",
+                  "Value #B": "출력",
+                  "Value #C": "캐시 읽기",
+                  "Value #D": "캐시 쓰기 5m 필드",
+                  "Value #E": "캐시 쓰기 1h 필드"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "title": "가격 기준 · 모델별",
+          "type": "table",
+          "gridPos": {
+            "x": 0,
+            "y": 32,
+            "w": 24,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (tool_name, model_name, harness_price_as_of, harness_price_id, harness_cost_status, harness_attribution) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_sample | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day, harness_price_id, harness_price_as_of, harness_cost_status, harness_attribution))",
+              "datasource": {
+                "type": "loki",
+                "uid": "${DS_LOKI}"
+              },
+              "queryType": "instant",
+              "editorMode": "code"
+            }
+          ],
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "description": "priced/unpriced를 분리합니다. 미등록 토큰이 있으면 합계는 부분 비용입니다. 최초 적용 가격은 재시도·설정 변경에도 보존합니다.",
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "기록 없음",
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "tool_name": "도구",
+                  "model_name": "모델",
+                  "harness_price_as_of": "가격표 기준일",
+                  "harness_price_id": "가격 기준 ID",
+                  "harness_cost_status": "가격 상태",
+                  "Value": "값",
+                  "Value #A": "값",
+                  "harness_attribution": "기간 귀속 기준"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "관측 API 사용량 단위",
+          "type": "stat",
+          "gridPos": {
+            "x": 0,
+            "y": 40,
+            "w": 24,
+            "h": 4
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | unwrap harness_sample | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+              "datasource": {
+                "type": "loki",
+                "uid": "${DS_LOKI}"
+              },
+              "queryType": "instant",
+              "editorMode": "code"
+            }
+          ],
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "description": "",
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "기록 없음",
+              "unit": "short",
+              "min": 0,
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "values": false,
+              "fields": ""
+            },
+            "colorMode": "none",
+            "graphMode": "none",
+            "textMode": "value"
+          }
+        }
+      ],
+      "targets": []
+    }
+  ],
+  "links": [
+    {
+      "title": "수집·차단 진단",
+      "url": "/d/harness-agentops",
+      "type": "link",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false
+    },
+    {
+      "title": "작업 검증 기록",
+      "url": "/d/harness-evidence",
+      "type": "link",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ]
+}

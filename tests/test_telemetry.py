@@ -67,9 +67,16 @@ class Collector:
         self.server.shutdown()
         self.server.server_close()
 
-    def records(self):
+    def all_records(self):
         return [record for body in self.bodies for resource in body["resourceLogs"]
                 for scope in resource["scopeLogs"] for record in scope["logRecords"]]
+
+    def records(self):
+        """v1 기록(세션·hooks·Codex 세션 사건). 같은 push가 함께 보내는 공통 텔레메트리 v2(#140)는 v2_records."""
+        return [record for record in self.all_records() if "harness.schema_version" not in attrs(record)]
+
+    def v2_records(self):
+        return [record for record in self.all_records() if "harness.schema_version" in attrs(record)]
 
 
 def attrs(record):
