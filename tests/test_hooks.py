@@ -409,6 +409,170 @@ class SymlinkTest(ProtectPathsCase):
         self.assertIsNone(decision)
 
 
+class ProcessKwargsTest(unittest.TestCase):
+    """OS별 하위 프로세스 인자(#145). Windows 플래그 값은 다른 OS에서도 os_name으로 확인한다."""
+
+    def test_windows_hides_console_without_detaching(self):
+        self.assertEqual(common.hidden_kwargs("nt"), {"creationflags": common.CREATE_NO_WINDOW})
+        flags = common.new_group_kwargs("nt")["creationflags"]
+        self.assertTrue(flags & common.CREATE_NO_WINDOW)
+        self.assertTrue(flags & common.CREATE_NEW_PROCESS_GROUP)
+        self.assertFalse(flags & 0x00000008)  # DETACHED_PROCESS: 함께 주면 CREATE_NO_WINDOW가 무시된다
+
+    def test_posix_uses_new_session_and_no_flags(self):
+        self.assertEqual(common.hidden_kwargs("posix"), {})
+        self.assertEqual(common.new_group_kwargs("posix"), {"start_new_session": True})
+
+    @unittest.skipUnless(os.name == "nt", "Windows 상수 대조")
+    def test_constants_match_subprocess(self):
+        self.assertEqual(common.CREATE_NO_WINDOW, subprocess.CREATE_NO_WINDOW)
+        self.assertEqual(common.CREATE_NEW_PROCESS_GROUP, subprocess.CREATE_NEW_PROCESS_GROUP)
+
+    def test_spawn_background_closes_streams_and_does_not_wait(self):
+        with mock.patch.object(common.subprocess, "Popen") as spawn:
+            common.spawn_background(["prog", "arg"], Path("work"))
+        args, kwargs = spawn.call_args
+        self.assertEqual(args, (["prog", "arg"],))
+        self.assertEqual(kwargs["cwd"], Path("work"))
+        self.assertTrue(kwargs["close_fds"])
+        self.assertNotIn("shell", kwargs)
+        self.assertNotIn("env", kwargs)
+        for stream in ("stdin", "stdout", "stderr"):
+            self.assertEqual(kwargs[stream], subprocess.DEVNULL)
+        for key, value in common.new_group_kwargs().items():
+            self.assertEqual(kwargs[key], value)
+        spawn.return_value.wait.assert_not_called()
+
+    def test_git_hides_console(self):
+        with mock.patch.object(common.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, b"out", b"")
+            self.assertEqual(common.git_result(Path("."), "status"), ("out", ""))
+        for key, value in common.hidden_kwargs().items():
+            self.assertEqual(run.call_args.kwargs[key], value)
+
+    def test_scripts_do_not_set_creation_flags_directly(self):
+        """플래그를 스크립트마다 따로 쓰다 일부가 틀려 창이 떴다(#145). 실행 인자는 harness_common 함수로만 만든다."""
+        offenders = [path.name for path in sorted(HOOKS.glob("*.py")) + sorted((ROOT / "core" / "metrics").glob("*.py"))
+                     if path.name != "harness_common.py"
+                     and any(word in path.read_text(encoding="utf-8")
+                             for word in ("creationflags", "DETACHED_PROCESS", "start_new_session"))]
+        self.assertEqual(offenders, [])
+
+
+class TelemetrySettingsTest(unittest.TestCase):
+    """harness.json telemetry 블록과 사용자 자격 파일(#145)."""
+
+    ENDPOINT = "https://collector.example"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(remove_tree, self.tmp)
+
+    def test_settings_fill_defaults(self):
+        self.assertIsNone(common.telemetry_settings({}))
+        self.assertEqual(common.telemetry_settings({"telemetry": {"endpoint": f" {self.ENDPOINT} "}}),
+                         {"endpoint": self.ENDPOINT, "tools": ["claude-code", "codex"], "harness_events": True})
+        self.assertEqual(common.telemetry_settings({"telemetry": {"endpoint": "http://127.0.0.1:4318", "tools": ["codex"],
+                                                                  "harness_events": False}}),
+                         {"endpoint": "http://127.0.0.1:4318", "tools": ["codex"], "harness_events": False})
+
+    def test_invalid_blocks_rejected(self):
+        bad = [None, [], {}, {"endpoint": ""}, {"endpoint": self.ENDPOINT, "typo": 1},
+               {"endpoint": "http://collector.example"},  # 원격 http: 헤더가 평문으로 나간다
+               {"endpoint": "https://user:pw@collector.example"}, {"endpoint": f"{self.ENDPOINT}?token=x"},
+               {"endpoint": "ftp://collector.example"}, {"endpoint": "https://collector.example:bad"},
+               {"endpoint": self.ENDPOINT, "tools": ["cursor"]}, {"endpoint": self.ENDPOINT, "tools": ["codex", "codex"]},
+               {"endpoint": self.ENDPOINT, "tools": "codex"}, {"endpoint": self.ENDPOINT, "harness_events": "yes"}]
+        for block in bad:
+            with self.subTest(block=block), self.assertRaises(common.ConfigError):
+                common.telemetry_settings({"telemetry": block})
+
+    def test_load_config_ignores_broken_telemetry(self):
+        """블록의 오타가 보호 경로 검사·종료 검증 설정 읽기를 깨지 않는다."""
+        (self.tmp / "harness.json").write_text(json.dumps({"telemetry": {"endpoint": 1}}), encoding="utf-8")
+        config = common.load_config(self.tmp)
+        with self.assertRaises(common.ConfigError):
+            common.telemetry_settings(config)
+
+    def test_endpoint_key_normalizes(self):
+        for url in ("HTTPS://Collector.Example/", "https://collector.example", " https://collector.example// "):
+            self.assertEqual(common.endpoint_key(url), "https://collector.example")
+        self.assertEqual(common.endpoint_key("https://c.example:8443/otlp/"), "https://c.example:8443/otlp")
+
+    def test_config_dir_per_os(self):
+        home = Path("/home/me")
+        self.assertEqual(common.config_dir({"APPDATA": r"C:\Users\me\AppData\Roaming"}, "nt", home),
+                         Path(r"C:\Users\me\AppData\Roaming") / "harness")
+        self.assertEqual(common.config_dir({}, "nt", home), home / "AppData" / "Roaming" / "harness")
+        xdg = self.tmp / "xdg"
+        self.assertEqual(common.config_dir({"XDG_CONFIG_HOME": str(xdg)}, "posix", home), xdg / "harness")
+        # XDG 규격: 상대 경로는 무시한다
+        self.assertEqual(common.config_dir({"XDG_CONFIG_HOME": "rel"}, "posix", home), home / ".config" / "harness")
+        self.assertEqual(common.config_dir({}, "posix", home), home / ".config" / "harness")
+
+    def write_credentials(self, data):
+        path = self.tmp / "credentials.json"
+        path.write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
+        return path
+
+    def test_headers_looked_up_by_endpoint(self):
+        path = self.write_credentials({"endpoints": {"https://Collector.Example/": {"headers": {"Authorization": "Bearer t"}}}})
+        self.assertEqual(common.telemetry_headers(self.ENDPOINT, path), {"Authorization": "Bearer t"})
+        self.assertEqual(common.telemetry_headers("https://other.example", path), {})
+        self.assertEqual(common.telemetry_headers(self.ENDPOINT, self.tmp / "missing.json"), {})
+
+    def test_malformed_credentials_rejected_without_values(self):
+        secret = "secret-sentinel"
+        bad = [f'{{"endpoints": {{"{self.ENDPOINT}": "{secret}"', {"endpoints": []}, [],
+               {"endpoints": {self.ENDPOINT: {"headers": {}}}},
+               {"endpoints": {self.ENDPOINT: {"headers": {"Authorization": f"Bearer {secret}\r\nX-Injected: 1"}}}},
+               {"endpoints": {self.ENDPOINT: {"headers": {"Bad Name": secret}}}},
+               {"endpoints": {"http://remote.example": {"headers": {"Authorization": secret}}}}]
+        for data in bad:
+            with self.subTest(data=data):
+                path = self.write_credentials(data)
+                with self.assertRaises(common.ConfigError) as caught:
+                    common.load_credentials(path)
+                self.assertNotIn(secret, str(caught.exception))
+
+    def test_headers_helper_matches_common_rules(self):
+        spec = importlib.util.spec_from_file_location("otel_headers_under_test", ROOT / "core" / "metrics" / "otel_headers.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        home = Path("/home/me")
+        for env, os_name in (({"APPDATA": r"C:\A"}, "nt"), ({}, "nt"), ({"XDG_CONFIG_HOME": str(self.tmp)}, "posix"),
+                             ({"XDG_CONFIG_HOME": "rel"}, "posix"), ({}, "posix")):
+            self.assertEqual(helper.config_dir(env, os_name, home), common.config_dir(env, os_name, home))
+        for url in ("HTTPS://Collector.Example/", "https://c.example:8443/otlp/", "http://127.0.0.1:4318"):
+            self.assertEqual(helper.endpoint_key(url), common.endpoint_key(url))
+        self.assertEqual(helper.CREDENTIALS_NAME, common.CREDENTIALS_NAME)
+
+    def run_helper(self, *args):
+        env = {**os.environ, "APPDATA": str(self.tmp), "XDG_CONFIG_HOME": str(self.tmp)}
+        return subprocess.run([sys.executable, str(ROOT / "core" / "metrics" / "otel_headers.py"), *args],
+                              capture_output=True, text=True, encoding="utf-8", env=env)
+
+    def test_headers_helper_prints_json_or_fails_quietly(self):
+        directory = self.tmp / "harness"
+        result = self.run_helper(self.ENDPOINT)
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        self.assertIn("자격 파일이 없다", result.stderr)
+        directory.mkdir()
+        secret = "Bearer secret-sentinel"
+        (directory / "credentials.json").write_text(
+            json.dumps({"endpoints": {self.ENDPOINT: {"headers": {"Authorization": secret}}}}), encoding="utf-8")
+        result = self.run_helper(self.ENDPOINT + "/")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), {"Authorization": secret})
+        result = self.run_helper("https://other.example")
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        (directory / "credentials.json").write_text('{"endpoints": {"' + secret, encoding="utf-8")
+        result = self.run_helper(self.ENDPOINT)
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        self.assertNotIn("secret-sentinel", result.stderr)
+        self.assertEqual(self.run_helper().returncode, 2)
+
+
 class GlobTest(unittest.TestCase):
     def match(self, pattern, path):
         return bool(common.compile_glob(pattern).fullmatch(path))

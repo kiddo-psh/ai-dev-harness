@@ -147,6 +147,40 @@ class PushTest(unittest.TestCase):
         self.assertEqual(self.push(), 0)
         self.assertEqual(self.collector.records()[-1]["body"]["stringValue"], "harness.hook.block")
 
+    def test_configured_endpoint_and_credentials_without_env(self):
+        """#145: Claude Code hook에는 OTEL 변수가 없다. harness.json 주소와 사용자 자격 파일의 헤더로 보낸다."""
+        self.write("events.jsonl", [{"ts": ts(1), "hook": "protect-paths", "decision": "block"}])
+        asked = []
+        def credentials(base):
+            asked.append(base)
+            return {"Authorization": "Bearer from-file"}
+        self.assertEqual(self.push(env={}, configured=self.collector.url + "/", credentials=credentials), 0)
+        self.assertEqual(asked, [self.collector.url])  # 기본 주소로 찾는다(/v1/logs·끝 / 없이)
+        self.assertEqual(self.collector.headers[0]["Authorization"], "Bearer from-file")
+        self.assertEqual(len(self.collector.records()), 1)
+
+    def test_env_wins_over_configured(self):
+        self.write("events.jsonl", [{"ts": ts(1), "hook": "protect-paths", "decision": "block"}])
+        other = Collector()
+        self.addCleanup(other.close)
+        env = {"OTEL_EXPORTER_OTLP_ENDPOINT": self.collector.url, "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer%20env"}
+        self.assertEqual(self.push(env=env, configured=other.url,
+                                   credentials=lambda base: {"Authorization": "Bearer from-file"}), 0)
+        self.assertEqual((len(self.collector.records()), len(other.records())), (1, 0))
+        self.assertEqual(self.collector.headers[0]["Authorization"], "Bearer env")
+        # 변수에 헤더가 없으면 주소(변수에서 온 것이어도)로 자격 파일을 찾는다
+        self.write("events.jsonl", [{"ts": ts(0), "hook": "protect-paths", "decision": "ask"}])
+        self.assertEqual(self.push(env={"OTEL_EXPORTER_OTLP_ENDPOINT": self.collector.url},
+                                   credentials=lambda base: {"Authorization": f"Bearer for {base}"}), 0)
+        self.assertEqual(self.collector.headers[-1]["Authorization"], f"Bearer for {self.collector.url}")
+
+    def test_credentials_error_is_config_error(self):
+        def broken(base):
+            raise telemetry.PushError("자격 파일 형식이 잘못됐다")
+        self.assertEqual(self.push(env={}, configured=self.collector.url, credentials=broken), 2)
+        self.assertIn("자격 파일 형식이 잘못됐다", self.out[-1])
+        self.assertEqual(self.collector.attempts, 0)
+
     def test_failure_keeps_position_and_retries(self):
         self.write("events.jsonl", [{"ts": ts(1), "hook": "protect-paths", "decision": "block"}])
         self.collector.fail = True
@@ -660,7 +694,7 @@ class AutoPushTest(unittest.TestCase):
         return path
 
     def test_no_endpoint_or_missing_copy_does_not_spawn(self):
-        with mock.patch.object(self.module.subprocess, "Popen") as spawn:
+        with mock.patch.object(self.module.common.subprocess, "Popen") as spawn:
             self.module.push_in_background(self.project)
             self.install()
             self.module.push_in_background(self.project)
@@ -669,12 +703,41 @@ class AutoPushTest(unittest.TestCase):
             self.module.push_in_background(self.project)
         spawn.assert_not_called()
 
+    def config(self, block):
+        (self.project / "harness.json").write_text(json.dumps({"telemetry": block}), encoding="utf-8")
+
+    def test_telemetry_block_spawns_without_env(self):
+        """#145: Claude Code는 OTEL 변수를 hook에 넘기지 않는다. harness.json 블록만으로 push를 띄운다."""
+        self.install()
+        self.config({"endpoint": "https://collector.example"})
+        with mock.patch.object(self.module.common.subprocess, "Popen") as spawn:
+            self.module.push_in_background(self.project)
+        spawn.assert_called_once()
+
+    def test_harness_events_false_stops_even_with_env(self):
+        self.install()
+        self.config({"endpoint": "https://collector.example", "harness_events": False})
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://collector.invalid"
+        with mock.patch.object(self.module.common.subprocess, "Popen") as spawn:
+            self.module.push_in_background(self.project)
+        spawn.assert_not_called()
+
+    def test_broken_block_falls_back_to_env(self):
+        self.install()
+        self.config({"endpoint": "http://remote.example"})
+        with mock.patch.object(self.module.common.subprocess, "Popen") as spawn:
+            self.module.push_in_background(self.project)
+            spawn.assert_not_called()
+            os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://collector.invalid"
+            self.module.push_in_background(self.project)
+        spawn.assert_called_once()
+
     def test_detached_without_shell_or_pipes(self):
         script = self.install()
         for endpoint in ("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"):
             with self.subTest(endpoint=endpoint), mock.patch.dict(os.environ, {endpoint: "https://collector.invalid",
                       "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=secret-sentinel"}, clear=True), \
-                    mock.patch.object(self.module.subprocess, "Popen") as spawn:
+                    mock.patch.object(self.module.common.subprocess, "Popen") as spawn:
                 self.module.push_in_background(self.project)
                 args, kwargs = spawn.call_args
                 self.assertEqual(args, ([sys.executable, str(script), "push"],))
@@ -685,8 +748,10 @@ class AutoPushTest(unittest.TestCase):
                 for stream in ("stdin", "stdout", "stderr"):
                     self.assertEqual(kwargs[stream], subprocess.DEVNULL)
                 if os.name == "nt":
-                    self.assertTrue(kwargs["creationflags"] & subprocess.DETACHED_PROCESS)
+                    # 콘솔 없는 프로세스(DETACHED_PROCESS)가 git을 띄우면 실행마다 창이 생긴다(#145)
+                    self.assertFalse(kwargs["creationflags"] & subprocess.DETACHED_PROCESS)
                     self.assertTrue(kwargs["creationflags"] & subprocess.CREATE_NO_WINDOW)
+                    self.assertTrue(kwargs["creationflags"] & subprocess.CREATE_NEW_PROCESS_GROUP)
                 else:
                     self.assertTrue(kwargs["start_new_session"])
                 spawn.return_value.wait.assert_not_called()
