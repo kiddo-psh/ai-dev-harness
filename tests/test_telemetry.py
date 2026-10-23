@@ -862,13 +862,20 @@ class AutoPushIntegrationTest(SessionRecordCase):
         self.prepare()
         self.collector.fail = True
         self.end_installed()
-        self.wait_for(lambda: self.collector.attempts == 1 and self.saved())
+        # v1 실패 뒤에도 v2 exporter를 보낸다. 두 시도의 상태 저장까지 기다려야
+        # 다음 세션을 시작할 때 이전 push와 겹치거나 fail 플래그를 일찍 바꾸지 않는다.
+        v2_state = self.state.with_name("telemetry-v2.json")
+        self.wait_for(lambda: self.saved() and v2_state.is_file()
+                      and json.loads(v2_state.read_text(encoding="utf-8")).get("failures") == 1)
+        self.assertEqual(self.collector.attempts, 2)
         self.assertEqual(self.collector.records(), [])
         self.collector.fail = False
         self.end_installed()
         self.wait_for(lambda: len(self.collector.records()) == 2)
         self.assertTrue(all(attrs(r)["harness.event"] == "end" for r in self.collector.records()))
         self.wait_for(lambda: self.saved())
+        self.wait_for(lambda: len(self.collector.v2_records()) == 1)
+        self.assertEqual(attrs(self.collector.v2_records()[0])["harness.previous_failures"], "1")
 
 
 if __name__ == "__main__":
