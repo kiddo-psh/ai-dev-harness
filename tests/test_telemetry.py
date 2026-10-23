@@ -398,12 +398,41 @@ class FragmentConfigTest(unittest.TestCase):
             else:
                 self.assertFalse(expr.endswith("or vector(0)"))  # 원천 무기록을 0으로 꾸미지 않는다
 
+    def test_codex_native_row(self):
+        """#145: Codex 내장 텔레메트리(응답마다 한 줄인 response.completed 사건)를 키트 기록과 다른 행에서 보인다.
+        내장 지표(codex_turn_token_usage)는 세션 속성이 없어 동시 실행이 한 시계열에 섞이므로 쓰지 않는다."""
+        dashboard = json.loads((OBS / "grafana/dashboards/harness-agentops.json").read_text(encoding="utf-8"))
+        row = next(panel for panel in dashboard["panels"] if panel.get("id") == 44)
+        self.assertEqual(row["type"], "row")
+        self.assertIn("저장소 필터 미적용", row["title"])
+        inner = {panel["id"]: panel for panel in row["panels"]}
+        self.assertEqual(set(inner), {120, 121, 122, 123, 124})
+        guide = inner.pop(123)["options"]["content"]
+        for expected in ("더하지 않는다", "캐시 적중분을 포함", "telemetry setup"):
+            self.assertIn(expected, guide)
+        for panel in inner.values():
+            self.assertEqual(panel["fieldConfig"]["defaults"]["noValue"], "기록 없음")
+            for target in panel["targets"]:
+                expr = target["expr"]
+                self.assertIn('{service_name=~"codex.*"} | event_name="codex.sse_event" | event_kind="response.completed"',
+                              expr, panel["title"])
+                self.assertNotIn('service_name="harness"', expr)  # 키트 기록과 더하지 않는다
+                self.assertNotIn("codex_turn_token_usage", expr)
+                self.assertFalse(expr.endswith("or vector(0)"))  # 미수집을 0으로 꾸미지 않는다
+                if "unwrap" in expr:
+                    self.assertIn('| __error__=""', expr)
+        self.assertTrue(all("$person" in t["expr"] for t in inner[121]["targets"]))
+        self.assertNotIn("$__range", inner[122]["targets"][0]["expr"])  # 시간당 그래프는 기간 누적이 아니다
+        titles = {panel["id"]: panel["title"] for panel in dashboard_panels(dashboard["panels"])}
+        self.assertIn("키트 기록", titles[15])
+        self.assertIn("키트 기록", titles[16])
+
     def test_dashboard_visibility_and_scope(self):
         dashboard = json.loads((OBS / "grafana/dashboards/harness-agentops.json").read_text(encoding="utf-8"))
         panels = {panel["id"]: panel for panel in dashboard_panels(dashboard["panels"])}
         self.assertEqual(dashboard["uid"], "harness-agentops")  # 기존 배포·링크 유지
         rows = [panel for panel in dashboard["panels"] if panel["type"] == "row"]
-        self.assertEqual(len(rows), 4)
+        self.assertEqual(len(rows), 5)  # #145: Codex 내장 텔레메트리 행
         self.assertTrue(all(row["collapsed"] and row["panels"] for row in rows))
         # 진단에서는 수집 관측과 Claude 개입·실패를 우선 표시한다.
         self.assertEqual([panel["id"] for panel in dashboard["panels"] if panel["type"] == "stat"], [101, 102, 5, 18])
