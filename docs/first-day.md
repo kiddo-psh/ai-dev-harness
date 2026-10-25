@@ -71,7 +71,7 @@ git commit -m "chore: ai-dev-harness 적용"
 
 - `.claude/settings.json`과 `.claude/hooks/`는 커밋한다. 개인 설정 `.claude/settings.local.json`은 커밋하지 않는다
 - `docs/README.md`·`AGENTS.md` 같은 생성 파일에 프로젝트 내용을 직접 쓰지 않는다. 다음 `init --force`가 덮어쓴다.
-  프로젝트 문서 목록은 생성 대상이 아닌 별도 문서에 둔다. 시드 파일(`docs/git-convention.md`, `docs/adr/README.md`)은
+  프로젝트 문서 목록은 생성 대상이 아닌 별도 문서에 둔다. 시드 파일(`docs/git-convention.md`, `docs/adr/README.md`, `.gitattributes`)은
   프로젝트가 채워도 된다
 
 ### 5. CI 조각

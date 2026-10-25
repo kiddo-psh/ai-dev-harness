@@ -928,6 +928,22 @@ class SeedFileTest(unittest.TestCase):
         self.assertEqual(code, 0, out)  # 시드 파일만 있으면 --force 없이도 진행하고 그 파일은 유지한다
         self.assertEqual((fresh / "docs" / "adr" / "README.md").read_text(encoding="utf-8"), "# 우리 ADR 목록\n")
 
+    def test_gitattributes_seeded_with_lf(self):
+        """#153: git-convention.md 5장이 약속하는 루트 .gitattributes(LF 강제)를 init이 만든다."""
+        lines = (self.target / ".gitattributes").read_text(encoding="utf-8").splitlines()
+        self.assertIn("* text=auto eol=lf", lines)
+        self.assertIn("*.bat text eol=crlf", lines)
+
+    def test_existing_gitattributes_is_kept(self):
+        """#153: 팀이 이미 둔 .gitattributes는 충돌로 보지 않고, --force도 덮어쓰지 않는다."""
+        fresh = self.tmp / "fresh-attrs"
+        fresh.mkdir()
+        (fresh / ".gitattributes").write_text("*.sh text eol=lf\n", encoding="utf-8")
+        code, out = run(["init", str(fresh), "--platform", "github", "--tracker", "github"])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(run(["init", str(fresh), "--force"])[0], 0)
+        self.assertEqual((fresh / ".gitattributes").read_text(encoding="utf-8"), "*.sh text eol=lf\n")
+
 
 if __name__ == "__main__":
     unittest.main()
