@@ -266,6 +266,17 @@ class NodeParityTest(unittest.TestCase):
         self.write(".gitlab-ci.yml", "image:\n  name: node:22.22-bookworm\n")
         self.assertEqual(self.parity(runtime=(22, 22, 1)), ([], []))
 
+    def test_partial_pin_inside_narrow_range(self):
+        """#154 Codex P2: 부분 버전 구간의 양 끝이 아니라 안쪽만 범위와 겹쳐도 맞는 것으로 본다"""
+        self.write(".nvmrc", "22\n")
+        self.write("package.json", json.dumps({"engines": {"node": "~22.22.0"}}))
+        self.assertEqual(self.parity(runtime=(22, 22, 1)), ([], []))
+        self.write("package.json", json.dumps({"engines": {"node": ">22.22.0 <=22.22.0"}}))  # 빈 범위는 겹치지 않는다
+        self.assertIn("engines.node `>22.22.0 <=22.22.0` 밖의 고정 버전: .nvmrc 22", self.parity()[0][0])
+        self.write(".nvmrc", "20\n")
+        self.write("package.json", json.dumps({"engines": {"node": "~20.19.0 || ~22.1.0"}}))  # 다른 메이저를 좁게 허용
+        self.assertIn("밖의 Node 22도 허용한다", self.parity()[0][0])
+
     def test_runtime_mismatch(self):
         """T4"""
         self.write(".node-version", "22\n")

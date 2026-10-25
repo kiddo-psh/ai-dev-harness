@@ -30,7 +30,6 @@ PARITY_ENV = "HARNESS_VERIFY_PARITY"
 _VERSION = r"(\d+(?:\.\d+){0,2})"
 _DOCKER_NODE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*(?:\S+/)?node:" + _VERSION + r"(?![\d.])", re.IGNORECASE)
 _CI_NODE = re.compile(r"(?:^|[\s\"'/])node:" + _VERSION + r"(?=$|[-@\s\"'])")
-_HUGE = 999999  # 부분 버전(22, 20.19)이 덮는 가장 큰 버전을 만들 때 쓴다
 
 
 class VerifyError(Exception):
@@ -155,9 +154,28 @@ def satisfies(version: tuple[int, ...], alternatives) -> bool:
     return any(all(checks[op](bound) for op, bound in alt) for alt in alternatives)
 
 
+def _bump(version: tuple[int, ...]) -> tuple[int, ...]:
+    return version[:2] + (version[2] + 1,)
+
+
+def _intersects(low: tuple[int, ...], high: tuple[int, ...], alternatives) -> bool:
+    """[low, high) 구간에 범위를 만족하는 버전이 하나라도 있는가. 버전이 정수라 `> b`는 `>= b+패치1`, `<= b`는 `< b+패치1`이다."""
+    for alt in alternatives:
+        lower, upper = low, high
+        for op, bound in alt:
+            if op in (">=", ">"):
+                lower = max(lower, bound if op == ">=" else _bump(bound))
+            else:
+                upper = min(upper, bound if op == "<" else _bump(bound))
+        if lower < upper:
+            return True
+    return False
+
+
 def _could_satisfy(version: tuple[int, ...], alternatives) -> bool:
-    """부분 버전(`node:22`)은 그 범위의 가장 낮은 버전과 가장 높은 버전 중 하나라도 맞으면 맞는 것으로 본다."""
-    return satisfies(_pad(version), alternatives) or satisfies(_pad(version, _HUGE), alternatives)
+    """부분 버전(`node:22`)은 그 버전이 덮는 구간(22.0.0 이상 23.0.0 미만)과 범위가 겹치면 맞는 것으로 본다(#154 Codex)."""
+    high = _bump(version) if len(version) == 3 else _next(version)
+    return _intersects(_pad(version), high, alternatives)
 
 
 def _agree(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
@@ -251,7 +269,7 @@ def node_parity(project: Path, config: dict, runtime=_DETECT) -> tuple[list[str]
         if outside:
             problems.append(f"{source}의 engines.node `{text}` 밖의 고정 버전: {', '.join(outside)}")
         extra = [m for m in range(100) if majors and m not in majors
-                 and (satisfies((m, 0, 0), alternatives) or satisfies((m, _HUGE, _HUGE), alternatives))]
+                 and _intersects((m, 0, 0), (m + 1, 0, 0), alternatives)]
         if extra:
             shown = ", ".join(map(str, extra[:3])) + (" 등" if len(extra) > 3 else "")
             problems.append(f"{source}의 engines.node `{text}`가 고정 버전의 메이저({', '.join(map(str, majors))}) 밖의 "
