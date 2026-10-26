@@ -27,7 +27,12 @@
 | `mockup-team-usage.png` | 팀 사용량 | 사람별 사용 내역의 도구별 토큰 열, 카드 설명 |
 | `mockup-collection-diagnostics.png` | 수집·차단 진단 | 카드 값 이름, 수집 상태·오류 표 통합, 최근 사건 표, Claude Code 내장 텔레메트리 행(펼친 모습) |
 | `mockup-task-evidence.png` | 작업 검증 기록 | 프로젝트 확장. #156에서 반영하지 않음 |
+| `mockup-team-usage-detail.png` | 팀 사용량 · 접힌 행 펼침 | 모델·토큰 상세와 가격 기준(패널 구성은 기존과 같음) |
+| `mockup-collection-diagnostics-detail-1.png` | 수집·차단 진단 · 접힌 행 펼침 ① | 관측 지연, Claude hooks, 기존 원천 진단 |
+| `mockup-collection-diagnostics-detail-2.png` | 수집·차단 진단 · 접힌 행 펼침 ② | Claude Code 내장(#156 추가), Codex 내장, 수집 범위·지표 정의 |
+| `mockup-task-evidence-detail.png` | 작업 검증 기록 · 접힌 행 펼침 | 프로젝트 확장의 근거 패널을 행별로 묶은 시안. #156에서 반영하지 않음 |
 
 - Grafana에 반영한 것은 패널 구성·제목·배치·색이다. 상단 탭·배지·알림 박스·타임라인·글꼴 같은 겉모양은 Grafana 테마로
   만들 수 없어 실제 화면과 다르다.
+- 펼친 상세 목업의 패널 제목·설명·열·폭은 실제 대시보드 JSON을 따르며, 값과 그래프 모양은 예시다.
 - 목업의 Pretendard는 이 PC에 없어 Noto Sans KR로 그려졌다.

@@ -95,6 +95,16 @@ Grafana에는 패널 구성·제목·배치·색을 반영하며, 탭·배지·�
 
 ![설계 목업: 작업 검증 기록(프로젝트 확장)](docs/assets/dashboards/mockup-task-evidence.png)
 
+접힌 상세 행을 모두 펼친 목업이다. 패널 제목·설명·열·폭은 실제 대시보드 JSON을 따른다.
+
+![설계 목업: 팀 사용량 · 모델·토큰 상세와 가격 기준](docs/assets/dashboards/mockup-team-usage-detail.png)
+
+![설계 목업: 수집·차단 진단 · 관측 지연, Claude hooks, 기존 원천 진단](docs/assets/dashboards/mockup-collection-diagnostics-detail-1.png)
+
+![설계 목업: 수집·차단 진단 · Claude Code 내장, Codex 내장, 수집 범위·지표 정의](docs/assets/dashboards/mockup-collection-diagnostics-detail-2.png)
+
+![설계 목업: 작업 검증 기록 · 검증 시도, 모델·규칙·컨텍스트, 근거 수집기 전송 상태](docs/assets/dashboards/mockup-task-evidence-detail.png)
+
 </details>
 
 팀 Grafana는 [팀 수집기 안내](core/observability/README.md)에 따라 선택해서 운영한다.
