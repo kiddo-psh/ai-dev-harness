@@ -511,6 +511,11 @@ class FragmentConfigTest(unittest.TestCase):
         self.assertIn("label_format who=`{{ if .$person }}", recent["targets"][0]["expr"])
         self.assertNotIn("line_format", recent["targets"][0]["expr"])
         self.assertEqual([t["id"] for t in recent["transformations"]][0], "extractFields")
+        # 반 폭 패널이라 긴 날짜 형식은 잘리고 경로 열이 밀려난다(실제 Grafana 화면 확인).
+        props = {item["matcher"]["options"]: {prop["id"]: prop["value"] for prop in item["properties"]}
+                 for item in recent["fieldConfig"]["overrides"]}
+        self.assertEqual(props["시각"]["unit"], "time:MM-DD HH:mm:ss")
+        self.assertTrue(all("custom.width" in props[name] for name in ("시각", "사람", "결정", "규칙")))
         # Claude Code 내장 텔레메트리 행: Codex 행과 같은 자리에 두고 키트 기록과 더하지 않는다.
         rows = [panel for panel in dashboard["panels"] if panel["type"] == "row"]
         self.assertEqual([row["id"] for row in rows][-3:], [45, 44, 42])
