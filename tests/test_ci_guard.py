@@ -3,12 +3,16 @@
 import importlib.util
 import io
 import json
+import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tempdirs import remove_tree  # noqa: E402
 from test_mr_lint import RepoCase, filled, git, lint  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -187,6 +191,145 @@ class VerifyChangedTest(RepoCase):
         self.assertEqual(self.run_verify("--base", "origin/nope")[0], 2)
         self.assertEqual(self.run_verify("--base=--evil")[0], 2)  # git 옵션으로 해석되지 않게 거절
 
+    def write_conflicting_node(self):
+        (self.repo / ".nvmrc").write_text("22\n", encoding="utf-8")
+        (self.repo / ".gitlab-ci.yml").write_text("test:\n  image: node:20.19-alpine\n", encoding="utf-8")
+
+    def test_parity_failure_blocks_before_commands(self):
+        """#152 T8: Node 선언이 어긋나면 영역 명령을 실행하지 않고 실패한다. HARNESS_VERIFY_PARITY=off면 건너뛴다"""
+        marker = (self.repo / "ran.txt").as_posix()
+        py = Path(sys.executable).as_posix()
+        self.set_config(areas=[{"dir": "backend", "verify": [f'"{py}" -c "open(\'{marker}\', \'w\').close()"']}])
+        self.write_conflicting_node()
+        (self.repo / "backend" / "src" / "auth" / "a.py").write_text("b\n", encoding="utf-8")
+        self.commit()
+        with patch.dict(os.environ, {"HARNESS_VERIFY_PARITY": ""}):
+            code, _, err = self.run_verify("--base", self.base)
+        self.assertEqual(code, 1, err)
+        self.assertIn("고정 버전이 서로 다르다", err)
+        self.assertIn("HARNESS_VERIFY_PARITY=off", err)
+        self.assertFalse(Path(marker).exists())
+        with patch.dict(os.environ, {"HARNESS_VERIFY_PARITY": "off"}):
+            code, _, err = self.run_verify("--base", self.base)
+        self.assertEqual(code, 0, err)
+        self.assertTrue(Path(marker).exists())
+
+    def test_no_commands_skips_parity(self):
+        """#152 T9: 실행할 명령이 없으면 런타임이 결과에 영향을 주지 않으므로 검사하지 않는다"""
+        self.write_conflicting_node()
+        self.commit()
+        with patch.dict(os.environ, {"HARNESS_VERIFY_PARITY": ""}):
+            code, out, err = self.run_verify("--base", "HEAD")
+        self.assertEqual(code, 0, err)
+        self.assertIn("실행할 검증 명령 0개", out)
+
+
+class NodeParityTest(unittest.TestCase):
+    """#152: 로컬·CI Node 버전 선언 패리티. 실행 중인 node는 runtime 인자로 고정한다."""
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp(prefix="harness-parity-"))
+        self.addCleanup(remove_tree, self.repo)
+
+    def write(self, rel, text):
+        path = self.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def parity(self, runtime=None, areas=()):
+        return verify.node_parity(self.repo, {"areas": [{"dir": d} for d in areas]}, runtime=runtime)
+
+    def test_feelm_case(self):
+        """T1: engines `>=20.19.0`은 CI·Docker의 20.19를 만족하지만 로컬 22도 통과시킨다"""
+        self.write("package.json", json.dumps({"engines": {"node": ">=20.19.0"}}))
+        self.write("Dockerfile", "FROM node:20.19-alpine AS build\nFROM nginx:1.27\n")
+        self.write(".gitlab-ci.yml", "frontend-test:\n  image: node:20.19-alpine\n")
+        problems, _ = self.parity()
+        [problem] = problems
+        self.assertIn("package.json의 engines.node `>=20.19.0`가 고정 버전의 메이저(20) 밖의 Node 21, 22, 23 등도 허용한다", problem)
+        self.assertIn("<21", problem)
+        problems, _ = self.parity(runtime=(22, 11, 0))  # 그 상태에서 로컬 22로 돌리면 실행 중 node 불일치도 나온다
+        self.assertTrue(any(p.startswith("실행 중인 node 22.11.0가 고정 버전과 다르다") for p in problems), problems)
+
+    def test_pins_conflict(self):
+        """T2"""
+        self.write(".nvmrc", "v22.22.0\n")
+        self.write(".gitlab-ci.yml", "variables:\n  HARNESS_VERIFY_IMAGE: \"node:20.19\"\n# image: node:18\n")
+        [problem], _ = self.parity()
+        self.assertEqual(problem, "고정 버전이 서로 다르다: .nvmrc 22.22.0, .gitlab-ci.yml:2 20.19")
+
+    def test_consistent_passes(self):
+        """T3"""
+        self.write("package.json", json.dumps({"engines": {"node": "^22.22.0"}}))
+        self.write(".nvmrc", "22\n")
+        self.write("Dockerfile.prod", "FROM --platform=linux/amd64 docker.io/library/node:22.22.0-alpine\n")
+        self.write(".gitlab-ci.yml", "image:\n  name: node:22.22-bookworm\n")
+        self.assertEqual(self.parity(runtime=(22, 22, 1)), ([], []))
+
+    def test_partial_pin_inside_narrow_range(self):
+        """#154 Codex P2: 부분 버전 구간의 양 끝이 아니라 안쪽만 범위와 겹쳐도 맞는 것으로 본다"""
+        self.write(".nvmrc", "22\n")
+        self.write("package.json", json.dumps({"engines": {"node": "~22.22.0"}}))
+        self.assertEqual(self.parity(runtime=(22, 22, 1)), ([], []))
+        self.write("package.json", json.dumps({"engines": {"node": ">22.22.0 <=22.22.0"}}))  # 빈 범위는 겹치지 않는다
+        self.assertIn("engines.node `>22.22.0 <=22.22.0` 밖의 고정 버전: .nvmrc 22", self.parity()[0][0])
+        self.write(".nvmrc", "20\n")
+        self.write("package.json", json.dumps({"engines": {"node": "~20.19.0 || ~22.1.0"}}))  # 다른 메이저를 좁게 허용
+        self.assertIn("밖의 Node 22도 허용한다", self.parity()[0][0])
+
+    def test_runtime_mismatch(self):
+        """T4"""
+        self.write(".node-version", "22\n")
+        self.write("package.json", json.dumps({"engines": {"node": ">=22 <23"}}))
+        problems, _ = self.parity(runtime=(20, 19, 0))
+        self.assertEqual(problems, ["실행 중인 node 20.19.0가 고정 버전과 다르다: .node-version 22",
+                                    "실행 중인 node 20.19.0가 package.json의 engines.node `>=22 <23` 밖이다"])
+
+    def test_ignores_non_numeric_and_missing(self):
+        """T5: 숫자가 아닌 선언과 깨진 파일은 실패로 만들지 않는다. 선언이 없으면 node를 실행하지 않는다"""
+        self.write(".nvmrc", "lts/*\n")
+        self.write("Dockerfile", "ARG V=22\nFROM node:${V}\nFROM node:lts-alpine\nFROM mynode:18\n")
+        self.write(".gitlab-ci.yml", "image: node:lts\nimage: registry/mynode:18\n")
+        with patch.object(verify, "detect_node", side_effect=AssertionError("node를 실행하면 안 된다")):
+            self.assertEqual(self.parity(runtime=verify._DETECT), ([], []))
+        self.write("package.json", "{broken")
+        problems, warnings = self.parity()
+        self.assertEqual(problems, [])
+        self.assertIn("package.json을 JSON으로 읽지 못해", warnings[0])
+        self.write("package.json", json.dumps({"engines": {"node": "latest"}}))
+        problems, warnings = self.parity(runtime=(22, 0, 0))
+        self.assertEqual(problems, [])
+        self.assertIn("해석하지 못해", warnings[0])
+
+    def test_area_dir_and_tool_versions(self):
+        """T6"""
+        self.write(".nvmrc", "22\n")
+        self.write("web/.tool-versions", "java 21\nnodejs 20.1.0\n")
+        self.write("web/web.Dockerfile", "FROM node:22\n")
+        [problem], _ = self.parity(areas=["web"])
+        self.assertEqual(problem, "고정 버전이 서로 다르다: .nvmrc 22, web/.tool-versions 20.1.0, web/web.Dockerfile:1 22")
+        self.assertEqual(self.parity()[0], [])  # 영역으로 등록하지 않은 디렉터리는 보지 않는다
+
+    def test_semver_ranges(self):
+        """T7"""
+        cases = [
+            ("^22.22.0", (22, 22, 0), True), ("^22.22.0", (22, 21, 9), False), ("^22.22.0", (23, 0, 0), False),
+            ("^0.2.3", (0, 2, 9), True), ("^0.2.3", (0, 3, 0), False), ("^0.0.3", (0, 0, 4), False),
+            ("~20.19", (20, 19, 5), True), ("~20.19.1", (20, 20, 0), False), ("~20", (20, 9, 0), True),
+            (">=20.19.0 <21", (20, 99, 0), True), (">= 20.19.0 < 21", (21, 0, 0), False),
+            ("20 || 22", (22, 1, 0), True), ("20 || 22", (21, 0, 0), False),
+            ("20.x", (20, 3, 0), True), ("22.X.x", (23, 0, 0), False), ("*", (4, 0, 0), True), ("", (4, 0, 0), True),
+            ("18 - 20", (20, 9, 9), True), ("18 - 20", (21, 0, 0), False), ("18.1 - 20.2.3", (20, 2, 4), False),
+            (">20", (21, 0, 0), True), (">20", (20, 9, 0), False), ("<=20", (20, 9, 0), True), ("v22.1.0", (22, 1, 0), True),
+        ]
+        for text, version, expected in cases:
+            with self.subTest(range=text, version=version):
+                self.assertEqual(verify.satisfies(version, verify.parse_range(text)), expected)
+        for text in ("latest", ">=", "22 - ", "^a"):
+            with self.subTest(bad=text):
+                with self.assertRaises(ValueError):
+                    verify.parse_range(text)
+
 
 class VerifyLoadTest(unittest.TestCase):
     def test_broken_common_is_exit_2(self):
@@ -206,7 +349,8 @@ class FragmentTest(unittest.TestCase):
     def test_verify_fragment_header_and_manifest(self):
         """T9"""
         text = (ROOT / "core" / "ci" / "gitlab" / "verify.yml").read_text(encoding="utf-8")
-        for needle in ("include:", "- remote:", "HARNESS_VERIFY_IMAGE", "필요 조건:", "예외:", "harness-verify:",
+        for needle in ("include:", "- remote:", "HARNESS_VERIFY_IMAGE", "HARNESS_VERIFY_PARITY", "필요 조건:", "예외:",
+                       "harness-verify:",
                        ".harness/verify/verify_changed.py"):
             self.assertIn(needle, text)
         self.assertIn("CI_MERGE_REQUEST_DIFF_BASE_SHA", text)  # fork MR도 대상 쪽 기준과 비교한다(리뷰 B F2)

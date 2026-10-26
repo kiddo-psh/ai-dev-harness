@@ -221,6 +221,32 @@ hooks가 없는 도구로 만든 MR도 같은 검증을 거친다. 검사 코드
 - 로컬에서 같은 검사: `python .harness/verify/verify_changed.py --base origin/<대상 브랜치>`
 - 명령은 종료 검증 hook과 같은 셸에서 돈다(Linux runner는 `/bin/sh`, Windows는 Git Bash)
 
+### Node 버전 패리티 (#152)
+
+같은 검증 명령이라도 로컬과 CI의 Node 버전이 다르면 결과가 갈린다(feelm: 로컬 Node 22에서 통과한 테스트가 CI `node:20.19`에서
+실패). 실행할 명령이 있으면 명령보다 먼저 저장소 루트와 `areas[].dir`(하위 디렉터리는 보지 않는다)의 선언을 모아 비교하고,
+어긋나면 명령을 돌리지 않고 실패(종료 1)한다.
+
+| 선언 | 읽는 값 |
+| --- | --- |
+| 고정 버전 | `.nvmrc`·`.node-version` 첫 줄, `.tool-versions`의 `nodejs`, `Dockerfile*`의 `FROM node:<ver>`, 루트 `.gitlab-ci.yml`의 `node:<ver>`(주석 줄 제외) |
+| 범위 | `package.json`의 `engines.node` |
+| 실행 중인 node | `node --version`. CI에서는 `HARNESS_VERIFY_IMAGE`의 node, 로컬 실행이면 개발자의 node. 없으면 건너뛴다 |
+
+| 실패 조건 | 예 |
+| --- | --- |
+| 고정 버전끼리 다르다(major.minor까지. 자릿수가 적은 쪽에 맞춰 `22`와 `22.22.0`은 같다) | `.nvmrc` 22, CI `node:20.19` |
+| 고정 버전이 `engines.node` 범위 밖이다 | `engines` `^22`, Dockerfile `node:20` |
+| `engines.node`가 고정 버전의 메이저 밖도 허용한다 | `>=20.19.0` + CI `node:20.19`. CI는 개발자의 node를 볼 수 없으므로 범위에 상한(`<21`, `^20.19.0`)을 두게 해서 막는다. `.npmrc`에 `engine-strict=true`를 두면 로컬 `npm install`도 다른 메이저를 거부한다 |
+| 실행 중인 node가 고정 버전·범위와 다르다 | 로컬 Node 22로 `verify_changed.py`를 돌림 |
+
+- 숫자가 아닌 값(`lts/*`, `node:lts`, `node:${V}`)은 무시한다. JSON이 깨진 `package.json`과 해석하지 못한 범위(npm semver의
+  `>= > <= < = ^ ~ x * ||`·하이픈 범위 밖)는 경고만 내고 그 선언을 건너뛴다
+- 선언이 하나도 없으면 아무것도 하지 않는다. 실행할 명령이 없을 때도 하지 않는다
+- 끄는 법: CI 변수 `HARNESS_VERIFY_PARITY=off`(로컬은 같은 환경 변수)
+- 한계: 영역마다 다른 Node를 쓰는 저장소(두 프런트엔드가 다른 메이저)는 하나의 기준으로 비교해 실패한다. 이 경우 끄고 이슈로 남긴다.
+  `.gitlab-ci.yml`은 키를 가리지 않고 `node:<ver>`를 읽으므로 `services`·스크립트 줄의 이미지도 선언으로 본다. `include`로 가져온 다른 파일의 이미지와 변수로 만든 이미지 이름은 보지 않는다. Java 등 다른 런타임은 다루지 않는다
+
 ## 측정 예약 파이프라인
 
 `metrics.yml`의 `harness-metrics` job은 **예약 파이프라인**(`$CI_PIPELINE_SOURCE == "schedule"`)에서 주 1회 돌며 측정 수집기 →
