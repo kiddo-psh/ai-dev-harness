@@ -82,6 +82,21 @@ Codex와 Claude Code를 함께 비교한다. 단가 미등록 모델도 토큰�
 
 </details>
 
+<details>
+<summary>화면 구성 목업 보기 · 설계 시안(#156)</summary>
+
+아래는 실제 Grafana 화면이 아니라 화면 구성을 합의할 때 쓴 **설계 목업**이다(Wanted Design System 토큰, 가상 팀원 목데이터).
+Grafana에는 패널 구성·제목·배치·색을 반영하며, 탭·배지·알림 박스·글꼴 같은 겉모양은 실제 화면과 다르다.
+수집·차단 진단 목업은 Claude Code 내장 텔레메트리 행(사람별 시간당 토큰, 캐시 읽기 제외)을 펼친 모습이다.
+
+![설계 목업: 팀 사용량](docs/assets/dashboards/mockup-team-usage.png)
+
+![설계 목업: 수집·차단 진단](docs/assets/dashboards/mockup-collection-diagnostics.png)
+
+![설계 목업: 작업 검증 기록(프로젝트 확장)](docs/assets/dashboards/mockup-task-evidence.png)
+
+</details>
+
 팀 Grafana는 [팀 수집기 안내](core/observability/README.md)에 따라 선택해서 운영한다.
 기본 키트의 기존 원천 진단과 공통 수집 v2 적용 여부를 구분해서 사용한다.
 수집기 없이 혼자 확인하려면 [로컬 대시보드](core/dashboard/README.md)를 쓴다.
