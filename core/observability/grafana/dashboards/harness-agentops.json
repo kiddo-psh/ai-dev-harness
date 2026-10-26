@@ -8,7 +8,7 @@
   "description": "수집 관측과 Claude hooks 문제 확인. 생존 신호는 에이전트 실행 상태가 아닙니다. 기존 원천 비용은 접힌 진단에만 남깁니다.",
   "editable": false,
   "schemaVersion": 39,
-  "version": 12,
+  "version": 13,
   "refresh": "30s",
   "time": {
     "from": "now-24h",
@@ -102,7 +102,32 @@
           "unit": "short",
           "min": 0
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "전송 실패"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "원천 읽기 오류"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "reduceOptions": {
@@ -128,7 +153,7 @@
       "id": 5,
       "type": "stat",
       "title": "보호 규칙 개입 · Claude",
-      "description": "키트 차단(block)·확인 요청(ask) 합계. 검증 실패는 오른쪽 카드로 분리한다. Codex는 동등 사건 미수집. 미수신은 기록 없음으로 표시한다.",
+      "description": "키트 차단(block)·확인 요청(ask)의 합계와 내역. 검증 실패는 오른쪽 카드로 분리한다. Codex는 동등 사건 미수집. 미수신은 기록 없음으로 표시한다.",
       "gridPos": {
         "x": 12,
         "y": 0,
@@ -149,16 +174,72 @@
           },
           "queryType": "instant",
           "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(count_over_time({service_name=\"harness\"} | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | harness_kind=\"hook\" | harness_decision=\"block\" [$__range]))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(count_over_time({service_name=\"harness\"} | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | harness_kind=\"hook\" | harness_decision=\"ask\" [$__range]))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "noValue": "기록 없음",
-          "decimals": 0,
-          "displayName": "차단 · 확인"
+          "decimals": 0
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "합계"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "차단"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "확인 요청"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "reduceOptions": {
@@ -171,7 +252,7 @@
         "colorMode": "none",
         "graphMode": "none",
         "textMode": "value_and_name",
-        "orientation": "horizontal"
+        "orientation": "auto"
       }
     },
     {
@@ -254,13 +335,33 @@
           },
           "queryType": "instant",
           "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "expr": "max by (person_name, repo_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"exporter\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | unwrap harness_previous_failures | __error__=\"\" [$__range]))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        },
+        {
+          "refId": "D",
+          "expr": "max by (person_name, repo_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"exporter\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | unwrap harness_source_errors | __error__=\"\" [$__range]))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
         }
       ],
       "datasource": {
         "type": "loki",
         "uid": "${DS_LOKI}"
       },
-      "description": "키트 공통 텔레메트리(v2)의 사람·저장소별 마지막 전송. 최근 7일 내 수신 이력 기준. 전송은 Codex 응답 종료(최소 5분 간격)와 세션 종료 때만 하므로 24시간 전송 없음은 도구를 쓰지 않은 경우도 포함합니다. 실시간 사용 여부는 도구 내장 텔레메트리 행에서 봅니다. 미설치 PC 목록은 알 수 없습니다.",
+      "description": "키트 공통 텔레메트리(v2)의 사람·저장소별 마지막 전송. 최근 7일 내 수신 이력 기준. 전송은 Codex 응답 종료(최소 5분 간격)와 세션 종료 때만 하므로 24시간 전송 없음은 도구를 쓰지 않은 경우도 포함합니다. 실시간 사용 여부는 도구 내장 텔레메트리 행에서 봅니다. 미설치 PC 목록은 알 수 없습니다. 전송 실패·원천 읽기 오류는 선택 기간 보고값의 최대이며, 장애 중 기록은 복구 후 늦게 도착할 수 있습니다.",
       "fieldConfig": {
         "defaults": {
           "noValue": "기록 없음",
@@ -326,7 +427,9 @@
               "person_name": "사람",
               "repo_name": "저장소",
               "Value #A": "마지막 전송",
-              "Value #B": "전송 상태"
+              "Value #B": "전송 상태",
+              "Value #C": "전송 실패 최대",
+              "Value #D": "읽기 오류 최대"
             }
           }
         }
@@ -389,6 +492,13 @@
               {
                 "id": "displayName",
                 "value": "차단"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF4242"
+                }
               }
             ]
           },
@@ -401,6 +511,13 @@
               {
                 "id": "displayName",
                 "value": "확인 요청"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF9200"
+                }
               }
             ]
           },
@@ -413,6 +530,13 @@
               {
                 "id": "displayName",
                 "value": "검증 실패"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#6541F2"
+                }
               }
             ]
           }
@@ -433,9 +557,9 @@
     },
     {
       "id": 13,
-      "type": "logs",
+      "type": "table",
       "title": "최근 차단·검증 실패 · Claude",
-      "description": "사람 · 브랜치 · 결정 · 규칙 · 경로 순서. 원본 구조화 메타데이터는 행을 펼쳐 확인한다. 발생 기록이며 해결 여부는 추적하지 않는다.",
+      "description": "최근 키트 차단·확인 요청·검증 실패 100건. 발생 기록이며 해결 여부는 추적하지 않는다. 원본 구조화 메타데이터는 Explore의 Loki에서 확인한다.",
       "gridPos": {
         "x": 12,
         "y": 11,
@@ -453,90 +577,124 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "{service_name=\"harness\"} | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | harness_kind=\"hook\" | harness_decision=~\"block|ask|fail\" | line_format `{{ if .$person }}{{ .$person }}{{ else }}미식별{{ end }} · {{.harness_branch}} · {{ if eq .harness_decision \"block\" }}차단{{ else if eq .harness_decision \"ask\" }}확인 요청{{ else }}검증 실패{{ end }} · {{.harness_rule}} · {{.harness_path}}`",
+          "expr": "{service_name=\"harness\"} | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | harness_kind=\"hook\" | harness_decision=~\"block|ask|fail\" | label_format who=`{{ if .$person }}{{ .$person }}{{ else }}미식별{{ end }}`",
           "queryType": "range",
           "maxLines": 100
         }
       ],
       "options": {
-        "showTime": true,
-        "wrapLogMessage": true,
-        "sortOrder": "Descending",
-        "enableLogDetails": true,
-        "showLabels": false
+        "showHeader": true,
+        "cellHeight": "sm"
       },
       "fieldConfig": {
         "defaults": {
           "noValue": "기록 없음"
         },
-        "overrides": []
-      }
-    },
-    {
-      "id": 111,
-      "title": "전송·읽기 오류 이력",
-      "type": "table",
-      "gridPos": {
-        "x": 0,
-        "y": 20,
-        "w": 24,
-        "h": 6
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max by (person_name, repo_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"exporter\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | unwrap harness_previous_failures | __error__=\"\" [$__range]))",
-          "datasource": {
-            "type": "loki",
-            "uid": "${DS_LOKI}"
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "결정"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "block": {
+                        "text": "차단",
+                        "color": "#FF4242"
+                      },
+                      "ask": {
+                        "text": "확인 요청",
+                        "color": "#FF9200"
+                      },
+                      "fail": {
+                        "text": "검증 실패",
+                        "color": "#6541F2"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
           },
-          "queryType": "instant",
-          "editorMode": "code"
-        },
-        {
-          "refId": "B",
-          "expr": "max by (person_name, repo_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"exporter\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | unwrap harness_source_errors | __error__=\"\" [$__range]))",
-          "datasource": {
-            "type": "loki",
-            "uid": "${DS_LOKI}"
-          },
-          "queryType": "instant",
-          "editorMode": "code"
-        }
-      ],
-      "datasource": {
-        "type": "loki",
-        "uid": "${DS_LOKI}"
-      },
-      "description": "선택 기간 보고된 전송 실패·원천 읽기 오류의 최대값. 장애 중 기록은 복구 후 늦게 도착할 수 있습니다.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "기록 없음",
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm"
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "시각"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
       },
       "transformations": [
         {
-          "id": "merge",
-          "options": {}
+          "id": "extractFields",
+          "options": {
+            "source": "labels",
+            "format": "auto",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Time",
+                "who",
+                "harness_decision",
+                "harness_rule",
+                "harness_branch",
+                "harness_path"
+              ]
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Time",
+                "desc": true
+              }
+            ]
+          }
         },
         {
           "id": "organize",
           "options": {
-            "excludeByName": {
-              "Time": true
+            "indexByName": {
+              "Time": 0,
+              "who": 1,
+              "harness_decision": 2,
+              "harness_rule": 3,
+              "harness_branch": 4,
+              "harness_path": 5
             },
             "renameByName": {
-              "person_name": "사람",
-              "repo_name": "저장소",
-              "Value": "값",
-              "Value #A": "이전 실패 최대",
-              "Value #B": "읽기 오류 최대"
+              "Time": "시각",
+              "who": "사람",
+              "harness_decision": "결정",
+              "harness_rule": "규칙",
+              "harness_branch": "브랜치",
+              "harness_path": "경로"
             }
           }
         }
@@ -549,7 +707,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 20,
         "w": 24,
         "h": 1
       },
@@ -560,7 +718,7 @@
           "type": "table",
           "gridPos": {
             "x": 0,
-            "y": 28,
+            "y": 21,
             "w": 24,
             "h": 7
           },
@@ -620,7 +778,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 21,
         "w": 24,
         "h": 1
       },
@@ -631,7 +789,7 @@
           "type": "table",
           "gridPos": {
             "x": 0,
-            "y": 29,
+            "y": 22,
             "w": 12,
             "h": 8
           },
@@ -698,7 +856,7 @@
           "type": "table",
           "gridPos": {
             "x": 12,
-            "y": 29,
+            "y": 22,
             "w": 12,
             "h": 8
           },
@@ -805,7 +963,7 @@
           "type": "table",
           "gridPos": {
             "x": 0,
-            "y": 37,
+            "y": 30,
             "w": 24,
             "h": 7
           },
@@ -904,7 +1062,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 22,
         "w": 24,
         "h": 1
       },
@@ -916,7 +1074,7 @@
           "description": "관측된 추정 비용이며 청구액이 아니다. Claude 네이티브 추정액과 Codex 키트 단가 추정액을 합친다. 미수신 원천의 비용은 합산에서 0으로 취급하므로 일부 원천만 도착하면 부분 합계다. 두 원천 모두 비용 기록이 없으면 기록 없음. Codex 단가 미등록 모델은 비용에서 제외되며 토큰은 센다. Codex는 사람·저장소·세션별 기간 누적 최댓값에서 기간 시작 전 7일 최댓값을 뺀다. 이전 기준값이 없으면 기간 안 누적 전체가 포함된다. 지연·누락·보관 기간 경계에서는 기간 귀속이 근사값이다. 기존 원천 진단: 사람·저장소 필터 미적용.",
           "gridPos": {
             "x": 0,
-            "y": 30,
+            "y": 23,
             "w": 24,
             "h": 5
           },
@@ -1018,7 +1176,7 @@
           "type": "stat",
           "gridPos": {
             "x": 0,
-            "y": 35,
+            "y": 28,
             "w": 24,
             "h": 5
           },
@@ -1068,7 +1226,7 @@
           "type": "timeseries",
           "gridPos": {
             "x": 0,
-            "y": 40,
+            "y": 33,
             "w": 24,
             "h": 10
           },
@@ -1183,7 +1341,7 @@
           "type": "barchart",
           "gridPos": {
             "x": 0,
-            "y": 50,
+            "y": 43,
             "w": 24,
             "h": 10
           },
@@ -1242,7 +1400,7 @@
                     "id": "color",
                     "value": {
                       "mode": "fixed",
-                      "fixedColor": "green"
+                      "fixedColor": "#3366FF"
                     }
                   }
                 ]
@@ -1257,7 +1415,7 @@
                     "id": "color",
                     "value": {
                       "mode": "fixed",
-                      "fixedColor": "purple"
+                      "fixedColor": "#FF9200"
                     }
                   }
                 ]
@@ -1372,7 +1530,7 @@
           "type": "stat",
           "gridPos": {
             "x": 0,
-            "y": 60,
+            "y": 53,
             "w": 24,
             "h": 4
           },
@@ -1423,7 +1581,7 @@
           "description": "관측된 추정 비용이며 청구액이 아니다. Claude 네이티브 추정액과 Codex 키트 단가 추정액을 합친다. 미수신 원천의 비용은 합산에서 0으로 취급하므로 일부 원천만 도착하면 부분 합계다. 두 원천 모두 비용 기록이 없으면 기록 없음. Codex 단가 미등록 모델은 비용에서 제외되며 토큰은 센다. Codex는 사람·저장소·세션별 기간 누적 최댓값에서 기간 시작 전 7일 최댓값을 뺀다. 이전 기준값이 없으면 기간 안 누적 전체가 포함된다. 지연·누락·보관 기간 경계에서는 기간 귀속이 근사값이다. 기존 원천 진단: 사람·저장소 필터 미적용.",
           "gridPos": {
             "x": 0,
-            "y": 64,
+            "y": 57,
             "w": 24,
             "h": 4
           },
@@ -1467,110 +1625,13 @@
           }
         },
         {
-          "id": 22,
-          "title": "Claude Code 토큰 · 종류별",
-          "type": "table",
-          "gridPos": {
-            "x": 0,
-            "y": 68,
-            "w": 24,
-            "h": 8
-          },
-          "description": "Claude 네이티브 type별 선택 기간 토큰. input·output·cacheRead·cacheCreation 기준이다. Codex와 캐시 쓰기 필드·집계 원천이 다르므로 종류별 표준화와 캐시 비율은 후속 #140에서 처리한다. 기존 원천 진단: 사람·저장소 필터 미적용.",
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum by (type) ((increase({__name__=~\"claude_code_token_usage.*\"}[$__range]) or last_over_time({__name__=~\"claude_code_token_usage.*\"}[$__range]) * 0) + ((min_over_time({__name__=~\"claude_code_token_usage.*\"}[$__range]) unless last_over_time({__name__=~\"claude_code_token_usage.*\"}[$__range] offset $__range)) or last_over_time({__name__=~\"claude_code_token_usage.*\"}[$__range]) * 0))",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "instant": true,
-              "range": false,
-              "format": "table"
-            }
-          ],
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "noValue": "기록 없음",
-              "unit": "short",
-              "min": 0
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "종류"
-                },
-                "properties": [
-                  {
-                    "id": "mappings",
-                    "value": [
-                      {
-                        "type": "value",
-                        "options": {
-                          "input": {
-                            "text": "일반 입력"
-                          },
-                          "output": {
-                            "text": "출력"
-                          },
-                          "cacheRead": {
-                            "text": "캐시 읽기"
-                          },
-                          "cacheCreation": {
-                            "text": "캐시 쓰기"
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          "options": {
-            "showHeader": true,
-            "cellHeight": "sm",
-            "sortBy": [
-              {
-                "displayName": "토큰",
-                "desc": true
-              }
-            ]
-          },
-          "transformations": [
-            {
-              "id": "organize",
-              "options": {
-                "excludeByName": {
-                  "Time": true
-                },
-                "renameByName": {
-                  "type": "종류",
-                  "Value": "토큰",
-                  "Value #A": "토큰",
-                  "Value #B": "토큰",
-                  "Value #C": "토큰",
-                  "Value #D": "토큰",
-                  "Value #E": "토큰"
-                }
-              }
-            }
-          ]
-        },
-        {
           "id": 16,
           "type": "bargauge",
           "title": "Codex 토큰 · 종류별 · 키트 기록",
           "description": "선택 기간의 토큰 증가분. 일반 입력은 캐시 적중분을 제외한다. 5분 필드에는 Codex cache_write_input_tokens를 매핑하며 실제 캐시 TTL을 의미하지 않는다. 1시간 필드는 현재 수집기가 0으로 채우지만 실제 수집 지표가 아니므로 화면에서 숨긴다. Codex는 사람·저장소·세션별 기간 누적 최댓값에서 기간 시작 전 7일 최댓값을 뺀다. 이전 기준값이 없으면 기간 안 누적 전체가 포함된다. 지연·누락·보관 기간 경계에서는 기간 귀속이 근사값이다. 기존 원천 진단: 사람·저장소 필터 미적용.",
           "gridPos": {
             "x": 0,
-            "y": 76,
+            "y": 61,
             "w": 24,
             "h": 8
           },
@@ -1760,7 +1821,7 @@
           "description": "완료 stop 사건의 기간 합계. 보조 세션 제외. 비용 대비 응답 수는 품질·생산성 점수가 아니다. 기존 원천 진단: 사람·저장소 필터 미적용.",
           "gridPos": {
             "x": 0,
-            "y": 84,
+            "y": 69,
             "w": 24,
             "h": 8
           },
@@ -1829,7 +1890,7 @@
           "description": "키트 stop 사건. 브랜치별 관측 응답 수이며 비용을 브랜치별로 중복 배분하지 않는다. 기존 원천 진단: 사람·저장소 필터 미적용.",
           "gridPos": {
             "x": 0,
-            "y": 92,
+            "y": 77,
             "w": 24,
             "h": 8
           },
@@ -1884,139 +1945,13 @@
           }
         },
         {
-          "id": 8,
-          "type": "timeseries",
-          "title": "시간당 토큰 · Claude Code",
-          "description": "Claude 네이티브 type별 직전 1시간 사용량. Codex와 표준화된 종류 비교는 후속 #140. 기존 원천 진단: 사람·저장소 필터 미적용.",
-          "gridPos": {
-            "x": 0,
-            "y": 100,
-            "w": 24,
-            "h": 8
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "expr": "sum by (type) ((increase({__name__=~\"claude_code_token_usage.*\"}[1h]) or last_over_time({__name__=~\"claude_code_token_usage.*\"}[1h]) * 0) + ((min_over_time({__name__=~\"claude_code_token_usage.*\"}[1h]) unless last_over_time({__name__=~\"claude_code_token_usage.*\"}[1h] offset 1h)) or last_over_time({__name__=~\"claude_code_token_usage.*\"}[1h]) * 0))",
-              "range": true,
-              "instant": false,
-              "legendFormat": "{{type}}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "noValue": "기록 없음",
-              "min": 0,
-              "custom": {
-                "drawStyle": "bars",
-                "lineWidth": 0,
-                "fillOpacity": 85,
-                "pointSize": 0,
-                "stacking": {
-                  "mode": "normal",
-                  "group": "A"
-                },
-                "axisCenteredZero": false,
-                "axisLabel": "토큰 / 직전 1시간",
-                "axisPlacement": "auto",
-                "spanNulls": false
-              }
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "interval": "1h"
-        },
-        {
-          "id": 7,
-          "type": "timeseries",
-          "title": "시간당 비용 · 사람별 · Claude Code",
-          "description": "Claude 네이티브 비용의 사람별 직전 1시간 증가분. Codex는 팀 요약의 별도 도구 시리즈로 확인한다. 기존 원천 진단: 사람·저장소 필터 미적용.",
-          "gridPos": {
-            "x": 0,
-            "y": 108,
-            "w": 24,
-            "h": 8
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "expr": "sum by ($person) ((increase({__name__=~\"claude_code_cost_usage.*\"}[1h]) or last_over_time({__name__=~\"claude_code_cost_usage.*\"}[1h]) * 0) + ((min_over_time({__name__=~\"claude_code_cost_usage.*\"}[1h]) unless last_over_time({__name__=~\"claude_code_cost_usage.*\"}[1h] offset 1h)) or last_over_time({__name__=~\"claude_code_cost_usage.*\"}[1h]) * 0))",
-              "range": true,
-              "instant": false,
-              "legendFormat": "{{$person}}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "currencyUSD",
-              "noValue": "기록 없음",
-              "min": 0,
-              "custom": {
-                "drawStyle": "bars",
-                "lineWidth": 0,
-                "fillOpacity": 85,
-                "pointSize": 0,
-                "stacking": {
-                  "mode": "none",
-                  "group": "A"
-                },
-                "axisCenteredZero": false,
-                "axisLabel": "USD / 직전 1시간",
-                "axisPlacement": "auto",
-                "spanNulls": false
-              }
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "interval": "1h"
-        },
-        {
           "id": 9,
           "type": "timeseries",
           "title": "도구 허용·거부 · Claude 원본",
           "description": "Claude tool_decision을 decision·source별로 표시한다. 키트 개입과 모집단이 다르므로 합산하지 않는다. 기존 원천 진단: 사람·저장소 필터 미적용.",
           "gridPos": {
             "x": 0,
-            "y": 116,
+            "y": 85,
             "w": 24,
             "h": 8
           },
@@ -2077,7 +2012,7 @@
           "description": "Claude 원본 tool_decision 중 reject 비율. 분모가 없으면 기록 없음. 키트 차단율이나 전체 도구 거부율이 아니다. 기존 원천 진단: 사람·저장소 필터 미적용.",
           "gridPos": {
             "x": 0,
-            "y": 124,
+            "y": 93,
             "w": 24,
             "h": 4
           },
@@ -2124,7 +2059,7 @@
           "description": "Claude hook_execution_complete의 num_blocking 합. 키트 개입과 중복될 수 있어 합산하지 않는다. 기존 원천 진단: 사람·저장소 필터 미적용.",
           "gridPos": {
             "x": 0,
-            "y": 128,
+            "y": 97,
             "w": 24,
             "h": 4
           },
@@ -2167,13 +2102,316 @@
       "targets": []
     },
     {
+      "id": 45,
+      "title": "Claude Code 내장 텔레메트리 · 실시간 · 사람별 · 사람·저장소 필터 미적용",
+      "type": "row",
+      "collapsed": true,
+      "targets": [],
+      "panels": [
+        {
+          "id": 125,
+          "type": "timeseries",
+          "title": "시간당 토큰 · 사람별 · Claude Code · 캐시 읽기 제외",
+          "description": "각 시점의 직전 1시간 토큰(input·output·cacheCreation, cacheRead 제외)을 사람별로 표시한다. Claude Code 내장 텔레메트리이며 키트 기록·팀 사용량(v2)과 더하지 않는다. 미수신 구간은 선을 잇지 않는다. 범례의 합계는 1시간 간격일 때 기간 합계다. 사람·저장소 필터 미적용.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "interval": "1h",
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "sum by ($person) ((increase({__name__=~\"claude_code_token_usage.*\", type!=\"cacheRead\"}[1h]) or last_over_time({__name__=~\"claude_code_token_usage.*\", type!=\"cacheRead\"}[1h]) * 0) + ((min_over_time({__name__=~\"claude_code_token_usage.*\", type!=\"cacheRead\"}[1h]) unless last_over_time({__name__=~\"claude_code_token_usage.*\", type!=\"cacheRead\"}[1h] offset 1h)) or last_over_time({__name__=~\"claude_code_token_usage.*\", type!=\"cacheRead\"}[1h]) * 0))",
+              "range": true,
+              "instant": false,
+              "legendFormat": "{{$person}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "noValue": "기록 없음",
+              "min": 0,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 0,
+                "pointSize": 5,
+                "showPoints": "always",
+                "spanNulls": false,
+                "axisLabel": "토큰 / 직전 1시간",
+                "axisPlacement": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "calcs": [
+                "sum",
+                "max"
+              ],
+              "sortBy": "Total",
+              "sortDesc": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 24,
+            "w": 24,
+            "h": 9
+          }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "시간당 토큰 · Claude Code",
+          "description": "Claude 네이티브 type별 직전 1시간 사용량. Codex와 표준화된 비교는 팀 사용량(v2)에서 본다. Claude Code 내장 텔레메트리. 사람·저장소 필터 미적용.",
+          "gridPos": {
+            "x": 0,
+            "y": 33,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "sum by (type) ((increase({__name__=~\"claude_code_token_usage.*\"}[1h]) or last_over_time({__name__=~\"claude_code_token_usage.*\"}[1h]) * 0) + ((min_over_time({__name__=~\"claude_code_token_usage.*\"}[1h]) unless last_over_time({__name__=~\"claude_code_token_usage.*\"}[1h] offset 1h)) or last_over_time({__name__=~\"claude_code_token_usage.*\"}[1h]) * 0))",
+              "range": true,
+              "instant": false,
+              "legendFormat": "{{type}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "noValue": "기록 없음",
+              "min": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "lineWidth": 0,
+                "fillOpacity": 85,
+                "pointSize": 0,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "axisCenteredZero": false,
+                "axisLabel": "토큰 / 직전 1시간",
+                "axisPlacement": "auto",
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "interval": "1h"
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "시간당 비용 · 사람별 · Claude Code",
+          "description": "Claude 네이티브 비용의 사람별 직전 1시간 증가분. Codex는 팀 요약의 별도 도구 시리즈로 확인한다. Claude Code 내장 텔레메트리. 사람·저장소 필터 미적용.",
+          "gridPos": {
+            "x": 12,
+            "y": 33,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "expr": "sum by ($person) ((increase({__name__=~\"claude_code_cost_usage.*\"}[1h]) or last_over_time({__name__=~\"claude_code_cost_usage.*\"}[1h]) * 0) + ((min_over_time({__name__=~\"claude_code_cost_usage.*\"}[1h]) unless last_over_time({__name__=~\"claude_code_cost_usage.*\"}[1h] offset 1h)) or last_over_time({__name__=~\"claude_code_cost_usage.*\"}[1h]) * 0))",
+              "range": true,
+              "instant": false,
+              "legendFormat": "{{$person}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "noValue": "기록 없음",
+              "min": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "lineWidth": 0,
+                "fillOpacity": 85,
+                "pointSize": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "axisCenteredZero": false,
+                "axisLabel": "USD / 직전 1시간",
+                "axisPlacement": "auto",
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "interval": "1h"
+        },
+        {
+          "id": 22,
+          "title": "Claude Code 토큰 · 종류별",
+          "type": "table",
+          "gridPos": {
+            "x": 0,
+            "y": 41,
+            "w": 24,
+            "h": 8
+          },
+          "description": "Claude 네이티브 type별 선택 기간 토큰. input·output·cacheRead·cacheCreation 기준이다. Codex와 표준화된 종류별 비교는 팀 사용량(v2)에서 본다. Claude Code 내장 텔레메트리. 사람·저장소 필터 미적용.",
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type) ((increase({__name__=~\"claude_code_token_usage.*\"}[$__range]) or last_over_time({__name__=~\"claude_code_token_usage.*\"}[$__range]) * 0) + ((min_over_time({__name__=~\"claude_code_token_usage.*\"}[$__range]) unless last_over_time({__name__=~\"claude_code_token_usage.*\"}[$__range] offset $__range)) or last_over_time({__name__=~\"claude_code_token_usage.*\"}[$__range]) * 0))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "instant": true,
+              "range": false,
+              "format": "table"
+            }
+          ],
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "noValue": "기록 없음",
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "종류"
+                },
+                "properties": [
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "input": {
+                            "text": "일반 입력"
+                          },
+                          "output": {
+                            "text": "출력"
+                          },
+                          "cacheRead": {
+                            "text": "캐시 읽기"
+                          },
+                          "cacheCreation": {
+                            "text": "캐시 쓰기"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "sortBy": [
+              {
+                "displayName": "토큰",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "type": "종류",
+                  "Value": "토큰",
+                  "Value #A": "토큰",
+                  "Value #B": "토큰",
+                  "Value #C": "토큰",
+                  "Value #D": "토큰",
+                  "Value #E": "토큰"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
       "id": 44,
       "title": "Codex 내장 텔레메트리 · 실시간 · 사람·모델별 · 저장소 필터 미적용",
       "type": "row",
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 29,
+        "y": 24,
         "w": 24,
         "h": 1
       },
@@ -2185,7 +2423,7 @@
           "title": "Codex 내장 텔레메트리 · 읽는 기준",
           "gridPos": {
             "x": 0,
-            "y": 30,
+            "y": 25,
             "w": 24,
             "h": 6
           },
@@ -2201,7 +2439,7 @@
           "description": "선택 기간에 끝난 Codex 응답 수. Codex 내장 텔레메트리(codex.sse_event의 response.completed, 응답마다 한 줄). 저장소·브랜치가 없어 저장소 필터를 적용하지 않는다.",
           "gridPos": {
             "x": 0,
-            "y": 36,
+            "y": 31,
             "w": 8,
             "h": 5
           },
@@ -2253,7 +2491,7 @@
           "description": "선택 기간의 토큰 합계. 입력은 캐시 적중분을 포함한다. Codex 내장 텔레메트리(codex.sse_event의 response.completed, 응답마다 한 줄). 저장소·브랜치가 없어 저장소 필터를 적용하지 않는다.",
           "gridPos": {
             "x": 8,
-            "y": 36,
+            "y": 31,
             "w": 16,
             "h": 5
           },
@@ -2338,7 +2576,7 @@
           "description": "선택 기간의 사람·모델별 토큰 합계. 사람 구분은 대시보드 위쪽 변수를 따른다(팀 화면은 member). Codex 내장 텔레메트리(codex.sse_event의 response.completed, 응답마다 한 줄). 저장소·브랜치가 없어 저장소 필터를 적용하지 않는다.",
           "gridPos": {
             "x": 0,
-            "y": 41,
+            "y": 36,
             "w": 24,
             "h": 8
           },
@@ -2442,7 +2680,7 @@
           "description": "각 시점의 직전 1시간 토큰(입력+출력) 합계. Codex 내장 텔레메트리(codex.sse_event의 response.completed, 응답마다 한 줄). 저장소·브랜치가 없어 저장소 필터를 적용하지 않는다.",
           "gridPos": {
             "x": 0,
-            "y": 49,
+            "y": 44,
             "w": 24,
             "h": 8
           },
@@ -2497,7 +2735,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 30,
+        "y": 25,
         "w": 24,
         "h": 1
       },
@@ -2508,7 +2746,7 @@
           "title": "수집 범위 · 현재 지원",
           "gridPos": {
             "x": 0,
-            "y": 32,
+            "y": 26,
             "w": 24,
             "h": 10
           },
@@ -2524,7 +2762,7 @@
           "type": "stat",
           "gridPos": {
             "x": 0,
-            "y": 42,
+            "y": 36,
             "w": 24,
             "h": 6
           },
@@ -2635,7 +2873,7 @@
           "description": "Claude 네이티브 세션 수에서 키트 세션 기록이 있는 수를 뺀 기존 근사값. 기간 경계·늦은 전송·사람 범위 차이로 음수일 수도 있고 수집 장애나 hooks 꺼짐으로 단정할 수 없다.",
           "gridPos": {
             "x": 0,
-            "y": 48,
+            "y": 42,
             "w": 24,
             "h": 6
           },
@@ -2702,7 +2940,7 @@
           "description": "Claude 네이티브 세션의 기간 내 식별 수. Codex 세션과 수집 방식이 달라 팀 전체 세션 합계로 사용하지 않는다.",
           "gridPos": {
             "x": 0,
-            "y": 54,
+            "y": 48,
             "w": 24,
             "h": 4
           },
@@ -2749,7 +2987,7 @@
           "description": "Claude 네이티브 세션만 포함한다. Codex와 전체 활성 세션 수로 해석하지 않는다.",
           "gridPos": {
             "x": 0,
-            "y": 58,
+            "y": 52,
             "w": 24,
             "h": 7
           },
@@ -2809,7 +3047,7 @@
           "title": "값을 읽는 기준",
           "gridPos": {
             "x": 0,
-            "y": 65,
+            "y": 59,
             "w": 24,
             "h": 9
           },

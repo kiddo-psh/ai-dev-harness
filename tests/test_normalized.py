@@ -280,6 +280,19 @@ class NormalizedTest(unittest.TestCase):
                 self.assertIn("harness_record_id", expr)
                 self.assertIn("[7d]) by (", expr)  # unwrap 단계에서 불필요한 메타데이터 차원을 없앤다
 
+    def test_people_table_splits_tokens_by_tool(self):
+        """#156: 사람별 사용 내역에 도구별 토큰 열을 둔다. 관측 토큰과 같은 식에 도구 조건만 더한다."""
+        panels = {panel["id"]: panel for panel in json.loads(DASHBOARD.read_text(encoding="utf-8"))["panels"]}
+        targets = {target["refId"]: target["expr"] for target in panels[14]["targets"]}
+        anchor = "harness_event_unix <= ${__to:date:seconds}"
+        for ref, tool in (("E", "codex"), ("F", "claude-code")):
+            self.assertEqual(targets[ref], targets["A"].replace(anchor, f'{anchor} | harness_tool="{tool}"', 1))
+        organize = next(t for t in panels[14]["transformations"] if t["id"] == "organize")["options"]
+        self.assertEqual((organize["renameByName"]["Value #E"], organize["renameByName"]["Value #F"]),
+                         ("Codex 토큰", "Claude Code 토큰"))
+        for pid in (1, 3):
+            self.assertTrue(panels[pid]["description"])
+
 
 class PushIntegrationTest(SessionRecordCase):
     """`telemetry push` 한 번이 v1에 이어 v2를 보낸다. 같은 PC·저장소의 Codex 세션만 읽는다."""

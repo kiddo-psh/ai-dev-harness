@@ -439,7 +439,7 @@ class FragmentConfigTest(unittest.TestCase):
         panels = {panel["id"]: panel for panel in dashboard_panels(dashboard["panels"])}
         self.assertEqual(dashboard["uid"], "harness-agentops")  # 기존 배포·링크 유지
         rows = [panel for panel in dashboard["panels"] if panel["type"] == "row"]
-        self.assertEqual(len(rows), 5)  # #145: Codex 내장 텔레메트리 행
+        self.assertEqual(len(rows), 6)  # #145: Codex 내장 텔레메트리 행, #156: Claude Code 내장 텔레메트리 행
         self.assertTrue(all(row["collapsed"] and row["panels"] for row in rows))
         # 진단에서는 수집 관측과 Claude 개입·실패를 우선 표시한다.
         self.assertEqual([panel["id"] for panel in dashboard["panels"] if panel["type"] == "stat"], [101, 102, 5, 18])
@@ -478,6 +478,56 @@ class FragmentConfigTest(unittest.TestCase):
         for panel in panels.values():
             if panel.get("targets"):
                 self.assertEqual(panel["fieldConfig"]["defaults"]["noValue"], "기록 없음")
+
+    def test_dashboard_layout_156(self):
+        """#156: 화면 구성 개편. 카드 값 이름 고정, 수집 상태·오류 표 통합, 최근 사건 표, Claude 내장 행"""
+        dashboard = json.loads((OBS / "grafana/dashboards/harness-agentops.json").read_text(encoding="utf-8"))
+        panels = {panel["id"]: panel for panel in dashboard_panels(dashboard["panels"])}
+
+        def names(panel):
+            return {item["matcher"]["options"]: next(prop["value"] for prop in item["properties"]
+                    if prop["id"] == "displayName") for item in panel["fieldConfig"]["overrides"]
+                    if item["matcher"]["id"] == "byFrameRefID"}
+
+        # legendFormat만으로는 instant 결과가 Value #A/#B로 보일 수 있어 ref별 이름을 고정한다.
+        self.assertEqual(names(panels[102]), {"A": "전송 실패", "B": "원천 읽기 오류"})
+        self.assertEqual(names(panels[5]), {"A": "합계", "B": "차단", "C": "확인 요청"})
+        exprs = {t["refId"]: t["expr"] for t in panels[5]["targets"]}
+        self.assertIn('harness_decision="block"', exprs["B"])
+        self.assertIn('harness_decision="ask"', exprs["C"])
+        self.assertEqual(exprs["A"].replace('=~"block|ask"', '="block"'), exprs["B"])
+        # 전송·읽기 오류 이력은 사람별 수집 상태 표에 합친다.
+        self.assertNotIn(111, panels)
+        status = panels[110]
+        self.assertEqual([t["refId"] for t in status["targets"]], ["A", "B", "C", "D"])
+        self.assertIn("unwrap harness_previous_failures", status["targets"][2]["expr"])
+        self.assertIn("unwrap harness_source_errors", status["targets"][3]["expr"])
+        renamed = status["transformations"][1]["options"]["renameByName"]
+        self.assertEqual((renamed["Value #C"], renamed["Value #D"]), ("전송 실패 최대", "읽기 오류 최대"))
+        # 최근 차단·검증 실패는 열이 있는 표다. 사람 표시는 사람 기준 변수를 따른다.
+        recent = panels[13]
+        self.assertEqual(recent["type"], "table")
+        self.assertEqual(recent["targets"][0]["queryType"], "range")
+        self.assertIn("label_format who=`{{ if .$person }}", recent["targets"][0]["expr"])
+        self.assertNotIn("line_format", recent["targets"][0]["expr"])
+        self.assertEqual([t["id"] for t in recent["transformations"]][0], "extractFields")
+        # Claude Code 내장 텔레메트리 행: Codex 행과 같은 자리에 두고 키트 기록과 더하지 않는다.
+        rows = [panel for panel in dashboard["panels"] if panel["type"] == "row"]
+        self.assertEqual([row["id"] for row in rows][-3:], [45, 44, 42])
+        claude = next(row for row in rows if row["id"] == 45)
+        self.assertIn("필터 미적용", claude["title"])
+        self.assertEqual([panel["id"] for panel in claude["panels"]], [125, 8, 7, 22])
+        hourly = panels[125]
+        expr = hourly["targets"][0]["expr"]
+        self.assertTrue(expr.startswith("sum by ($person) ("))
+        self.assertEqual(expr.count('type!="cacheRead"'), expr.count("claude_code_token_usage"))
+        self.assertNotIn("$__range", expr)  # 시간당 그래프는 기간 누적이 아니다
+        self.assertNotIn('service_name="harness"', expr)
+        self.assertFalse(hourly["fieldConfig"]["defaults"]["custom"]["spanNulls"])  # 미수신 구간을 잇지 않는다
+        self.assertEqual(hourly["options"]["legend"]["calcs"], ["sum", "max"])
+        self.assertEqual(hourly["interval"], "1h")
+        for pid in (22, 8, 7):
+            self.assertNotIn("기존 원천 진단", panels[pid]["description"])
 
     def test_dashboard_layout_has_no_overlapping_visible_panels(self):
         dashboard = json.loads((OBS / "grafana/dashboards/harness-agentops.json").read_text(encoding="utf-8"))
