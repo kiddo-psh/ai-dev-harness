@@ -8,7 +8,7 @@
   "description": "사람별 공통 토큰 사용량. 단가 미등록 포함, 사건 시각 기준 최근 7일. 추정 비용은 보조 지표이며 청구액이 아닙니다.",
   "editable": false,
   "schemaVersion": 39,
-  "version": 6,
+  "version": 7,
   "refresh": "30s",
   "time": {
     "from": "now-7d",
@@ -234,7 +234,7 @@
         "type": "loki",
         "uid": "${DS_LOKI}"
       },
-      "description": "",
+      "description": "등록된 USD 단가로 계산한 추정액. 청구액이 아니며 단가 미등록 모델의 토큰은 제외합니다.",
       "fieldConfig": {
         "defaults": {
           "noValue": "기록 없음",
@@ -283,7 +283,7 @@
         "type": "loki",
         "uid": "${DS_LOKI}"
       },
-      "description": "",
+      "description": "단가가 없어 추정 비용에서 제외된 토큰. 관측 토큰 합계에는 포함합니다.",
       "fieldConfig": {
         "defaults": {
           "noValue": "기록 없음",
@@ -366,7 +366,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "green"
+                  "fixedColor": "#3366FF"
                 }
               }
             ]
@@ -381,7 +381,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "purple"
+                  "fixedColor": "#FF9200"
                 }
               }
             ]
@@ -550,7 +550,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "green"
+                  "fixedColor": "#3366FF"
                 }
               }
             ]
@@ -565,7 +565,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "purple"
+                  "fixedColor": "#FF9200"
                 }
               }
             ]
@@ -722,6 +722,26 @@
           },
           "queryType": "instant",
           "editorMode": "code"
+        },
+        {
+          "refId": "E",
+          "expr": "sum by (person_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | harness_tool=\"codex\" | label_format token_total=`{{add .harness_tokens_input .harness_tokens_output .harness_tokens_cache_read .harness_tokens_cache_write_5m .harness_tokens_cache_write_1h}}` | unwrap token_total | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
+        },
+        {
+          "refId": "F",
+          "expr": "sum by (person_name) (max_over_time({service_name=\"harness\"} | harness_schema_version=\"2\" | harness_kind=\"usage\" | label_format person_name=`{{if .member}}{{.member}}{{else}}미식별{{end}}`, repo_name=`{{if .harness_repo}}{{.harness_repo}}{{else}}미식별{{end}}`, tool_name=`{{if .harness_tool}}{{.harness_tool}}{{else}}미식별{{end}}`, model_name=`{{if .model}}{{.model}}{{else}}미식별{{end}}` | person_name=~${member:doublequote} | repo_name=~${repo:doublequote} | tool_name=~${tool:doublequote} | model_name=~${model:doublequote} | harness_event_unix >= ${__from:date:seconds} | harness_event_unix <= ${__to:date:seconds} | harness_tool=\"claude-code\" | label_format token_total=`{{add .harness_tokens_input .harness_tokens_output .harness_tokens_cache_read .harness_tokens_cache_write_5m .harness_tokens_cache_write_1h}}` | unwrap token_total | __error__=\"\" [7d]) by (person_name, repo_name, tool_name, model_name, harness_record_id, harness_day))",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "queryType": "instant",
+          "editorMode": "code"
         }
       ],
       "fieldConfig": {
@@ -792,7 +812,18 @@
               "Value #A": "관측 토큰",
               "Value #B": "완료 응답",
               "Value #C": "추정 비용 · USD",
-              "Value #D": "단가 미등록 토큰"
+              "Value #D": "단가 미등록 토큰",
+              "Value #E": "Codex 토큰",
+              "Value #F": "Claude Code 토큰"
+            },
+            "indexByName": {
+              "person_name": 0,
+              "Value #E": 1,
+              "Value #F": 2,
+              "Value #A": 3,
+              "Value #B": 4,
+              "Value #C": 5,
+              "Value #D": 6
             }
           }
         }
