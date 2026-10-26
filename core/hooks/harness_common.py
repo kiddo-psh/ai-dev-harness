@@ -526,6 +526,28 @@ def git(project: Path, *args: str) -> str | None:
     return git_result(project, *args)[0]
 
 
+def spawn_telemetry_push(project: Path) -> bool:
+    """저장소 안 `telemetry push`를 기다리지 않고 띄운다. 띄웠으면 True. 기존 push의 잠금·전송 위치를 공유하고, 설정이
+    없는 PC와 갱신 전 저장소에서는 아무것도 하지 않는다. Claude SessionEnd와 Codex Stop·SessionEnd hook이 쓴다(#140).
+
+    주소는 OTEL 변수나 `harness.json` telemetry 블록에서 온다. Claude Code는 설정 파일 env의 `OTEL_*`를 hook에
+    넘기지 않으므로 hook 안에서는 대개 telemetry 블록으로 정해진다(#145). `harness_events: false`면 보내지 않는다."""
+    try:
+        settings = telemetry_settings(load_config(project))
+    except ConfigError:
+        settings = None  # 깨진 블록은 수동 push와 `harness check`가 알린다. 여기서는 변수 경로만 남긴다
+    if settings is not None and not settings["harness_events"]:
+        return False
+    if settings is None and not (os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+                                 or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")):
+        return False
+    script = project / ".harness" / "telemetry.py"
+    if not script.is_file():
+        return False
+    spawn_background([sys.executable, str(script), "push"], project)
+    return True
+
+
 NO_BASH_HINT = ("Windows에서 bash를 찾지 못해 cmd로 실행했다. 검증 명령은 bash 문법(`./gradlew`, `&&`, `/` 경로)으로 쓰므로 "
                 "Git for Windows를 설치하거나 환경 변수 CLAUDE_CODE_GIT_BASH_PATH에 bash.exe 경로를 정한다")
 

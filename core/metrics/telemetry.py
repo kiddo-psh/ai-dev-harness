@@ -31,6 +31,7 @@ import json
 import os
 import sys
 import time
+import types
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -40,6 +41,7 @@ SERVICE = "harness"
 STATE_FILE = "telemetry.json"
 LOG_FILES = ("sessions.jsonl", "events.jsonl")
 CODEX = "codex"  # to_log의 원천 이름(Codex 세션 사건은 세션 기록 형식이다)
+NORMALIZED = "normalized.py"  # 공통 텔레메트리 v2(#140). 키트는 같은 디렉터리, 대상 저장소는 metrics/ 아래
 DEFAULT_CHECKOUT = "(기본)"
 BATCH = 500
 TIMEOUT_SEC = 10
@@ -406,9 +408,10 @@ def codex_events(common, collect, summary, target: Path, home: Path | None = Non
 
 def run(common, collect, summary, target: Path, version: str | None = None, endpoint: str | None = None,
         dry_run: bool = False, from_start: bool = False, env=None, out=print,
-        warn=lambda text: print(text, file=sys.stderr)) -> int:
+        warn=lambda text: print(text, file=sys.stderr), claude_home: Path | None = None) -> int:
     """`telemetry push` 한 번. 키트 명령과 `.harness/telemetry.py push`가 같이 부른다. version이 없으면 `harness.json`의
-    `harness_version`(저장소에 넣은 키트 버전)."""
+    `harness_version`(저장소에 넣은 키트 버전). v1 기록을 보낸 뒤 공통 텔레메트리 v2(`normalized.py`)를 보낸다.
+    claude_home은 v2가 읽는 Claude Code 설정 홈(기본 `~/.claude`)."""
     if common.git_state_path(target, common.SESSION_LOG) is None:
         out(f"harness telemetry: git 저장소가 아니다: {target}")
         return 2
@@ -436,9 +439,24 @@ def run(common, collect, summary, target: Path, version: str | None = None, endp
         except common.ConfigError as exc:
             raise PushError(str(exc)) from None
 
-    return push(repo, dirs, state_dir / STATE_FILE, collect, collect.merged_pricing(config), version, common._file_lock,
-                endpoint=endpoint, env=env, dry_run=dry_run, from_start=from_start, out=out,
-                codex=codex_events(common, collect, summary, target), configured=configured, credentials=credentials)
+    pricing = collect.merged_pricing(config)
+    legacy = push(repo, dirs, state_dir / STATE_FILE, collect, pricing, version, common._file_lock,
+                  endpoint=endpoint, env=env, dry_run=dry_run, from_start=from_start, out=out,
+                  codex=codex_events(common, collect, summary, target), configured=configured, credentials=credentials)
+    # 공통 텔레메트리 v2(#140). v1 전송이 실패해도 따로 보낸다(위치·outbox가 서로 다르다)
+    source = Path(__file__).with_name(NORMALIZED)  # 키트: core/metrics/
+    if not source.is_file():
+        source = Path(__file__).parent / "metrics" / NORMALIZED  # 대상 저장소: .harness/metrics/
+    try:
+        normalized = summary.load_module(source, "harness_telemetry_normalized")
+    except summary.SummaryError:
+        out("harness telemetry v2: 정규화 수집 파일이 없다. 키트 `harness init <저장소> --force`로 다시 생성한다")
+        return legacy or 2
+    # 이 모듈은 sys.modules에 없이 파일로 읽히므로(load_telemetry·main) 지금의 전역을 묶어 넘긴다
+    current = normalized.run(types.SimpleNamespace(**globals()), common, collect, summary, target, dirs, repo, pricing,
+                             version, endpoint=endpoint, env=env, dry_run=dry_run, from_start=from_start, out=out,
+                             claude_home=claude_home, configured=configured, credentials=credentials)
+    return legacy or current
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
                                              "생략하면 OTEL_EXPORTER_OTLP_ENDPOINT, 그다음 harness.json telemetry.endpoint")
     push_cmd.add_argument("--dry-run", action="store_true", help="보내지 않고 보낼 내용을 출력한다(위치도 전진하지 않는다)")
     push_cmd.add_argument("--from-start", action="store_true", help="보낸 위치를 무시하고 처음부터 다시 보낸다")
+    push_cmd.add_argument("--claude-home", type=Path, help="공통 텔레메트리 v2가 읽는 Claude Code 설정 홈(기본 ~/.claude)")
     harness_dir = Path(__file__).resolve().parent
     setup_source = harness_dir / "telemetry_setup.py"
     if setup_source.is_file():  # 설정·점검 명령(#145). 갱신 전 복사본이 없으면 push만 연다
@@ -491,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("setup", "doctor"):
         return telemetry_setup.run_command(common, args.command, args, target, harness_dir / "otel_headers.py", out)
     return run(common, collect, summary, target, endpoint=args.endpoint, dry_run=args.dry_run,
-               from_start=args.from_start, out=out)
+               from_start=args.from_start, out=out, claude_home=args.claude_home)
 
 
 if __name__ == "__main__":

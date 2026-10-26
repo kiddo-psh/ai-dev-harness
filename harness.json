@@ -30,7 +30,7 @@
       "standard": [
         "/core/", "/bin/", "/.github/", "/profiles/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/harness.json",
         "/docs/templates/", "/docs/adr/0000-template.md", "/docs/ai-collaboration.md",
-        "/docs/secret-environment-variables.md"
+        "/docs/secret-environment-variables.md", "/.claude/hooks/codex-hook.py"
       ]
     },
     "test_paths": ["/tests/"],

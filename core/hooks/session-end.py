@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -17,23 +16,8 @@ import harness_common as common  # noqa: E402
 
 
 def push_in_background(project: Path) -> None:
-    """기존 push의 잠금·전송 위치를 공유한다. 설정이 없는 PC와 갱신 전 저장소에서는 아무것도 하지 않는다.
-
-    주소는 OTEL 변수나 `harness.json` telemetry 블록에서 온다. Claude Code는 설정 파일 env의 `OTEL_*`를 hook에
-    넘기지 않으므로 hook 안에서는 대개 telemetry 블록으로 정해진다(#145). `harness_events: false`면 보내지 않는다."""
-    try:
-        settings = common.telemetry_settings(common.load_config(project))
-    except common.ConfigError:
-        settings = None  # 깨진 블록은 수동 push와 `harness check`가 알린다. 여기서는 변수 경로만 남긴다
-    if settings is not None and not settings["harness_events"]:
-        return
-    if settings is None and not (os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-                                 or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")):
-        return
-    script = project / ".harness" / "telemetry.py"
-    if not script.is_file():
-        return
-    common.spawn_background([sys.executable, str(script), "push"], project)
+    """설정이 있으면 저장소 안 telemetry push를 띄운다. 판단은 Codex hook과 같이 쓰는 `spawn_telemetry_push`에 있다."""
+    common.spawn_telemetry_push(project)
 
 
 def main() -> int:

@@ -244,9 +244,11 @@ class GitignoreInitTest(unittest.TestCase):
         self.assertIn("불일치: .harness/mr-lint/mr_lint.py", out)
         github = self.tmp / "gh"
         self.assertEqual(self.init(github)[0], 0)
-        # GitHub 대상에는 MR 기록 요약(#123)·telemetry push(#127)·인증 헤더 출력(#145)과 그것이 읽는 코드만 생긴다
+        # GitHub 대상에는 MR 기록 요약(#123)·telemetry push(#127)·인증 헤더 출력(#145)·공통 텔레메트리 v2(#140)와
+        # 그것이 읽는 코드만 생긴다
         self.assertEqual(sorted(p.relative_to(github).as_posix() for p in (github / ".harness").rglob("*.py")),
-                         [".harness/metrics/classify_ci.py", ".harness/metrics/collect.py", ".harness/otel_headers.py",
+                         [".harness/metrics/classify_ci.py", ".harness/metrics/collect.py",
+                          ".harness/metrics/normalized.py", ".harness/otel_headers.py",
                           ".harness/summary.py", ".harness/telemetry.py", ".harness/telemetry_setup.py"])
 
 
@@ -505,7 +507,8 @@ class ConfigTest(unittest.TestCase):
 
 
 class HookInstallTest(unittest.TestCase):
-    HOOK_FILES = ("protect-paths.py", "stop-verify.py", "session-start.py", "session-end.py", "harness_common.py")
+    HOOK_FILES = ("protect-paths.py", "stop-verify.py", "session-start.py", "session-end.py", "harness_common.py",
+                  "codex-hook.py")
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="harness-hook-install-"))
@@ -543,6 +546,14 @@ class HookInstallTest(unittest.TestCase):
                     installed = (target / ".claude" / "hooks" / name).read_text(encoding="utf-8")
                     original = (harness.HOOKS_DIR / name).read_text(encoding="utf-8")
                     self.assertEqual(installed, original)
+                # #140: Codex 프로젝트 hook. Windows Codex는 명령을 PowerShell로, POSIX는 sh로 실행하므로 따옴표로
+                # 시작하지 않고 두 셸이 모두 펼치는 `$(...)`로 worktree 루트를 찾는다
+                codex = json.loads((target / ".codex" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+                self.assertEqual(sorted(codex), ["SessionEnd", "Stop"])
+                for event, arg in (("Stop", "stop"), ("SessionEnd", "session-end")):
+                    self.assertEqual(codex[event][0]["hooks"], [{
+                        "type": "command",
+                        "command": f'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/codex-hook.py" {arg}'}])
                 code, out = run(["check", str(target)])
                 self.assertEqual(code, 0, out)
 
@@ -786,7 +797,8 @@ class SelfApplicationTest(unittest.TestCase):
         outputs = harness.render_all(config, self_mode=True)
         for dest in (".claude/settings.json", ".claude/hooks/protect-paths.py",
                      ".claude/hooks/stop-verify.py", ".claude/hooks/session-start.py",
-                     ".claude/hooks/session-end.py", ".claude/hooks/harness_common.py"):
+                     ".claude/hooks/session-end.py", ".claude/hooks/harness_common.py",
+                     ".claude/hooks/codex-hook.py", ".codex/hooks.json"):
             self.assertIn(dest, outputs)
         commands = [hook["command"] for groups in json.loads(outputs[".claude/settings.json"])["hooks"].values()
                     for group in groups for hook in group["hooks"]]

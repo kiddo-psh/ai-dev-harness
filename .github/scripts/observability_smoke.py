@@ -273,7 +273,9 @@ def main() -> int:
     repo, hook_count = kit_records()
     codex_home = Path(tempfile.mkdtemp(prefix="obs-smoke-codex-"))
     codex_count = codex_session(codex_home, repo)
-    env = {**os.environ, "CODEX_HOME": str(codex_home), "OTEL_EXPORTER_OTLP_HEADERS": f"X-Harness-Member={MEMBER}"}
+    # v2가 실행 환경의 실제 Claude Code 홈을 읽지 않게 빈 위치를 준다(#140)
+    env = {**os.environ, "CODEX_HOME": str(codex_home), "CLAUDE_CONFIG_DIR": str(codex_home / "no-claude"),
+           "OTEL_EXPORTER_OTLP_HEADERS": f"X-Harness-Member={MEMBER}"}
 
     def pushed():
         out = subprocess.run([sys.executable, str(ROOT / "bin" / "harness.py"), "telemetry", "push", str(repo),
@@ -291,7 +293,9 @@ def main() -> int:
     wait(lambda: scalar(query({"expr": 'sum(count_over_time({service_name=~"claude-code.*"} | event_name="tool_decision"'
                                        ' | decision="reject" [1h]))', "datasource": {"uid": "harness-loki"}})) == 1,
          "Claude Code tool_decision 이벤트가 Loki에")
-    wait(lambda: scalar(query({"expr": 'sum(count_over_time({service_name="harness"} | harness_tool="codex" [1h]))',
+    # v1 Codex 세션 사건만 센다. 같은 push가 보내는 공통 텔레메트리 v2(#140)는 harness_kind가 usage·completion·exporter다
+    wait(lambda: scalar(query({"expr": 'sum(count_over_time({service_name="harness"} | harness_kind="session"'
+                                       ' | harness_tool="codex" [1h]))',
                                "datasource": {"type": "loki", "uid": "harness-loki"}})) == codex_count + 4,
          "이 저장소의 Codex 세션이 Loki에")
     elapsed = time.monotonic() - started

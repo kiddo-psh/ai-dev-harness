@@ -26,8 +26,9 @@ FRAGMENT = ROOT / "core" / "ci" / "gitlab" / "metrics.yml"
 CI_README = ROOT / "core" / "ci" / "README.md"
 METRICS_README = ROOT / "core" / "metrics" / "README.md"
 METRICS_DIR = ROOT / "core" / "metrics"
-SCRIPTS = ("collect.py", "report.py", "notify.py", "classify_ci.py")
-SUMMARY_DEPS = ("collect.py", "classify_ci.py")  # `.harness/summary.py`가 읽어 모든 플랫폼에 복사한다(#123)
+SCRIPTS = ("collect.py", "report.py", "notify.py", "classify_ci.py", "normalized.py")
+# `.harness/summary.py`·`telemetry.py`가 읽어 모든 플랫폼에 복사한다(#123, 공통 텔레메트리 v2 #140)
+SUMMARY_DEPS = ("collect.py", "classify_ci.py", "normalized.py")
 IN_REPO = ("summary.py", "telemetry.py", "otel_headers.py", "telemetry_setup.py")  # 저장소 안에서 키트 없이 실행하는 명령(`.harness/`, #123·#127·#145)
 
 

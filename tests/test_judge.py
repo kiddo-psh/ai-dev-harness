@@ -196,6 +196,9 @@ class KitSelfJudgeTest(unittest.TestCase):
         "core/hooks/session-start.py": "strict", ".claude/hooks/session-start.py": "strict",
         # #96: 세션 종료 기록만 남긴다. 무엇도 막거나 검증 대상을 바꾸지 않는다
         "core/hooks/session-end.py": "standard", ".claude/hooks/session-end.py": "standard",
+        # #140: Codex hook은 전송 계기이며 차단·검증 정책을 바꾸지 않는다
+        "core/hooks/codex-hook.py": "standard", ".claude/hooks/codex-hook.py": "standard",
+        "core/hooks/codex-hooks.template.json": "standard",
         "core/ci/gitlab/secret-detection.yml": "strict", "core/ci/gitlab/sast.yml": "strict",
         "core/ci/gitlab/dependency-audit.yml": "strict", "core/ci/gitlab/image-scan.yml": "strict",
         ".github/workflows/security.yml": "strict", ".github/scripts/run_fragment.py": "strict",
@@ -205,6 +208,7 @@ class KitSelfJudgeTest(unittest.TestCase):
         ".github/workflows/ci.yml": "standard", ".github/scripts/rehearse.py": "standard",
         ".github/scripts/rehearse_profiles.py": "standard",
         ".github/scripts/observability_smoke.py": "standard",
+        ".github/scripts/normalized_smoke.py": "standard",
         "core/metrics/classify_ci.py": "standard", "AGENTS.md": "standard",
         "docs/templates/plan.md": "standard", "docs/secret-environment-variables.md": "standard",
         "core/ci/README.md": "standard", "harness.json": "standard", "README.md": "standard",
@@ -234,7 +238,8 @@ class KitSelfJudgeTest(unittest.TestCase):
 
     def test_new_files_in_watched_dirs_need_a_decision(self):
         """리뷰 F9: 보안 조각·hook·워크플로가 새로 생기면 표준으로 조용히 떨어지지 않게 판정을 명시한다."""
-        tracked = subprocess.run(["git", "ls-files", *self.WATCHED_DIRS], cwd=ROOT, capture_output=True,
+        tracked = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", *self.WATCHED_DIRS],
+                                 cwd=ROOT, capture_output=True,
                                  check=True).stdout.decode("utf-8").split()
         missing = [path for path in tracked if path not in self.EXPECTED and not path.endswith("README.md")]
         self.assertEqual(missing, [], "docs/contributing.md 판정표를 보고 EXPECTED와 harness.json judge에 추가한다")
