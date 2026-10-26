@@ -341,6 +341,7 @@ class FragmentConfigTest(unittest.TestCase):
             self.assertTrue(port.startswith(expected), port)
         self.assertIn("${GRAFANA_ADMIN_PASSWORD:?", compose)
         self.assertIn('GF_AUTH_ANONYMOUS_ENABLED: "false"', compose)
+        self.assertIn('GF_USERS_DEFAULT_THEME: "light"', compose)  # #156: 기본 화면 테마
 
     def test_dashboard_matches_provisioning(self):
         """T6(#127): 모든 패널·쿼리가 데이터소스 변수를 쓰고 변수 기본값이 프로비저닝 uid다. 사람 키는 `$person` 변수"""
