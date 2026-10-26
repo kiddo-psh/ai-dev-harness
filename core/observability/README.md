@@ -29,6 +29,7 @@ GRAFANA_ADMIN_PASSWORD='<비밀번호>' docker compose up -d     # http://127.0.
   수집기(4317·4318)는 인증하지 않으므로 `HARNESS_OBS_COLLECTOR_BIND`는 `127.0.0.1`로 두고, 같은 호스트의 인증 프록시(TLS)만 밖에
   연다. 수집기 포트를 직접 열면 프록시를 거치지 않고 보낼 수 있다. Docker가 연 포트는 ufw·firewalld 규칙을 거치지 않는다
   (막으려면 `DOCKER-USER` 체인).
+- Grafana 기본 화면은 라이트 테마다(`GF_USERS_DEFAULT_THEME`, #156). 각자 프로필 설정에서 다크로 바꿀 수 있다.
 - 이미지는 버전과 digest로 고정했다(`docker-compose.yml` 머리 주석). 올릴 때 digest를 함께 바꾼다. CI의 `observability` job이 스택을
   띄워 스모크 검사를 하고 이미지 4개를 trivy로 보고한다.
 - 끄기: `docker compose down`(데이터까지 지우려면 `-v`). 텔레메트리를 꺼도 키트의 다른 기능(hooks·`sessions summary`·`dashboard`·주간
