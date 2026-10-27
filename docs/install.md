@@ -29,6 +29,7 @@ python bin/harness.py version
 | 대상 | 내용 |
 | --- | --- |
 | `AGENTS.md`, `CLAUDE.md` | AI 도구가 따르는 공통 절차 |
+| `.gitattributes` | 텍스트 파일 LF 강제(`docs/git-convention.md` 5장). Windows `core.autocrlf`로 섞인 CRLF가 CI(Linux)의 형식 검사에서만 실패하는 것을 막는다 |
 | `docs/README.md` | 문서 역할과 우선순위 |
 | `docs/ai-collaboration.md` | AI 병렬 작업과 충돌 방지 |
 | `docs/git-convention.md` | 브랜치·커밋·병합 요청 |
@@ -46,7 +47,7 @@ python bin/harness.py version
 | `.harness/metrics/` (`report.py`·`notify.py`) | `gitlab`만. 측정 예약 파이프라인 조각이 `collect.py`와 함께 실행하는 수집·리포트·발송 코드([설명](../core/ci/README.md)) |
 | `.gitignore`의 `/plans/`·`/.claude/settings.local.json` 줄 | 생성 파일이 아니라 줄 추가다. 아래 참고 |
 
-`docs/git-convention.md`(커밋 Scope 표·릴리스 태그 이름)와 `docs/adr/README.md`(ADR 목록)는 **시드 파일**이다. 처음 한 번
+`docs/git-convention.md`(커밋 Scope 표·릴리스 태그 이름), `docs/adr/README.md`(ADR 목록), `.gitattributes`는 **시드 파일**이다. 처음 한 번
 생성한 뒤에는 프로젝트가 채워 넣는 문서라 `init --force`가 덮어쓰지 않고 `check`도 내용을 비교하지 않는다(없으면 `없음`으로
 보고하고 다시 만든다).
 
@@ -212,8 +213,15 @@ python bin/harness.py scaffold backend <kind> MovieReview --target ../my-project
 ## 4. 기존 저장소에 붙이기
 
 기존 파일을 말없이 덮어쓰지 않는다. 충돌하는 파일이 하나라도 있으면 **아무것도 쓰지 않고 중단**하고
-목록을 보여 준다. 단 시드 파일(`docs/git-convention.md`, `docs/adr/README.md`)은 이미 있으면 충돌로 보지 않고 그 파일을
+목록을 보여 준다. 단 시드 파일(`docs/git-convention.md`, `docs/adr/README.md`, `.gitattributes`)은 이미 있으면 충돌로 보지 않고 그 파일을
 그대로 쓴다(덮어쓰지 않는다). 기존 저장소의 같은 이름 문서가 키트 내용과 다르면 직접 맞춘다.
+
+`.gitattributes`가 없던 저장소는 `init`이 만든 파일 때문에 CRLF로 커밋된 파일이 수정된 것으로 보일 수 있다. 기능 변경과
+섞지 않고 줄끝만 바꾸는 커밋을 따로 만든다.
+
+```bash
+git add .gitattributes && git add --renormalize . && git commit -m "chore: 줄끝을 LF로 정규화"
+```
 
 ```
 오류: 이미 존재하는 파일이 있어 중단한다. 덮어쓰려면 --force 를 지정한다:
@@ -385,7 +393,7 @@ rm .claude/settings.json harness.json .harness/summary.py .harness/telemetry.py
 ```
 
 문서(`AGENTS.md`, `CLAUDE.md`, `docs/`)와 병합 요청 템플릿은 저장소의 내용이므로 지울지는 따로 판단한다.
-시드 파일(`docs/git-convention.md`, `docs/adr/README.md`)은 생성 뒤 프로젝트가 채운 문서라 남기는 것이 기본이다.
+시드 파일(`docs/git-convention.md`, `docs/adr/README.md`, `.gitattributes`)은 생성 뒤 프로젝트가 채운 파일이라 남기는 것이 기본이다.
 CI 조각(5절)을 붙였다면 CI 정의에서 해당 `include`와 그 조각의 job 참조도 지운다.
 GitLab이면 다음도 걷어낸다.
 
@@ -458,7 +466,7 @@ CLI 명령은 `init`, `check`, `scaffold`, `judge`(`--eval` 포함), `lint-plans
 라벨이 붙은 줄의 형식은 `core/metrics/README.md`와 `core/ci/README.md`가 정한다.
 매니페스트의 `includes`는 원본 파일의 `##` 절을 골라 자리표시자 값으로 넣는다. `when`(`two-branch`·`trunk`)을 단
 항목은 브랜치 모델별 변형이고, 같은 이름의 두 변형을 모두 둬야 한다. 원본을 고치면 생성 파일이 바뀌므로 `check`가 불일치로
-보고한다(시드 파일 제외). `files` 항목의 `seed: true`는 시드 파일(`docs/git-convention.md`, `docs/adr/README.md`)로, 처음
+보고한다(시드 파일 제외). `files` 항목의 `seed: true`는 시드 파일(`docs/git-convention.md`, `docs/adr/README.md`, `.gitattributes`)로, 처음
 한 번만 생성하고 `--force`가 덮어쓰지 않으며 `check`는 존재만 본다. 그래서 템플릿을 바꿔도 이미 만든 시드 파일에는
 반영되지 않는다(필요하면 파일을 지우고 `init --force`로 다시 만든다). 항목의 `base`는 `templates`(기본)·`hooks`·`ci`(`core/ci/`)·`metrics`(`core/metrics/`) 중 하나다.
 

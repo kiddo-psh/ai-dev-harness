@@ -1,0 +1,10 @@
+# 텍스트 파일은 저장소와 워킹트리 모두 LF (docs/git-convention.md 5장). Windows 배치 파일만 CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary

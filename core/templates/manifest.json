@@ -15,6 +15,7 @@
   ],
   "files": [
     {"src": "AGENTS.md", "dest": "AGENTS.md", "self": true},
+    {"src": ".gitattributes", "dest": ".gitattributes", "self": false, "render": false, "seed": true},
     {"src": "CLAUDE.md", "dest": "CLAUDE.md", "self": true},
     {"src": "docs/README.md", "dest": "docs/README.md", "self": false},
     {"src": "docs/ai-collaboration.md", "dest": "docs/ai-collaboration.md", "self": true},
