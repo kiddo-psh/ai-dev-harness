@@ -95,9 +95,12 @@ python bin/harness.py check --self
 고치는 곳은 항상 `core/`의 원본이다. `.harness/`·`.claude/hooks/`의 복사본을 고치면 `check --self`가 불일치로 막고 `init --self --force`가 덮어쓴다.
 생성된 파일(`AGENTS.md`, `docs/templates/*`, `docs/adr/0000-template.md`, PR 템플릿, `.claude/settings.json`, `.claude/hooks/*`, `.harness/*` 등)은 직접 고치지 않는다.
 
-이 저장소에도 hooks가 설치돼 있다(`harness.json`의 `hooks`). Claude Code 세션은 응답을 끝낼 때마다 위 두 명령을 실행한다.
-전체 테스트가 Windows 작업 PC에서 5~8분 걸려 기본 명령별 제한(300초)을 넘으므로 `stop_timeout_sec`를 780초로 둔다(전체 예산 840초, #92).
-테스트가 더 길어지면 제한을 올리기 전에 느린 테스트를 줄이거나 종료 검증 명령을 나눈다.
+이 저장소에도 hooks가 설치돼 있다(`harness.json`의 `hooks`). Claude Code 세션은 응답을 끝낼 때마다 빠른 검증만 실행한다:
+`check --self`(드리프트)와 `tests.test_harness`·`tests.test_profiles`·`tests.test_judge`(Windows에서 20초 안팎). 종료 검증이 끝나야
+턴이 닫혀 그동안 보낸 메시지에 응답하지 못하므로 `stop_timeout_sec`를 120초로 둔다.
+전체 테스트(`unittest discover`, Windows에서 5~8분, `test_hooks`만 2분 넘게)는 PR의 `ci` workflow `verify` job이 돌린다.
+hooks·세션·요약 코드를 고쳤으면 PR 전에 해당 테스트(`python -m unittest tests.test_hooks` 등)를 직접 실행한다.
+종료 검증 명령은 20초대를 넘기지 않게 유지한다. 느려지면 CI로 옮긴다(#92).
 `hooks.python`은 `python`이다. `python`이 없는 환경이면 개인 설정(`.claude/settings.local.json`)으로 끄고 `friction` 이슈로 남긴다.
 
 PR에는 `security` workflow가 `core/ci/gitlab/`의 Secret 탐지(차단)와 SAST(경고) 조각을 같은 이미지·스크립트로 실행한다
