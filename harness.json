@@ -12,8 +12,8 @@
     {"label": "개발 계획과 마일스톤", "path": "docs/roadmap.md"}
   ],
   "hooks": {
-    "stop_verify": ["python -m unittest discover tests -q", "python bin/harness.py check --self"],
-    "stop_timeout_sec": 780,
+    "stop_verify": ["python bin/harness.py check --self", "python -m unittest tests.test_harness tests.test_profiles tests.test_judge -q"],
+    "stop_timeout_sec": 120,
     "python": "python"
   },
   "judge": {

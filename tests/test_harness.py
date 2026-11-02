@@ -806,8 +806,10 @@ class SelfApplicationTest(unittest.TestCase):
         for command in commands:
             self.assertTrue(command.startswith('python "'), command)  # Windows에서 python3은 Store 별칭이다
         # 리뷰 #16 B-F9: 종료 검증을 의미 없는 명령으로 약화하면 잡는다. 기준은 docs/contributing.md "검증"
+        # 전체 테스트는 CI verify job이 돌리고, 종료 검증은 턴을 막으므로 빠른 명령만 둔다(#92)
         self.assertEqual(config["hooks"]["stop_verify"],
-                         ["python -m unittest discover tests -q", "python bin/harness.py check --self"])
+                         ["python bin/harness.py check --self",
+                          "python -m unittest tests.test_harness tests.test_profiles tests.test_judge -q"])
         verify = (ROOT / "docs" / "contributing.md").read_text(encoding="utf-8")
         self.assertIn("python -m unittest discover tests -v\npython bin/harness.py check --self\n", verify)
 
